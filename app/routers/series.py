@@ -110,6 +110,7 @@ async def series_page(request: Request, _=Depends(require_role("viewer"))):
 
     for entry in series.values():
         entry["owned_count"] = sum(1 for i in entry["items"] if i["owned"])
+        entry["wishlist_count"] = sum(1 for i in entry["items"] if i["wishlisted"])
         entry["gaps"] = find_gaps([i["series_position"] for i in entry["items"]])
         meta = meta_ci.get(entry["name"].casefold())
         entry["description"] = meta["description"] if meta else None
@@ -161,9 +162,7 @@ async def check_series(name: str = "", _=Depends(require_role("viewer"))):
     for b in books:
         match = by_hc_id.get(b["hardcover_book_id"]) or by_title.get(b["title"].casefold().strip())
         if match:
-            # Plan 2 adds the third arm: a row that is neither owned nor
-            # wishlisted. Until then the two are still complements.
-            status = "wishlist" if match["wishlisted"] else "owned"
+            status = "owned" if match["owned"] else "wishlist" if match["wishlisted"] else "missing"
         else:
             status = "missing"
         out.append({**b, "status": status, "series_name": name})

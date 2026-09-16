@@ -51,6 +51,10 @@
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
         Owned must be on or off. Nothing was saved.
     </div>
+    {% elif error == "invalid_wishlisted" %}
+    <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
+        An item you own can't also be on your wishlist. Nothing was saved.
+    </div>
     {% elif error == "invalid_number" %}
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
         A number field (year, pages, minutes, series #, value) had something that isn't a number. Nothing was saved.
@@ -283,14 +287,28 @@
                 </select>
             </div>
 
-            <div>
+            <div x-data="ownershipBoxes" data-owned="{{ '1' if item.owned else '0' }}"
+                 data-wishlisted="{{ '1' if item.wishlisted else '0' }}" class="space-y-2">
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="hidden" name="owned" value="0">
                     <input type="checkbox" name="owned" value="1" {% if item.owned %}checked{% endif %}
+                           x-model="owned" data-testid="edit-owned"
                            class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
                     <span class="font-medium text-shelf-muted">I own this item</span>
                 </label>
-                <p class="text-xs text-shelf-muted mt-1 ml-6">Uncheck for wishlist items you don't physically have yet</p>
+                <div>
+                    <label class="flex items-center gap-2 text-sm cursor-pointer">
+                        {# The hidden 0 renders first so a checked box wins (G8); a
+                           disabled box is not submitted, so the 0 posts (G90). #}
+                        <input type="hidden" name="wishlisted" value="0">
+                        <input type="checkbox" name="wishlisted" value="1" {% if item.wishlisted %}checked{% endif %}
+                               {% if item.owned %}disabled{% endif %}
+                               x-model="wishlisted" :disabled="owned" data-testid="edit-wishlisted"
+                               class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent disabled:opacity-50">
+                        <span class="font-medium text-shelf-muted">On my wishlist</span>
+                    </label>
+                    <p class="text-xs text-shelf-muted mt-1 ml-6">Uncheck both for a book you read but don't own — reading history stays.</p>
+                </div>
             </div>
 
             <div>

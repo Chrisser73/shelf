@@ -3,8 +3,8 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-3253%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![E2E tests](https://img.shields.io/badge/e2e%20tests-246%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-3321%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![E2E tests](https://img.shields.io/badge/e2e%20tests-250%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
 A self-hosted home library catalog with barcode scanning, multi-mode scanning workflows, automatic metadata lookup, cover art, and collection management — all in a single Docker container.
@@ -128,8 +128,8 @@ of this whole directory carries the keys next to the data they protect.
 
 | Mode | What it does |
 |------|-------------|
-| **Add** | Scan barcodes to add items to your collection with full metadata lookup |
-| **Wishlist** | Scan at a bookstore to save items you want — adds as unowned |
+| **Add** | Scan barcodes to add items to your collection with full metadata lookup. Scanning something already on your wishlist marks it owned |
+| **Wishlist** | Scan at a bookstore to save items you want — adds them to your wishlist |
 | **Lend** | Select a borrower, then scan items to check them out |
 | **Return** | Scan items to check them back in |
 | **Move** | Select a target location, then batch-scan items to relocate them |
@@ -191,9 +191,9 @@ each option before anything is sent.
 - **Game platforms** — customizable list of platforms, add your own for niche or retro systems
 - **Checkout system** — lend to borrowers with the Lend scan mode, filter by "Lent Out" in browse
 - **Loan reminders** — overdue loans get a red badge, and an optional daily digest (ntfy or webhook) nags you about them; configure under Settings → Library → Lending
-- **Wishlist** — mark items as unowned to build a wish list alongside your catalog
+- **Wishlist** — a list of what you want, kept alongside your catalog. Owning and wishing are separate: an item can also be neither — a book you read from the library stays in your catalog, with its reading history, without being owned or wished for
 - **Series tracking** — a Series page groups your library by series with position numbers, flags likely gaps, and (with Hardcover configured) checks the full series and adds missing volumes to your wishlist in one click. Each series can carry its own synopsis, written inline or fetched from Hardcover. Rename a series (renaming onto an existing name merges the two — the quick fix for duplicate series records left by metadata lookup) or disband it entirely, right from the series card
-- **Bulk editing** — select multiple items in Browse to move them, change type or reading status, or set and clear their series in one go
+- **Bulk editing** — select multiple items in Browse to move them, change type or reading status, add them to or remove them from the wishlist, or set and clear their series in one go
 - **Choose your columns** — Browse's list view has a column picker (value, series, publisher, year, pages, language, added date, platform, ISBN/UPC, and more), on top of the author/type/location/status shown by default; the choice is remembered per browser, not per account
 - **Valuation report** — location-grouped, print-ready report of your collection's list-price value for insurance documentation ([print view](screenshots/valuation-report-print.png)); prices via ISBNdb
 - **Display currency** — pick from 20 currencies under Settings → Collection and every value surface follows. This is formatting, not conversion: Shelf never converts amounts between currencies, so the figure ISBNdb returns is the figure shown

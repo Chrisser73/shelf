@@ -6,6 +6,7 @@ function browsePage() {
         bulkLocationVal: '',
         bulkTypeVal: '',
         bulkStatusVal: '',
+        bulkWishlistVal: '',
         bulkSeriesVal: '',
         filterPills: [],
         viewMode: localStorage.getItem('shelf-view') || 'grid',

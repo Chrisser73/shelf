@@ -1615,6 +1615,15 @@ def _rendered_form(client, item_id):
         fields[m.group(1)] = sel.group(1) if sel else ""
     # owned: hidden 0 + checkbox 1 (checked or not)
     fields["owned"] = "1" if re.search(r'name="owned" value="1"[^>]*checked', html) else "0"
+    # wishlisted: the same pair; a disabled box does not submit, so the
+    # hidden 0 is what the browser sends (G90).
+    wish = re.search(r'<input type="checkbox" name="wishlisted" value="1"([^>]*)>', html)
+    assert wish, "the edit form must render the wishlist checkbox"
+    # Bare attributes only: drop quoted values (the class list carries
+    # `disabled:opacity-50`) and bound ones (`:disabled="owned"`).
+    attrs = re.sub(r'\s[:@]?[\w:.-]+="[^"]*"', " ", wish.group(1)).split()
+    checked = "checked" in attrs and "disabled" not in attrs
+    fields["wishlisted"] = "1" if checked else "0"
     return fields, html
 
 
@@ -1666,6 +1675,7 @@ class TestEditFormValueFunnel:
         ({"platform": "ps9"}, "unknown_platform"),
         ({"reading_status": "done"}, "invalid_reading_status"),
         ({"owned": "2"}, "invalid_owned"),
+        ({"wishlisted": "2"}, "invalid_wishlisted"),
         ({"publish_year": "abc"}, "invalid_number"),
     ])
     def test_each_refusal_redirects_with_its_code_and_leaves_the_row(self, editor_client, db, change, code):
@@ -1681,6 +1691,31 @@ class TestEditFormValueFunnel:
         assert after == before
         banner = editor_client.get(resp.headers["location"]).text
         assert 'data-testid="edit-error"' in banner
+
+    def test_wishlist_state_round_trips_through_the_rendered_form(self, editor_client, db):
+        """G36: the edit page renders a wishlisted row's box checked, and
+        posting the form back unchanged leaves the membership alone."""
+        from app.services import lists
+
+        item_id = _insert_item(db, title="Round Trip Wish", isbn="9780000000026", owned=0,
+                               wishlisted=True)
+        neither_id = _insert_item(db, title="Round Trip Neither", isbn="9780000000033", owned=0)
+        db.commit()
+
+        fields, html = _rendered_form(editor_client, item_id)
+        assert fields["wishlisted"] == "1"
+        assert fields["owned"] == "0"
+        resp = self._post(editor_client, item_id)
+        assert resp.status_code == 303
+        assert lists.is_member(db, lists.WISHLIST, item_id)
+        assert self._row(item_id, "owned")["owned"] == 0
+
+        fields, _ = _rendered_form(editor_client, neither_id)
+        assert fields["wishlisted"] == "0"
+        resp = self._post(editor_client, neither_id)
+        assert resp.status_code == 303
+        assert not lists.is_member(db, lists.WISHLIST, neither_id)
+        assert self._row(neither_id, "owned")["owned"] == 0
 
     def test_refusal_keeps_the_from_key(self, editor_client, db):
         item_id = _insert_item(db, title="From Key", isbn="9780000000026")

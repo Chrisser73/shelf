@@ -18,9 +18,10 @@
         hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
         hx-include="{{ filter_includes('owned') }}"
         class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
-    <option value="" {{ 'selected' if not active_owned else '' }}>All ({{ owned_count + wishlist_count }})</option>
+    <option value="" {{ 'selected' if not active_owned else '' }}>All ({{ owned_count + wishlist_count + neither_count }})</option>
     <option value="1" {{ 'selected' if active_owned == '1' else '' }}>Owned ({{ owned_count }})</option>
     <option value="0" {{ 'selected' if active_owned == '0' else '' }}>Wishlist ({{ wishlist_count }})</option>
+    <option value="none" {{ 'selected' if active_owned == 'none' else '' }}>Not owned or wishlisted ({{ neither_count }})</option>
 </select>
 
 {% if locations is defined %}

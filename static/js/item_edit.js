@@ -195,9 +195,29 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
+// The edit form's two ownership checkboxes (#125). Owned and wishlisted are
+// independent, except that an owned item cannot be on the wishlist: the
+// wishlist box is disabled while "I own this" is checked, and checking it
+// clears the wishlist box. Initial state comes from data attributes, read
+// synchronously (G2).
+function ownershipBoxes() {
+    return {
+        owned: false,
+        wishlisted: false,
+        init() {
+            this.owned = this.$el.dataset.owned === '1';
+            this.wishlisted = this.$el.dataset.wishlisted === '1';
+            this.$watch('owned', (value) => {
+                if (value) this.wishlisted = false;
+            });
+        }
+    };
+}
+
 // CSP build has no global fallback — register so x-data components resolve.
 document.addEventListener('alpine:init', function () {
     Alpine.data('coverDrop', coverDrop);
     Alpine.data('isbnCamera', isbnCamera);
     Alpine.data('upcCamera', upcCamera);
+    Alpine.data('ownershipBoxes', ownershipBoxes);
 });

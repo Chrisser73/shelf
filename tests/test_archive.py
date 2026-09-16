@@ -2568,7 +2568,7 @@ class TestArchiveCopiesImport:
     def test_a_located_zero_copy_item_survives_its_own_round_trip(self, db, tmp_path):
         """The export half of B3: what `_build_items` writes for a located
         item with no copies must import back to the same thing."""
-        _insert_item(db, title="Round Trip Wishlist", owned=0,
+        _insert_item(db, title="Round Trip Wishlist", owned=0, wishlisted=True,
                      location_id=_insert_location(db, name="Wishlist Shelf"))
         db.execute("DELETE FROM item_copies")
         db.execute("COMMIT")
@@ -2656,7 +2656,7 @@ class TestWishlistMembershipRoundTrip:
     """`wishlisted` travels in the archive as its own boolean (#125)."""
 
     def test_a_wishlist_item_exports_true_and_imports_as_a_member(self, db):
-        _insert_item(db, title="Wanted Book", isbn="9780000000019", owned=0)
+        _insert_item(db, title="Wanted Book", isbn="9780000000019", owned=0, wishlisted=True)
         db.execute("COMMIT")
 
         path = build_archive(db)
@@ -2810,7 +2810,7 @@ class TestWishlistRoundTripFidelity:
         # canonical pair — an unrelated difference that would otherwise show
         # up in this comparison and read as a wishlist defect.
         _insert_item(db, title="Wanted Book", isbn="9780000000019",
-                     isbn10="0000000019", owned=0)
+                     isbn10="0000000019", owned=0, wishlisted=True)
         _insert_item(db, title="Owned Book", isbn="9780000000033",
                      isbn10="0000000035", owned=1)
         db.execute("COMMIT")

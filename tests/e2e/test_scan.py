@@ -1284,6 +1284,39 @@ def test_a_typed_duplicate_scan_raises_exactly_one_warning_toast(
     assert_page_clean(authed_page)
 
 
+def test_a_wishlisted_isbn_scanned_in_add_mode_promotes_it(
+    live_server, authed_page
+):
+    """Issue #125 T11: Add mode scanning a wishlisted ISBN answers
+    `promoted`, the card shows the "Now owned" detail, and the row is owned
+    afterwards — the reporter's Add-mode scenario for the neither-state
+    plan."""
+    data_dir = live_server["data_dir"]
+    item_id = insert_item(
+        data_dir, title="Promote On Add Scan Subject", media_type="book",
+        isbn="9780000450098", owned=0, wishlisted=True,
+    )
+
+    _open_scan_in_mode(authed_page, live_server, "Add")
+    authed_page.fill("#isbn-input", "9780000450098")
+    with authed_page.expect_response(lambda r: "/api/scan" in r.url and r.ok):
+        authed_page.press("#isbn-input", "Enter")
+
+    card = authed_page.locator("#scan-results .scan-result").first
+    expect(card).to_have_attribute("data-scan-status", "promoted", timeout=10_000)
+    expect(card.locator("[data-scan-detail]")).to_contain_text("Now owned")
+
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        row = conn.execute(
+            "SELECT owned FROM items WHERE id = ?", (item_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == 1
+    assert_page_clean(authed_page)
+
+
 # --- T7: every status toasts something (issue #50) -------------------------
 #
 # T1+T2 replaced app.js's toast extractor with `scanCardToast()`, which reads
@@ -1294,7 +1327,7 @@ def test_a_typed_duplicate_scan_raises_exactly_one_warning_toast(
 # paragraph inside the not_found arm's manual-add form — a hidden element
 # that still yields a (blank) textContent (`G51`).
 #
-# This section pins the fix across the router's full 17-status vocabulary,
+# This section pins the fix across the router's full 18-status vocabulary,
 # not just the one status that shipped broken, so a future status — or a
 # regressed data-scan-* attribute on an existing one — fails here instead of
 # reaching a user as a blank toast.
@@ -1343,6 +1376,7 @@ _STATUS_CASES = {
     "added": dict(title="Dune", authors="Frank Herbert", item_id=7, source="openlibrary"),
     "wishlisted": dict(title="Dune", authors="Frank Herbert", item_id=7, source="openlibrary"),
     "duplicate": dict(title="Dune", item_id=7),
+    "promoted": dict(title="Dune", item_id=7),
     "checked_out": dict(title="Dune", item_id=7, message="Lent to Bea"),
     "returned": dict(title="Dune", item_id=7, message="Returned from Bea"),
     "moved": dict(title="Dune", item_id=7, message="Office Shelf → Loft Box"),
@@ -1368,7 +1402,7 @@ _STATUS_CASES = {
 # Per app.js's SCAN_OK_STATUSES.
 _OK_STATUSES = {
     "added", "wishlisted", "returned", "confirmed", "marked_read",
-    "checked_out", "moved", "found", "relocated",
+    "checked_out", "moved", "found", "relocated", "promoted",
 }
 
 # Per app.js's SCAN_INFO_STATUSES — the scan worked and the answer is a
@@ -1396,6 +1430,7 @@ _TOAST_MUST_CONTAIN = {
     "added": "Dune",
     "wishlisted": "Dune",
     "duplicate": "Dune",
+    "promoted": "Dune",
     "checked_out": "Lent to Bea",
     "returned": "Returned from Bea",
     "moved": "Office Shelf \u2192 Loft Box",
@@ -1415,7 +1450,7 @@ _TOAST_MUST_CONTAIN = {
 assert set(_STATUS_CASES) == _OK_STATUSES | _INFO_STATUSES | {
     "duplicate", "already_checked_out", "not_checked_out",
     "not_owned", "not_found", "error", "legacy_ambiguous",
-}, "status table drifted from the 17-status vocabulary"
+}, "status table drifted from the 18-status vocabulary"
 assert not (_OK_STATUSES & _INFO_STATUSES), "a status is one class or the other"
 assert set(_TOAST_MUST_CONTAIN) == set(_STATUS_CASES), (
     "every status case needs the text its toast must carry"
@@ -1426,7 +1461,7 @@ assert set(_TOAST_MUST_CONTAIN) == set(_STATUS_CASES), (
 def test_every_scan_status_toasts_non_empty_text(live_server, authed_page, status):
     """The pin: every status in the router's vocabulary toasts *something*.
 
-    Parametrised over the full 17-status table so a future status — or a
+    Parametrised over the full 18-status table so a future status — or a
     regressed data-scan-* attribute on an existing one — fails here instead
     of shipping a blank toast."""
     authed_page.goto(f"{live_server['url']}/scan")

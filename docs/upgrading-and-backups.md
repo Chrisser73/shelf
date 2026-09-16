@@ -26,6 +26,19 @@ Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
 
+### After upgrading to 0.42.0
+
+**No migrations run.** Your items keep the state they had: everything you
+marked as not owned is still on your wishlist. An item becomes *neither owned
+nor wishlisted* only when you make it so — see
+[Cleaning up a wishlist after a Goodreads import](user-guide/import-and-export.md#cleaning-up-a-wishlist-after-a-goodreads-import).
+
+**Valuation totals can drop.** The valuation now counts only what you own. If
+any wishlist items had values, the collection total, the Stats page's **Est.
+Value** and the insurance report are lower by that amount. Earlier points on
+the value-over-time chart stay as they were recorded. See
+[Stats and valuation](user-guide/stats-and-valuation.md).
+
 ### After upgrading to 0.41.1
 
 **Four migrations run.** They add two tables (`lists` and `list_items`), seed

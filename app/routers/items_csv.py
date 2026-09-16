@@ -34,7 +34,7 @@ async def export_csv(_=Depends(require_role("viewer"))):
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value", "wishlisted"])
+    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value", "owned", "wishlisted"])
 
     with get_db() as db:
         rows = db.execute(
@@ -50,7 +50,7 @@ async def export_csv(_=Depends(require_role("viewer"))):
             row["platform"], row["publisher"], row["publish_year"], row["page_count"],
             row["series_name"], row["location_name"], row["source"],
             row["estimated_value"], row["manual_value"],
-            1 if row["wishlisted"] else 0,
+            row["owned"], 1 if row["wishlisted"] else 0,
         ])
 
     output.seek(0)
@@ -138,9 +138,9 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 isbn_val = norm["isbn"]
                 media = norm["media_type"]
 
-                owned = norm["owned"]
-                if to_read_wishlist and norm["reading_status"] == "want_to_read":
-                    owned = False
+                owned, wishlisted, owned_given, wishlisted_given = _resolve_state(
+                    norm, to_read_wishlist, tracker=fmt != reading_imports.GENERIC
+                )
 
                 # Check duplicate (within this file, then against the DB).
                 #
@@ -207,21 +207,22 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     # mode == update: refresh metadata, and reading state
                     # for reading-tracker imports
                     _update_from_csv_row(db, existing["id"], norm)
-                    if fmt != reading_imports.GENERIC:
-                        # COALESCE semantics: only touch reading_status /
-                        # date_finished when this row actually carries one;
-                        # owned is always authoritative from the row.
-                        # wishlisted = not owned (plan 1's rule); plan 2
-                        # introduces a genuine neither-owned-nor-wishlisted
-                        # state and will replace this equality.
-                        # (norm["wishlisted"], parsed from an imported CSV's
-                        # own column, is not wired in here — that's plan 2.)
-                        tracker_fields = {"owned": int(owned), "wishlisted": not owned}
-                        if norm["reading_status"] is not None:
-                            tracker_fields["reading_status"] = norm["reading_status"]
-                        if norm["date_finished"] is not None:
-                            tracker_fields["date_finished"] = norm["date_finished"]
-                        update_item_fields(db, existing["id"], tracker_fields)
+                    # Each state flag changes only when this row says
+                    # something about it (G87) — a metadata-only CSV must not
+                    # flip a wishlisted or neither row to owned. Reading-
+                    # tracker rows always say both. COALESCE semantics for
+                    # reading_status / date_finished: only when present.
+                    state_fields = {}
+                    if owned_given:
+                        state_fields["owned"] = int(owned)
+                    if wishlisted_given:
+                        state_fields["wishlisted"] = wishlisted
+                    if norm["reading_status"] is not None:
+                        state_fields["reading_status"] = norm["reading_status"]
+                    if norm["date_finished"] is not None:
+                        state_fields["date_finished"] = norm["date_finished"]
+                    if state_fields:
+                        update_item_fields(db, existing["id"], state_fields)
                     imported += 1
                     continue
 
@@ -242,12 +243,7 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     reading_status=norm["reading_status"],
                     date_finished=norm["date_finished"],
                     owned=int(owned),
-                    # wishlisted = not owned (plan 1's rule); plan 2
-                    # introduces a genuine neither-owned-nor-wishlisted
-                    # state and will replace this equality.
-                    # (norm["wishlisted"], parsed from an imported CSV's own
-                    # column, is not wired in here — that's plan 2.)
-                    wishlisted=not owned,
+                    wishlisted=wishlisted,
                     source=source,
                 )
                 if isbn_val:
@@ -276,6 +272,42 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
         "format": fmt,
         "covers_queued": covers_queued,
     }
+
+def _resolve_state(norm: dict, to_read_wishlist: bool,
+                   tracker: bool) -> tuple[bool, bool, bool, bool]:
+    """Resolve a row's (owned, wishlisted) once, and whether it states each.
+
+    `owned` comes from the normaliser untouched. A generic row with no
+    `owned` value is one of two things: a 0.41.1-era export, where
+    `wishlisted=1` meant not owned, or any other file, where the historical
+    default is owned (applied on insert; an update leaves the row alone).
+
+    `wishlisted`, in order: an owned row is never on the wishlist (the funnel
+    would refuse the pair, and an import must not fail a row that only says
+    "I have it" — G96); else the file's own `wishlisted` column; else the
+    to-read option. A present `wishlisted=0` is honoured, not replaced by the
+    option (G87).
+    """
+    owned = norm["owned"]
+    column_wish = norm["wishlisted"]
+    if owned is None and column_wish:
+        owned = False
+    owned_given = owned is not None
+    if owned is None:
+        owned = True
+
+    if owned:
+        wishlisted = False
+    elif column_wish is not None:
+        wishlisted = column_wish
+    else:
+        wishlisted = to_read_wishlist and norm["reading_status"] == "want_to_read"
+
+    # A reading-tracker row states both flags. A generic row states
+    # `wishlisted` only through its column, or by being owned (rule 1).
+    wishlisted_given = tracker or column_wish is not None or (owned_given and owned)
+    return owned, wishlisted, owned_given, wishlisted_given
+
 
 def _update_from_csv_row(db, item_id: int, row: dict):
     """Update an existing item from CSV row data (non-empty fields only)."""

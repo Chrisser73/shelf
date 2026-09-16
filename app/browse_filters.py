@@ -90,16 +90,19 @@ def _search(value):
 
 
 def _owned(value):
-    # Tri-state: "" (either), "1" (owned), "0" (wishlist). The filter's name,
-    # values and URL contract are unchanged, but `owned = 0` no longer means
-    # "wishlist" — membership lives in `list_items` (#125), so the "0" arm
-    # reads the list. "1" is still possession. Neither binds a parameter, so
-    # the condition and its params are built together — which is the whole
+    # Four values: "" (all), "1" (owned), "0" (wishlist), "none" (neither).
+    # The filter's name and URL contract are unchanged for the first three,
+    # but `owned = 0` no longer means "wishlist" — membership lives in
+    # `list_items` (#125), so the "0" arm reads the list and "none" reads its
+    # negation. "1" is still possession. None binds a parameter, so the
+    # condition and its params are built together — which is the whole
     # reason this returns both.
     if value == "1":
         return "i.owned = 1", []
     if value == "0":
         return lists.WISHLISTED_SQL, []
+    if value == "none":
+        return lists.NEITHER_SQL, []
     return None
 
 

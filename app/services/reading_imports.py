@@ -17,7 +17,7 @@ Each normalizer returns the shelf-native shape consumed by the CSV import:
         "series_name": str | None,
         "reading_status": str | None,   # read / reading / want_to_read
         "date_finished": str | None,    # ISO date
-        "owned": bool,
+        "owned": bool | None,        # generic: None when absent/blank
         "wishlisted": bool | None,   # generic only; None when absent/blank
     }
 """
@@ -89,13 +89,13 @@ _TRUTHY = {"1", "true", "yes"}
 _FALSY = {"0", "false", "no"}
 
 
-def _parse_wishlisted(value: str | None) -> bool | None:
-    """Parse a generic CSV's own `wishlisted` column.
+def _parse_flag(value: str | None) -> bool | None:
+    """Parse a generic CSV's own `owned` or `wishlisted` column.
 
     Accepts 1/0, true/false, yes/no, case-insensitive. Blank or absent (the
-    column itself may not exist in the row dict) yields None — the importer
-    does not read this value in plan 1 (see items_csv.py); it exists so a
-    later plan can.
+    column itself may not exist in the row dict) yields None, and the
+    importer treats None as "this file does not say" (G87) — see
+    items_csv.py for how each flag is resolved.
     """
     v = (value or "").strip().lower()
     if v in _TRUTHY:
@@ -196,8 +196,10 @@ def normalize_generic(row: dict) -> dict:
         "series_position": None,
         "reading_status": None,
         "date_finished": None,
-        "owned": True,
-        "wishlisted": _parse_wishlisted(row.get("wishlisted")),
+        # Both state columns are Shelf's own export (#125). None means the
+        # column is absent or blank; items_csv.py applies the defaults.
+        "owned": _parse_flag(row.get("owned")),
+        "wishlisted": _parse_flag(row.get("wishlisted")),
     }
 
 

@@ -15,9 +15,11 @@ All under Settings → Data. Four mechanisms, each for a different job.
 
 `title, authors, isbn, media_type, platform, publisher, publish_year,
 page_count, series_name, location, source, estimated_value, manual_value,
-wishlisted`
+owned, wishlisted`
 
-`wishlisted` is `1` for an item on your wishlist and `0` otherwise.
+`owned` and `wishlisted` are each `1` or `0`, so the file records all three
+states: owned (`1`, `0`), on your wishlist (`0`, `1`) and neither (`0`, `0`).
+Re-importing the file into an empty library brings all three back.
 
 ## CSV import
 
@@ -37,10 +39,26 @@ items that also lack one: it will not be folded into an edition you own that
 `978-0-441-17271-9` are the same book, so a file carrying any of them matches
 the copy you already own — whichever form Shelf stored it under.
 
+**Owned and wishlist columns.** A row's `owned` and `wishlisted` values
+(`1`/`0`, `true`/`false` or `yes`/`no`) are applied as given, in this order:
+
+1. An owned row is never put on the wishlist — `owned=1, wishlisted=1`
+   imports as owned, without an error.
+2. Otherwise the row's own `wishlisted` value decides.
+3. With no `wishlisted` value, the **Import "to read" books as wishlist**
+   option decides (see Options).
+
+A file with no `owned` column is treated as an export from an earlier Shelf,
+where `wishlisted=1` meant *not owned*: those rows arrive on the wishlist and
+not owned, and every other new row arrives owned.
+
 **Duplicate mode** — what happens to a row that matches something you own:
 
 - **Skip** (the default) — the row is counted as skipped and nothing changes.
-- **Update** — the matched item's metadata is refreshed from the row.
+- **Update** — the matched item's metadata is refreshed from the row. Owned
+  and wishlist state change only where the file has a value for them: a
+  file without an `owned` or `wishlisted` column leaves that part of every
+  matched item as it was.
 
 Those are the only two. Any other value is refused outright: the whole file is
 rejected with an error, before it is read, and nothing is written.
@@ -51,8 +69,9 @@ Options:
   fill in covers, publishers, descriptions. Only book-ish
   media types are enriched: discs and games are left alone, because a
   title-only lookup for one can match a novel of the same name.
-- **Import "to read" books as wishlist** — rows with a to-read status arrive
-  unowned.
+- **Import "to read" books as wishlist** — a row with a to-read status that
+  is not owned goes on the wishlist. With the option off, it arrives neither
+  owned nor wishlisted. It never changes whether a row is owned.
 
 Errors are reported per row (missing title, over-long fields, an ISBN whose
 check digit doesn't add up, a media type Shelf doesn't know); the rest of
@@ -65,8 +84,32 @@ account → Export) and upload the file **as-is** to the same import card. The
 format is auto-detected from the headers. Shelf maps:
 
 - shelves / statuses → want-to-read, reading, read (+ dates)
-- "owned" / "to-read" → owned or wishlist (with the option above)
+- owned copies (Goodreads) / "Owned?" (StoryGraph) → owned or not owned
+- to-read + not owned → wishlist, with the option above on
+- everything else not owned — a book you read or are reading but don't own
+  → neither: it keeps its status and dates, stays out of the Owned and
+  Wishlist filters, and isn't valued
 - ISBN / title / author → lookup and covers
+
+In **Update** mode a Goodreads or StoryGraph file always sets owned and
+wishlist state on the items it matches.
+
+### Cleaning up a wishlist after a Goodreads import
+
+Earlier versions of Shelf put every book a Goodreads or StoryGraph export
+listed as not owned on the wishlist, including the ones you had already read.
+To take the read ones off in one go:
+
+1. **Browse → Owned: Wishlist**.
+2. **Reading status: Read**.
+3. **Select**, then **Select All**.
+4. **Wishlist… → Remove from wishlist → Apply**.
+
+**Select All** picks the items loaded on the page, so on a long list repeat
+steps 3–4 until the filter is empty. The books stay in your catalogue with
+their reading history, now neither owned nor wishlisted. Nothing does this
+automatically: a book you read and then want to buy belongs on the wishlist,
+so the choice is yours.
 
 Ratings are **not** imported yet (Shelf has no ratings; that's on the
 roadmap) and the import summary says so. LibraryThing and Libib importers

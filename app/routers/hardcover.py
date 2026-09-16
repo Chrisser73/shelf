@@ -11,7 +11,7 @@ from starlette.responses import StreamingResponse
 from app.auth import require_role
 from app.config import HTTP_TIMEOUT
 from app.database import get_db, get_setting
-from app.services import hardcover, covers
+from app.services import hardcover, covers, lists
 from app.services import isbn as isbn_svc
 from app.services.item_write import ItemValueError, insert_item, update_item_fields
 
@@ -133,15 +133,18 @@ async def add_hardcover_to_shelf(request: Request, _=Depends(require_role("edito
     existing = None
     item_id = None
     value_error = None
+    promoted_to_wishlist = False
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
         if hc_book_id:
             existing = db.execute(
-                "SELECT id FROM items WHERE hardcover_book_id = ?", (hc_book_id,)
+                f"SELECT id, owned, {lists.WISHLISTED_SQL} AS wishlisted FROM items i "
+                "WHERE hardcover_book_id = ?", (hc_book_id,)
             ).fetchone()
         if not existing and isbn:
             existing = db.execute(
-                "SELECT id FROM items WHERE isbn = ?", (isbn,)
+                f"SELECT id, owned, {lists.WISHLISTED_SQL} AS wishlisted FROM items i "
+                "WHERE isbn = ?", (isbn,)
             ).fetchone()
         if existing is None:
             try:
@@ -166,7 +169,16 @@ async def add_hardcover_to_shelf(request: Request, _=Depends(require_role("edito
                 )
             except ItemValueError as e:
                 value_error = str(e)
+        elif not existing["owned"] and not existing["wishlisted"]:
+            # A neither row: this book is already tracked (by hardcover_book_id
+            # or isbn) but is on no list and not owned. Adding it from
+            # Hardcover here means "put it on the wishlist", not "insert a
+            # second row" — join the existing one to the wishlist instead.
+            update_item_fields(db, existing["id"], {"wishlisted": True})
+            promoted_to_wishlist = True
 
+    if promoted_to_wishlist:
+        return {"ok": True, "message": "Added to wishlist", "item_id": existing["id"]}
     if existing:
         return {"ok": False, "message": "Already in your library", "item_id": existing["id"]}
     if value_error:

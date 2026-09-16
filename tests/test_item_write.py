@@ -26,6 +26,7 @@ from app.services.item_write import (
     UnknownPlatform,
     insert_item,
     item_columns,
+    promote_wishlisted,
     reset_column_cache,
     update_item_fields,
     update_items_fields,
@@ -868,3 +869,31 @@ class TestWishlistedRefusals:
                                 {"wishlisted": True})
         assert _snapshot(db) == before
         assert not any(_is_member(db, i) for i in (unowned_a, owned, unowned_b))
+
+
+class TestPromoteWishlisted:
+    """#125: Add mode's "I bought it" transition, on the caller's connection."""
+
+    def _state(self, db, item_id):
+        from app.services import lists
+
+        owned = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()["owned"]
+        return owned, lists.is_member(db, lists.WISHLIST, item_id)
+
+    def test_a_member_becomes_owned_and_leaves_the_wishlist(self, db):
+        item_id = _insert_item(db, title="Bought It", owned=0, wishlisted=True)
+        assert promote_wishlisted(db, item_id) is True
+        assert self._state(db, item_id) == (1, False)
+
+    def test_a_neither_row_is_left_alone(self, db):
+        item_id = _insert_item(db, title="Read Elsewhere", owned=0)
+        assert promote_wishlisted(db, item_id) is False
+        assert self._state(db, item_id) == (0, False)
+
+    def test_an_owned_row_is_left_alone(self, db):
+        item_id = _insert_item(db, title="Already Mine", owned=1)
+        before = db.execute("SELECT updated_at FROM items WHERE id = ?", (item_id,)).fetchone()[0]
+        assert promote_wishlisted(db, item_id) is False
+        assert self._state(db, item_id) == (1, False)
+        after = db.execute("SELECT updated_at FROM items WHERE id = ?", (item_id,)).fetchone()[0]
+        assert after == before

@@ -224,35 +224,43 @@ def has_bare_attribute(html: str, name: str) -> bool:
     return re.search(re.escape(name) + r"(?![-\w])", html) is not None
 
 
-def _insert_item(db, title="Test Book", isbn="9780000000026", media_type="book", **kwargs):
-    """Insert a test item and return its ID."""
+def _insert_item(db, title="Test Book", isbn="9780000000026", media_type="book", wishlisted=False, **kwargs):
+    """Insert a test item and return its ID.
+
+    `wishlisted=True` adds the row to the wishlist after the INSERT; it is a
+    keyword of this helper, not a column, so it never reaches the statement.
+    `owned=0` alone is a legal "neither" state — pass `wishlisted=True`
+    explicitly for a wishlist seed.
+    """
     fields = {"title": title, "isbn": isbn, "media_type": media_type, "source": "test"}
     fields.update(kwargs)
     cols = ", ".join(fields.keys())
     placeholders = ", ".join("?" for _ in fields)
     cursor = db.execute(f"INSERT INTO items ({cols}) VALUES ({placeholders})", list(fields.values()))
-    if fields.get("owned") == 0:
+    if wishlisted:
         from app.services import lists
 
         lists.add(db, lists.WISHLIST, cursor.lastrowid)
     return cursor.lastrowid
 
 
-def _assert_wishlist_invariant(db):
-    """Assert `owned = 0` and wishlist membership agree for every item.
+def _assert_ownership_partition(db):
+    """Assert no item is both owned and a wishlist member.
 
+    `owned = 1` must never coexist with wishlist membership — the one
+    coupling that survives the ownership/wishlist split. `owned = 0` with no
+    membership is a legal "neither" state and this check does not touch it.
     Raw-SQL test seeds bypass the app's write funnel, so this is a fixture
-    sanity check, not app-code coverage: T4-T7 call it after every writer
-    that touches either side of the invariant once enforcement lands.
+    sanity check, not app-code coverage.
     """
     from app.services.lists import WISHLISTED_SQL
 
     rows = db.execute(
         f"SELECT i.id, i.title, i.owned FROM items i "
-        f"WHERE (i.owned = 0) != ({WISHLISTED_SQL})"
+        f"WHERE i.owned = 1 AND {WISHLISTED_SQL}"
     ).fetchall()
     assert not rows, (
-        "owned=0/wishlist-membership mismatch for: "
+        "owned items found on the wishlist: "
         + ", ".join(f"#{r['id']} {r['title']!r} (owned={r['owned']})" for r in rows)
     )
 

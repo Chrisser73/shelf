@@ -209,6 +209,47 @@ def test_item_edit_save(live_server, authed_page):
     expect(authed_page.locator("body")).to_contain_text("Updated Title")
 
 
+def test_owned_box_disables_and_clears_the_wishlist_box(live_server, authed_page):
+    """#125: the two ownership boxes are independent, except that an owned
+    item cannot be wishlisted — checking "I own this" clears and disables the
+    wishlist box, and the saved row is owned and off the wishlist."""
+    item_id = insert_item(
+        live_server["data_dir"],
+        title="Ownership Boxes Probe",
+        media_type="book",
+        isbn="9780000125002",
+        owned=0,
+        wishlisted=True,
+    )
+    authed_page.goto(f"{live_server['url']}/item/{item_id}/edit")
+    owned = authed_page.get_by_test_id("edit-owned")
+    wish = authed_page.get_by_test_id("edit-wishlisted")
+    expect(wish).to_be_checked()
+    expect(wish).to_be_enabled()
+    expect(owned).not_to_be_checked()
+
+    owned.check()
+    expect(wish).not_to_be_checked()
+    expect(wish).to_be_disabled()
+
+    owned.uncheck()
+    expect(wish).to_be_enabled()
+    owned.check()
+
+    authed_page.locator("button[type=submit]:has-text('Save')").click()
+    authed_page.wait_for_url(f"{live_server['url']}/item/{item_id}", timeout=10_000)
+    conn = sqlite3.connect(str(live_server["data_dir"] / "shelf.db"))
+    try:
+        owned_val = conn.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()[0]
+        member = conn.execute(
+            "SELECT COUNT(*) FROM list_items li JOIN lists l ON l.id = li.list_id "
+            "WHERE l.slug = 'wishlist' AND li.item_id = ?", (item_id,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert (owned_val, member) == (1, 0)
+
+
 def test_manual_value_overrides_estimate_then_falls_back(live_server, authed_page):
     """#18: a manual value overrides the ISBNdb estimate in the Stats total
     and the valuation report (with a "manual" badge); clearing it falls

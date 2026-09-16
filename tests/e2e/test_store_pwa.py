@@ -5,6 +5,7 @@ worker registers in headless Chromium exactly as it would on a trusted
 HTTPS origin.
 """
 import sqlite3
+import time
 
 import pytest
 from playwright.sync_api import expect
@@ -17,6 +18,22 @@ from tests.e2e.conftest import (
 )
 
 pytestmark = pytest.mark.e2e
+
+
+def _wait_for_sw_control(pg, timeout_ms: int = 10_000) -> None:
+    """Poll for `navigator.serviceWorker.controller` from Python.
+
+    G21: `page.wait_for_function` needs eval(), which this app's CSP
+    refuses — and the suite already spends its one allowed call site
+    (`test_offline_verdicts_and_queue_flush`, above) on this same wait. A
+    bare `page.evaluate` expression goes through Runtime.evaluate instead
+    and is unaffected, so poll with that."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if pg.evaluate("() => !!navigator.serviceWorker.controller"):
+            return
+        pg.wait_for_timeout(100)
+    raise AssertionError("service worker never took control within the timeout")
 
 OWNED_ISBN = "9789010000187"
 WISHLIST_ISBN = "9789010000255"
@@ -35,7 +52,8 @@ def _login(live_server, ctx, setup_admin):
 
 def test_offline_verdicts_and_queue_flush(live_server, browser, setup_admin):
     insert_item(live_server["data_dir"], title="Store Owned Book", isbn=OWNED_ISBN)
-    insert_item(live_server["data_dir"], title="Store Wishlist Book", isbn=WISHLIST_ISBN, owned=0)
+    insert_item(live_server["data_dir"], title="Store Wishlist Book", isbn=WISHLIST_ISBN, owned=0,
+                wishlisted=True)
 
     ctx = browser.new_context()
     try:
@@ -90,6 +108,41 @@ def test_offline_verdicts_and_queue_flush(live_server, browser, setup_admin):
 
         # Queue drained in the UI
         expect(pg.get_by_test_id("queue-count")).to_have_text("0", timeout=10_000)
+        assert_page_clean(pg)
+    finally:
+        ctx.close()
+
+
+NEITHER_ISBN = "9789010000392"
+
+
+def test_a_neither_item_reads_not_in_library_offline(live_server, browser, setup_admin):
+    """Issue #125 T11: a row that is neither owned nor wishlisted is left out
+    of the store manifest (`store.py::store_data`) exactly like an ISBN with
+    no row at all, so it reads NOT IN LIBRARY offline even though the title
+    is already tracked on the server. Unique ISBN — never matches any other
+    seeded row, so the verdict holds no matter what else the session-scoped
+    server has accumulated (G34)."""
+    insert_item(
+        live_server["data_dir"], title="Store Neither Book", isbn=NEITHER_ISBN, owned=0,
+    )
+
+    ctx = browser.new_context()
+    try:
+        pg = _login(live_server, ctx, setup_admin)
+
+        pg.goto(f"{live_server['url']}/store")
+        expect(pg.get_by_test_id("status-line")).to_contain_text("titles cached", timeout=10_000)
+        _wait_for_sw_control(pg)
+
+        ctx.set_offline(True)
+        pg.reload()
+        expect(pg.get_by_test_id("status-line")).to_contain_text("offline", timeout=10_000)
+
+        pg.get_by_test_id("isbn-input").fill(NEITHER_ISBN)
+        pg.get_by_test_id("check-button").click()
+        expect(pg.get_by_test_id("verdict")).to_contain_text("NOT IN LIBRARY")
+
         assert_page_clean(pg)
     finally:
         ctx.close()

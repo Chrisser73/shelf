@@ -19,6 +19,7 @@ from app.config import HTTP_TIMEOUT
 from app.database import get_db, get_setting
 from app.services import covers
 from app.services import isbn as isbn_svc
+from app.services import lists
 from app.services.item_write import insert_item, update_item_fields
 
 logger = logging.getLogger(__name__)
@@ -49,12 +50,16 @@ async def service_worker():
 
 @router.get("/api/store/data")
 async def store_data(_=Depends(require_role("viewer"))):
-    """Compact offline dataset: every item with an ISBN, plus all barcode
-    forms it can be matched by (stored ISBN/ISBN-10 and their conversions)."""
+    """Compact offline dataset: every owned or wishlisted item with an ISBN,
+    plus all barcode forms it can be matched by (stored ISBN/ISBN-10 and
+    their conversions). A row that is neither owned nor wishlisted is not in
+    the library on this device either — scanning it in a shop means "I want
+    this", which the flush below turns into wishlist membership."""
     with get_db() as db:
         rows = db.execute(
-            "SELECT title, authors, owned, isbn, isbn10 FROM items "
-            "WHERE isbn IS NOT NULL OR isbn10 IS NOT NULL"
+            "SELECT i.title, i.authors, i.owned, i.isbn, i.isbn10 FROM items i "
+            "WHERE (i.isbn IS NOT NULL OR i.isbn10 IS NOT NULL) "
+            f"AND (i.owned = 1 OR {lists.WISHLISTED_SQL})"
         ).fetchall()
 
     items = []
@@ -145,16 +150,37 @@ async def store_queue(request: Request, _=Depends(require_role("editor"))):
                 continue
             isbn13 = pair[0]
 
+            # G18 — the guard read and the wishlist write it may trigger
+            # share one connection and one write lock, BEGIN IMMEDIATE first,
+            # above the guard SELECT: a row inserted between an unlocked read
+            # and a later write would be acted on blind.
+            newly_wishlisted = False
             with get_db() as db:
+                db.execute("BEGIN IMMEDIATE")
                 existing = db.execute(
-                    "SELECT id, title FROM items WHERE isbn = ? AND media_type = 'book'",
+                    f"SELECT i.id, i.title, i.owned, {lists.WISHLISTED_SQL} AS wishlisted "
+                    "FROM items i WHERE i.isbn = ? AND i.media_type = 'book'",
                     (isbn13,),
                 ).fetchone()
+                if existing and not existing["owned"] and not existing["wishlisted"]:
+                    # Neither owned nor wishlisted — the scan means "I want
+                    # this", so the flush adds membership rather than
+                    # reporting a no-op duplicate (no `logger.*`/`_log_scan`
+                    # in here — G3).
+                    update_item_fields(db, existing["id"], {"wishlisted": True})
+                    newly_wishlisted = True
             if existing:
-                results.append({
-                    "isbn": isbn13, "status": "duplicate",
-                    "title": existing["title"], "item_id": existing["id"],
-                })
+                if newly_wishlisted:
+                    items_common._log_scan(isbn13, "book", "wishlisted", existing["id"], "wishlist")
+                    results.append({
+                        "isbn": isbn13, "status": "wishlisted",
+                        "title": existing["title"], "item_id": existing["id"],
+                    })
+                else:
+                    results.append({
+                        "isbn": isbn13, "status": "duplicate",
+                        "title": existing["title"], "item_id": existing["id"],
+                    })
                 continue
 
             metadata, source, hc_ids = None, None, {}

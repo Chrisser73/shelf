@@ -9,7 +9,7 @@ import pytest
 import respx
 
 from app.services import vision
-from tests.conftest import _assert_wishlist_invariant, _insert_item
+from tests.conftest import _assert_ownership_partition, _insert_item
 
 OL_SEARCH_URL = "https://openlibrary.org/search.json"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
@@ -823,7 +823,7 @@ class TestConfirmEndpoint:
         row = db.execute("SELECT * FROM items WHERE title = 'Obscure Zine'").fetchone()
         assert row["isbn"] is None
         assert row["owned"] == 0
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
     def test_unknown_media_type_rejected(self, admin_client):
         resp = admin_client.post("/api/intake/confirm", json={
@@ -973,7 +973,7 @@ class TestConfirmWithIsbn:
         assert row["media_type"] == "kids_book"
         assert row["source"] == "photo_intake"
         assert row["owned"] == 0
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
         assert row["hardcover_book_id"] == 42
         assert route.called is False                  # no weak-path search
 

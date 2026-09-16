@@ -1,15 +1,15 @@
 from app.routers import shelf_fill
 from app.services import lists
 from app.services import locations as location_svc
-from tests.conftest import _assert_wishlist_invariant
+from tests.conftest import _assert_ownership_partition
 
 
-def _item(db, *, title="Filed book", owned=1, isbn=None):
+def _item(db, *, title="Filed book", owned=1, isbn=None, wishlisted=False):
     cur = db.execute(
         "INSERT INTO items (title, media_type, owned, isbn) VALUES (?, 'book', ?, ?)",
         (title, owned, isbn),
     )
-    if owned == 0:
+    if wishlisted:
         from app.services import lists
 
         lists.add(db, lists.WISHLIST, cur.lastrowid)
@@ -41,7 +41,7 @@ def test_place_item_creates_primary_copy_and_appends_when_ordering_exists(db):
 
 def test_place_item_promotes_wishlist_to_owned(db):
     shelf = location_svc.create_location(db, "Shelf")
-    item_id = _item(db, owned=0)
+    item_id = _item(db, owned=0, wishlisted=True)
 
     result = shelf_fill._place_item(db, item_id, shelf)
 
@@ -49,7 +49,7 @@ def test_place_item_promotes_wishlist_to_owned(db):
     assert item["owned"] == 1
     assert result["was_wishlist"] is True
     assert not lists.is_member(db, lists.WISHLIST, item_id)
-    _assert_wishlist_invariant(db)
+    _assert_ownership_partition(db)
 
 
 def test_place_exact_copy_promotes_wishlist_and_removes_membership(db):
@@ -64,7 +64,7 @@ def test_place_exact_copy_promotes_wishlist_and_removes_membership(db):
     """
     first = location_svc.create_location(db, "Shelf A")
     target = location_svc.create_location(db, "Shelf B")
-    item_id = _item(db, owned=0)
+    item_id = _item(db, owned=0, wishlisted=True)
     secondary_id = db.execute(
         "INSERT INTO item_copies (item_id, copy_number, location_id, copy_barcode, is_primary) "
         "VALUES (?, 1, ?, 'WISH-COPY-1', 0)", (item_id, first),
@@ -86,7 +86,7 @@ def test_place_exact_copy_promotes_wishlist_and_removes_membership(db):
     assert [row["id"] for row in copies] == [secondary_id]
     assert copies[0]["is_primary"] == 0
     assert copies[0]["location_id"] == target
-    _assert_wishlist_invariant(db)
+    _assert_ownership_partition(db)
 
 
 def test_copy_barcode_moves_exact_secondary_without_moving_primary(db):

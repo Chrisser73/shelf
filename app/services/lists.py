@@ -44,6 +44,11 @@ WISHLISTED_SQL = (
     "AND li.list_id = (SELECT id FROM lists WHERE slug = 'wishlist'))"
 )
 
+#: A boolean fragment for "is this item neither owned nor wishlisted" — the
+#: third state #125 makes reachable. Same alias requirement as
+#: `WISHLISTED_SQL`: the caller's `items` table must be aliased `i`.
+NEITHER_SQL = f"(i.owned = 0 AND NOT {WISHLISTED_SQL})"
+
 
 class UnknownList(ValueError):
     """Raised when a slug does not name a row in `lists`."""

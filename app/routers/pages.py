@@ -378,7 +378,10 @@ async def item_edit(
 ):
     back = nav.back_target(from_)
     with get_db() as db:
-        item = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute(
+            f"SELECT i.*, {lists.WISHLISTED_SQL} AS wishlisted FROM items i WHERE i.id = ?",
+            (item_id,),
+        ).fetchone()
         locations = db.execute(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
@@ -408,7 +411,9 @@ async def stats(request: Request, _=Depends(require_role("viewer"))):
         stats_wishlist = db.execute(
             f"SELECT COUNT(*) as c FROM items i WHERE {lists.WISHLISTED_SQL}"
         ).fetchone()["c"]
-        stats_owned = total - stats_wishlist
+        stats_owned = db.execute(
+            "SELECT COUNT(*) as c FROM items WHERE owned = 1"
+        ).fetchone()["c"]
         with_covers = db.execute(
             "SELECT COUNT(*) as c FROM items WHERE cover_path IS NOT NULL"
         ).fetchone()["c"]
@@ -440,9 +445,10 @@ async def stats(request: Request, _=Depends(require_role("viewer"))):
             "SELECT substr(created_at, 1, 10) as d, total_value FROM valuation_history "
             "ORDER BY created_at"
         ).fetchall()
+        # The valuation concerns what you own (#125) — owned = 1.
         current_value = db.execute(
             "SELECT COALESCE(SUM(COALESCE(manual_value, estimated_value)), 0) as v FROM items "
-            "WHERE COALESCE(manual_value, estimated_value) IS NOT NULL"
+            "WHERE COALESCE(manual_value, estimated_value) IS NOT NULL AND owned = 1"
         ).fetchone()["v"]
 
     from datetime import date as _date

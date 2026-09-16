@@ -869,11 +869,20 @@ half-written record behind (`GOTCHAS.md` G85). Ownership is judged
 *effective*, not submitted: an absent `owned` on insert means the `SCHEMA`
 default of 1, and a partial update means the row's current value.
 
-> **Invariant.** `owned` answers *do I have a copy?*; wishlist membership
-> answers *do I want one?* They are separate states. Until the follow-on
-> plan ships the user-visible "neither" state, every writer keeps the two
-> equal — on the wishlist ⇔ `owned = 0` — and `tests/conftest.py`'s
-> `_assert_wishlist_invariant` is called after every writer to prove it.
+> **Three states.** `owned` answers *do I have a copy?*; wishlist
+> membership answers *do I want one?* The one coupling between them is
+> `owned = 1` ⇒ not a member, so an item is exactly one of **owned**,
+> **wishlisted** (`owned = 0`, a member) or **neither** (`owned = 0`, not a
+> member). `lists.WISHLISTED_SQL` and `lists.NEITHER_SQL` are the SQL for
+> the two unowned states, and `tests/conftest.py`'s
+> `_assert_ownership_partition` is called after every writer to prove the
+> coupling. Readers follow from the states: the valuation (total, report,
+> snapshot, sweeps, the Stats tile) counts `owned = 1` only; the Store Mode
+> manifest carries owned and wishlisted rows only, so a neither row reads
+> *Not in library* offline and a flush adds it to the wishlist; Add mode's
+> duplicate guards promote a wishlisted row to owned (`item_write.
+> promote_wishlisted`, status `promoted`) under the same `BEGIN IMMEDIATE`
+> as the guard read.
 
 **When a route decides on a `SELECT`, the transaction is the third.** Every
 add path that reads a duplicate guard and then inserts on the answer runs both

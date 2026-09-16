@@ -766,8 +766,14 @@ def insert_reading_log(data_dir: Path, item_id: int, count: int = 1) -> None:
         conn.close()
 
 
-def insert_item(data_dir: Path, **kwargs) -> int:
-    """Insert a test item directly into the E2E SQLite DB; return its id."""
+def insert_item(data_dir: Path, wishlisted: bool = False, **kwargs) -> int:
+    """Insert a test item directly into the E2E SQLite DB; return its id.
+
+    `wishlisted=True` adds wishlist membership after the INSERT, on this
+    same connection; it is a keyword of this helper, not a column, so it
+    never reaches the statement. `owned=0` alone is a legal "neither" state
+    — pass `wishlisted=True` explicitly for a wishlist seed.
+    """
     db_path = data_dir / "shelf.db"
     fields = {
         "title": "Test Book",
@@ -781,7 +787,7 @@ def insert_item(data_dir: Path, **kwargs) -> int:
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.execute(f"INSERT INTO items ({cols}) VALUES ({placeholders})", list(fields.values()))
-        if fields.get("owned") == 0:
+        if wishlisted:
             conn.execute(
                 "INSERT OR IGNORE INTO list_items (list_id, item_id) "
                 "SELECT id, ? FROM lists WHERE slug = 'wishlist'",

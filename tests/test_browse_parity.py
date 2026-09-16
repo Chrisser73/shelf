@@ -13,7 +13,7 @@ import re
 
 import pytest
 
-from tests.conftest import _assert_wishlist_invariant, _insert_borrower, _insert_item, _insert_location
+from tests.conftest import _assert_ownership_partition, _insert_borrower, _insert_item, _insert_location
 
 SELECT_IDS = ("type-filter", "owned-filter", "location-filter", "reading-status-filter")
 
@@ -61,6 +61,10 @@ def seeded_library(db):
     )
     _insert_item(
         db, title="Wishlist Book", isbn="9780000030016", media_type="book",
+        owned=0, wishlisted=True,
+    )
+    _insert_item(
+        db, title="Neither Book", isbn="9780000060013", media_type="book",
         owned=0,
     )
     deu = _insert_item(
@@ -91,6 +95,8 @@ QUERYSTRINGS = [
     "",
     "owned=0",
     "owned=1",
+    "owned=none",
+    "owned=none&media_type_filter=book",
     "media_type_filter=dvd",
     # location_filter is filled in per-test from the seeded loc_a id.
     "reading_status=read",
@@ -127,7 +133,7 @@ def test_dropdown_parity_location_filter(admin_client, seeded_library):
 
 @pytest.mark.parametrize("qs", QUERYSTRINGS)
 def test_result_set_parity(admin_client, seeded_library, db, qs):
-    _assert_wishlist_invariant(db)
+    _assert_ownership_partition(db)
     b = admin_client.get(f"/browse?{qs}")
     s = admin_client.get(f"/api/search?{qs}")
     assert b.status_code == 200

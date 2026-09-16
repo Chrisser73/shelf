@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.conftest import _assert_wishlist_invariant, _insert_item
+from tests.conftest import _assert_ownership_partition, _insert_item
+from tests.test_intake import _install_lock_probe
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SW_PATH = REPO_ROOT / "static" / "sw.js"
@@ -117,7 +118,7 @@ class TestSwPrecacheDigest:
 class TestStoreData:
     def test_returns_items_with_code_expansion(self, admin_client, db):
         _insert_item(db, title="Owned Book", isbn="9780441013593")
-        _insert_item(db, title="Wishlist Book", isbn="9780553283686", owned=0)
+        _insert_item(db, title="Wishlist Book", isbn="9780553283686", owned=0, wishlisted=True)
         db.execute("COMMIT")
 
         data = admin_client.get("/api/store/data").json()
@@ -153,6 +154,19 @@ class TestStoreData:
         client.cookies.set("access_token", token)
         assert client.get("/api/store/data").status_code == 200
 
+    def test_neither_row_omitted_owned_and_wishlisted_kept(self, admin_client, db):
+        """A row that is neither owned nor wishlisted is not "in the library"
+        on the device — scanning it in a shop means "I want this" (§6)."""
+        _insert_item(db, title="Owned Book", isbn="9780441013593")
+        _insert_item(db, title="Wishlist Book", isbn="9780062319005", owned=0, wishlisted=True)
+        _insert_item(db, title="Neither Book", isbn="9780340000007", owned=0)
+        db.execute("COMMIT")
+
+        data = admin_client.get("/api/store/data").json()
+        titles = {i["title"] for i in data["items"]}
+        assert titles == {"Owned Book", "Wishlist Book"}
+        assert "Neither Book" not in titles
+
 
 class TestStoreQueue:
     def _meta(self, title="Found Book"):
@@ -169,7 +183,7 @@ class TestStoreQueue:
 
         item = db.execute("SELECT * FROM items WHERE isbn = '9780441013593'").fetchone()
         assert item["owned"] == 0
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
     def test_google_key_reaches_store_metadata_lookup(self, admin_client, monkeypatch):
         monkeypatch.setenv("GOOGLE_BOOKS_API_KEY", "store-google-key")
@@ -204,6 +218,86 @@ class TestStoreQueue:
         result = resp.json()["results"][0]
         assert result["status"] == "duplicate"
         assert result["title"] == "Already Here"
+
+    def test_wishlisted_duplicate_still_reported_as_duplicate(self, admin_client, db):
+        """An already-wishlisted row is a no-op, same as an owned one."""
+        item_id = _insert_item(db, title="Already Wanted", isbn="9780062319005",
+                                owned=0, wishlisted=True)
+        db.execute("COMMIT")
+
+        lookup = AsyncMock(side_effect=AssertionError("must not look up an existing row"))
+        with patch("app.routers.items_common._lookup_metadata", new=lookup):
+            resp = admin_client.post("/api/store/queue", json={"isbns": ["9780062319005"]})
+        lookup.assert_not_awaited()
+
+        result = resp.json()["results"][0]
+        assert result["status"] == "duplicate"
+        assert result["title"] == "Already Wanted"
+
+        row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
+        assert row["owned"] == 0
+        assert db.execute("SELECT COUNT(*) AS c FROM items").fetchone()["c"] == 1
+        _assert_ownership_partition(db)
+
+    def test_flushing_a_neither_isbn_wishlists_it(self, admin_client, db):
+        """A neither row scanned in a shop means "I want this" — the flush
+        adds membership rather than treating it as a no-op duplicate (§6)."""
+        item_id = _insert_item(db, title="Neither Book", isbn="9780340000007", owned=0)
+        db.execute("COMMIT")
+
+        lookup = AsyncMock(side_effect=AssertionError("must not look up an existing row"))
+        with patch("app.routers.items_common._lookup_metadata", new=lookup):
+            resp = admin_client.post("/api/store/queue", json={"isbns": ["9780340000007"]})
+        lookup.assert_not_awaited()
+
+        result = resp.json()["results"][0]
+        assert result["status"] == "wishlisted"
+        assert result["title"] == "Neither Book"
+        assert result["item_id"] == item_id
+
+        row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
+        assert row["owned"] == 0
+        assert db.execute("SELECT COUNT(*) AS c FROM items").fetchone()["c"] == 1
+
+        from app.services.lists import WISHLISTED_SQL
+        member = db.execute(
+            f"SELECT 1 FROM items i WHERE i.id = ? AND {WISHLISTED_SQL}", (item_id,)
+        ).fetchone()
+        assert member is not None
+
+        scan = db.execute(
+            "SELECT result, item_id, mode FROM scan_log WHERE isbn = ?", ("9780340000007",)
+        ).fetchone()
+        assert scan["result"] == "wishlisted"
+        assert scan["item_id"] == item_id
+        assert scan["mode"] == "wishlist"
+
+        _assert_ownership_partition(db)
+
+    def test_flush_guard_reads_under_the_write_lock(self, admin_client, db, monkeypatch):
+        """G18: the existing-row guard and the wishlist write it may trigger
+        share the write lock — see `_install_lock_probe` in tests/test_intake.py."""
+        from app.routers import store as store_router
+
+        _insert_item(db, title="Neither Book", isbn="9780340000007", owned=0)
+        db.execute("COMMIT")
+
+        probe_results = []
+
+        def predicate(sql):
+            return "i.media_type = 'book'" in sql
+
+        _install_lock_probe(monkeypatch, store_router, predicate, probe_results)
+
+        resp = admin_client.post("/api/store/queue", json={"isbns": ["9780340000007"]})
+
+        assert resp.status_code == 200
+        assert probe_results, "the guard query never ran — the probe did not fire"
+        assert probe_results[-1].startswith("locked"), (
+            f"a rival writer could take the write lock while the flush's existing-row "
+            f"guard was being read (got {probe_results[-1]!r}) — the route is missing "
+            "its BEGIN IMMEDIATE, or takes it after the guard SELECT (G18)"
+        )
 
     def test_isbn10_input_normalized(self, admin_client, db):
         with patch("app.routers.items_common._lookup_metadata",

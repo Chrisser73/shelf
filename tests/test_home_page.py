@@ -20,7 +20,7 @@ def test_home_links_to_browse_without_replacing_it(admin_client):
 
 def test_home_renders_summary_and_recent_items(admin_client, db):
     first = _insert_item(db, title="Older Item", media_type="book", owned=1)
-    second = _insert_item(db, title="Newest Item", media_type="dvd", owned=0)
+    second = _insert_item(db, title="Newest Item", media_type="dvd", owned=0, wishlisted=True)
     db.execute(
         "UPDATE items SET created_at = '2026-01-01 00:00:00' WHERE id = ?",
         (first,),

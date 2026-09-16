@@ -24,8 +24,8 @@ The mode is sticky — set it once and scan a pile.
 
 | Mode | What happens on each scan |
 |---|---|
-| **Add** | Look up metadata, download the cover, add the item as owned. Scanning a barcode you already own shows the existing item instead of duplicating it — whatever the media-type dropdown says. A dropdown pick the barcode contradicts is corrected rather than obeyed (see [Media types](#media-types)) |
-| **Wishlist** | Same lookup, but the item is added as *not owned* — your wish list |
+| **Add** | Look up metadata, download the cover, add the item as owned. Scanning a barcode you already own shows the existing item instead of duplicating it — whatever the media-type dropdown says. Scanning something on your wishlist marks it owned and takes it off the wishlist (*Now owned*). A dropdown pick the barcode contradicts is corrected rather than obeyed (see [Media types](#media-types)) |
+| **Wishlist** | Same lookup, but the item is added to your wishlist, not as owned. A barcode already in your library is left as it is |
 | **Lend** | Pick a borrower first; each scan checks that item out to them. Optional due date |
 | **Return** | Each scan checks the item back in, whoever had it |
 | **Move** | Pick a location first; each scan relocates the item there. To work along a shelf putting things away in order, use [Shelf Fill](shelf-fill.md) instead — it keeps the shelf selected and numbers each scan's position |

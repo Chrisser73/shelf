@@ -463,6 +463,11 @@ PY
   then deletes takes its write lock only at the DELETE, and anything committed
   in that window is acted on blind. `db.execute("BEGIN IMMEDIATE")` must be
   the **first** statement in the `with get_db()` block, above the guard query.
+- **"Already holds the lock" is a claim to grep, not to trust.** Issue #125's
+  design said `manual_add` "already holds the lock across its guard"; the
+  route had no `BEGIN IMMEDIATE` at all, and adding a promotion write there
+  would have created exactly this shape. `grep -n "BEGIN IMMEDIATE"` the file
+  before filing a site as compliant (`6bd583a`, 2026-09-16).
 - **Why:** `_run_migrations` samples `applied` once before its loop. Two
   overlapping runners both saw the same pending set; the one that lost the
   `BEGIN IMMEDIATE` race then tolerated the winner's duplicate column and
@@ -1256,6 +1261,21 @@ python -c "from app.services.openlibrary import USER_AGENT as U; assert 'http' i
     `assert body.inner_text() != ""`. No waiter, however broken, reddens it. If
     a mutation check comes back green, read the assertion before you trust the
     code — it may not be asserting anything.
+
+  Two more, both from issue #125 plan 2 (2026-09-16), where one boolean became
+  a three-state partition:
+  - **Seed every state, or the old arithmetic still adds up.** The series page
+    printed `items − owned` as "wishlisted". With only an owned and a
+    wishlisted row seeded, that subtraction equals the true wishlist count, so
+    the pin passed against the reverted template. It went red only once a
+    *neither* row joined the series (`377ae3e`). When a derivation is replaced
+    by a direct count, seed the state the derivation miscounts.
+  - **A later key can overwrite the mutation.** The edit route's restored
+    `wishlisted = (owned == 0)` derivation ran *before* the `wishlisted` key in
+    the same loop, so every planned pin (all of which posted `wishlisted`)
+    stayed green. The pin that reddens it posts `owned` alone (`85fec05`).
+    When a mutation restores a derived value, ask whether anything later in
+    the request writes the same field.
 
 - **Evidence:** `ce1003c`, `8ba5853`, `10caf32` (2026-08-21, issue #27). The
   queue's requeue-filter and head-of-line pins were mutation-checked the same
@@ -4310,6 +4330,84 @@ python -m pytest tests/test_lists_migration.py -q -k "predates or create_and_see
 
 - **Status:** documented. Not a lint candidate — whether a fixture is "pre-N"
   is a judgment about intent, not a grep.
+
+
+## G99 — A docs task cannot know the version; never write one into a doc
+
+- **Rule:** a plan's docs task writes the *content* of an upgrade note but not
+  its version number. Leave the heading's version as `X.Y.Z` (or omit the
+  heading and let `/release` add it), and let the release fill it in. Anywhere
+  a doc must name the version it ships in, that text is the release's to write.
+- **Why:** the docs task runs inside `/run-plan`, and `/release` step 2 chooses
+  the version *later* — so any number the docs task writes is a guess about a
+  decision that has not been made. Issue #125's docs task wrote
+  `### After upgrading to 0.42.0` because the design plan's `## Sequencing`
+  said the recommendation was one minor release carrying both halves. The
+  second half slipped, the same section's fallback ("ship this as a patch")
+  applied instead, and the release went out as **0.41.1** — leaving a public
+  upgrade note pointing at a version that does not exist. Caught at step 4b of
+  the release that shipped it, which is the last place it could have been
+  caught: after the tag it is a published doc.
+- **How it shows up:** `grep -rn '<next-version>' docs/` at release time finds
+  a heading naming a version the changelog has never heard of. The docs read
+  fine in isolation — nothing in the plan set is wrong — which is why only the
+  release notices.
+- **Status:** documented. A lint is possible but weak — it would have to know
+  the unreleased version to know which mentions are stale. The cheap guard is
+  step 4b's existing sweep: grep the docs for any version string newer than the
+  changelog's top released section.
+
+
+## G100 — When an add path has a duplicate guard before the provider call *and* one at the insert
+
+- **Rule:** apply any existing-row transition (promotion, merge, status
+  change) at **every** guard that can return that row — and start with the
+  earliest. The pre-provider identity guard is the normal existing-row path;
+  a guard beside the insert usually sees only a row that a rival inserted
+  while the provider call was in flight.
+- **Why:** the guard beside the insert looks like the place to edit — it is
+  already under the write lock and already answers the duplicate card — so a
+  change made only there reads as complete and passes a race-shaped test. But
+  a row that existed before the request never reaches it. Issue #125's plan
+  put the Add-mode promotion only at `_scan_upc`'s two media-keyed save
+  guards; the barcode-only guard above the UPC lookup returns `duplicate`
+  first, so an already-wishlisted DVD or game would never have been promoted.
+  Caught by the plan review (codex-R2), fixed in `7150cc5` (2026-09-16).
+- **Verify:** the tests seed the row *before* the request and forbid the
+  provider call, so they only pass if the early guard does the transition:
+
+```bash
+python -m pytest tests/test_scan_upc_enrichment.py -k "PromotesTheWishlist" -q
+```
+
+  When adding a guard-side behaviour elsewhere, read the route from input
+  normalisation through every `duplicate` return, and test a pre-seeded row
+  with the providers mocked to fail if called.
+- **Status:** documented. Not a lint candidate — which guards are related is
+  route-specific.
+
+## G101 — When a CSV export must round-trip two independent state flags
+
+- **Rule:** export both flags, parse both on import with "absent" as its own
+  value (G87), and state the rule for files written before the second column
+  existed. A column that is written but not read on import — or read and then
+  overridden by a hard-coded default — does not make a round trip.
+- **Why:** once two booleans allow three states, one of them cannot rebuild
+  the other. Shelf 0.41.1 exported `wishlisted` but no `owned`, and the
+  generic importer hard-coded `owned = True`; a wishlisted row re-imported
+  as owned and a neither row as owned too. The fix needed three parts: an
+  `owned` export column, a legacy rule (no `owned` column + `wishlisted=1`
+  means not owned), and update mode applying each flag only when its column
+  is present, so a metadata-only CSV cannot reset state (`f25b42b`,
+  2026-09-16; plan review codex-R1).
+- **Verify:**
+
+```bash
+python -m pytest tests/test_csv_roundtrip.py -k OwnershipStates -q
+python -m pytest tests/test_reading_imports.py -k "legacy_export or without_state_columns" -q
+```
+
+- **Status:** documented. A contract test, not a lint.
 
 
 ## Graveyard

@@ -47,9 +47,16 @@ its home.
   dates. Viewers can set this too; it's the one thing they can change. It
   appears on books, kids' books, audiobooks, ebooks and comics — discs and
   games don't carry one.
-- **Location** and **owned / wishlist** flag. Locations can be nested, and an
-  item shows the full path — see [Locations](locations.md). Every location
-  shown here is a link to Browse filtered to that location.
+- **Location**. Locations can be nested, and an item shows the full path —
+  see [Locations](locations.md). Every location shown here is a link to
+  Browse filtered to that location.
+- **I own this item** and **On my wishlist** — two separate checkboxes. An
+  item is owned, on your wishlist, or neither; it can't be both, so the
+  wishlist box is greyed out while *I own this item* is ticked, and ticking
+  it clears the wishlist box. Untick both for a book you read but don't own
+  (a library copy, a borrowed one): it stays in your catalogue with its
+  reading status and dates, and it is left out of the Owned and Wishlist
+  filters, Store Mode and the valuation.
 - **Copies** — the physical objects you own, as opposed to the catalogue entry
   describing them. An item with more than one copy shows a **Copies** list
   instead of the single Location line: one row per copy with its location, its

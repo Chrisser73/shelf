@@ -35,6 +35,7 @@ from app.services import igdb, scan_outcome, title_lookup, tmdb, upcitemdb
 from app.services import upc as upc_svc
 from app.services import isbn as isbn_svc
 from app.services.item_write import ItemValueError, insert_item, update_item_fields
+from app.services import item_write  # promote_wishlisted (scan) — call through the module (patchable)
 
 logger = logging.getLogger(__name__)
 
@@ -71,15 +72,12 @@ def filter_counts(db, values: dict, total: int) -> dict:
     type_total = sum(type_counts.values())
 
     own_where, own_params = _count_where("owned")
-    _own_join = " AND" if own_where else " WHERE"
-    owned_count = db.execute(
-        f"SELECT COUNT(*) as c FROM items i {own_where}{_own_join} i.owned = 1",
+    own_row = db.execute(
+        f"SELECT COALESCE(SUM(i.owned = 1), 0) AS o, COALESCE(SUM({lists.WISHLISTED_SQL}), 0) AS w, "
+        f"COALESCE(SUM({lists.NEITHER_SQL}), 0) AS n FROM items i {own_where}",
         own_params,
-    ).fetchone()["c"]
-    wishlist_count = db.execute(
-        f"SELECT COUNT(*) as c FROM items i {own_where}{_own_join} {lists.WISHLISTED_SQL}",
-        own_params,
-    ).fetchone()["c"]
+    ).fetchone()
+    owned_count, wishlist_count, neither_count = own_row["o"], own_row["w"], own_row["n"]
 
     loc_where, loc_params = _count_where("location_filter")
     _loc_join = " AND" if loc_where else " WHERE"
@@ -117,6 +115,7 @@ def filter_counts(db, values: dict, total: int) -> dict:
         "type_total": type_total,
         "owned_count": owned_count,
         "wishlist_count": wishlist_count,
+        "neither_count": neither_count,
         "location_counts": location_counts,
         "no_location_count": no_location_count,
         "reading_status_counts": reading_status_counts,
@@ -453,30 +452,31 @@ async def _scan_upc(request: Request, templates, upc_code: str, media_type: str,
 
     # --- Duplicate check, part 1 of 2: the barcode alone, above the network.
     #
-    # Keyed on `upc` with **no media_type term**, deliberately. One physical
-    # barcode is one product, so a barcode already on the shelf under any type
-    # short-circuits here and a re-scan costs no outbound call at all. That is
-    # also what stops a quota-exhausted or offline lookup from telling the user
-    # a disc they own is "Not found — add manually below": this dedupe check
-    # runs before `upcitemdb.lookup` is ever called, so neither `rate_limited`
-    # nor `transport_failed` (G47) can reach a row already on the shelf.
+    # Keyed on `upc` with **no media_type term**: a barcode already on the
+    # shelf short-circuits here at no outbound cost, so neither `rate_limited`
+    # nor `transport_failed` (G47) can reach a row already on the shelf. Part
+    # 2 (media_type-keyed) runs at the save, once the effective type is known
+    # — deduping on the hint up here would match the wrong row. Manual add
+    # keeps its own media_type-keyed check (same UPC, two types is its contract).
     #
-    # Part 2 — the media_type-keyed check the insert needs — runs at the save,
-    # once the effective type is known. Deduping on the hint up here and then
-    # saving under a detected type would match the wrong row.
-    #
-    # `/api/items/manual` keeps its own media_type-keyed `_find_duplicate_item`
-    # and is unaffected: "the same UPC under two types" is a manual-add
-    # contract (tests/test_upc_manual_add.py), not a scan one.
+    # This is the primary promotion site (#125, triage codex-R2) — most
+    # existing UPCs are caught here, not at the race guards below — so the
+    # write lock and the promote have to live here too (G18): BEGIN IMMEDIATE
+    # first, the promote inside the block, `_log_scan` after it (G3).
+    promoted = False
     with get_db() as db:
+        db.execute("BEGIN IMMEDIATE")
         existing = db.execute(
             "SELECT id, title, media_type FROM items WHERE upc = ?", (upc_key,)
         ).fetchone()
+        if existing and mode != "wishlist":
+            promoted = item_write.promote_wishlisted(db, existing["id"])
     if existing:
-        _log_scan(upc_norm, existing["media_type"], "duplicate", existing["id"], mode)
+        status = "promoted" if promoted else "duplicate"
+        _log_scan(upc_norm, existing["media_type"], status, existing["id"], mode)
         return templates.TemplateResponse(
             request, "fragments/scan_result.html",
-            {"status": "duplicate", "isbn": upc_norm, "title": existing["title"], "item_id": existing["id"]},
+            {"status": status, "isbn": upc_norm, "title": existing["title"], "item_id": existing["id"]},
         )
 
     # --- One UPC Item DB lookup, above the game/film fork.
@@ -662,6 +662,7 @@ async def _scan_upc(request: Request, templates, upc_code: str, media_type: str,
                 existing = _find_upc_row(db, upc_key, media_type)
                 if existing is None:
                     raise
+        promoted = bool(existing) and mode != "wishlist" and item_write.promote_wishlisted(db, existing["id"])
 
     # _log_scan opens its own connection, so it must run outside the write
     # transaction above or it blocks on the lock that block still holds.
@@ -672,10 +673,11 @@ async def _scan_upc(request: Request, templates, upc_code: str, media_type: str,
             {"status": "error", "isbn": upc_norm, "message": value_error},
         )
     if existing:
-        _log_scan(upc_norm, media_type, "duplicate", existing["id"], mode)
+        status = "promoted" if promoted else "duplicate"
+        _log_scan(upc_norm, media_type, status, existing["id"], mode)
         return templates.TemplateResponse(
             request, "fragments/scan_result.html",
-            {"status": "duplicate", "isbn": upc_norm, "title": existing["title"],
+            {"status": status, "isbn": upc_norm, "title": existing["title"],
              "item_id": existing["id"]},
         )
 
@@ -838,6 +840,7 @@ async def _scan_upc_game(request: Request, templates, upc_norm: str, product: di
                 existing = _find_upc_row(db, upc_key, "video_game")
                 if existing is None:
                     raise
+        promoted = bool(existing) and mode != "wishlist" and item_write.promote_wishlisted(db, existing["id"])
 
     # Outside the write transaction — _log_scan opens its own connection.
     if value_error:
@@ -847,10 +850,11 @@ async def _scan_upc_game(request: Request, templates, upc_norm: str, product: di
             {"status": "error", "isbn": upc_norm, "message": value_error},
         )
     if existing:
-        _log_scan(upc_norm, "video_game", "duplicate", existing["id"], mode)
+        status = "promoted" if promoted else "duplicate"
+        _log_scan(upc_norm, "video_game", status, existing["id"], mode)
         return templates.TemplateResponse(
             request, "fragments/scan_result.html",
-            {"status": "duplicate", "isbn": upc_norm, "title": existing["title"],
+            {"status": status, "isbn": upc_norm, "title": existing["title"],
              "item_id": existing["id"]},
         )
 

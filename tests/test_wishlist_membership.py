@@ -1,20 +1,19 @@
-"""Issue #125 T5: after every writer, on the wishlist iff owned = 0.
+"""Issue #125: wishlist membership is its own state, not derived from `owned`.
 
 The write funnel (`app/services/item_write.py`) accepts a virtual
 `wishlisted: bool` field and writes `list_items` membership through
-`app/services/lists.py`. T5 threads `wishlisted` through every scan,
-manual-add, UPC, store, intake, periodicals and music call site that sets
-`owned = 0`. Each test here drives one such writer end to end and then
-calls `_assert_wishlist_invariant(db)` — the fixture-sanity check from
-`tests/conftest.py` that fails loudly on any `owned = 0` row missing from
-the wishlist, or any wishlisted row that is `owned = 1`.
+`app/services/lists.py`. Each test here drives one such writer end to end
+and asserts the membership it should leave — `owned = 1` is never a member
+(`_assert_ownership_partition(db)`, the fixture-sanity check from
+`tests/conftest.py`), but `owned = 0` with no membership is a legal
+"neither" state and no test here should expect the reverse.
 
 These are the sites the plan's recon found with **no** wishlist-mode pin
-at all before this task: the film UPC branch, the store's unreadable and
-bare-fallback rows, periodicals confirm, and music add. Everywhere else
-that already had a wishlist-mode test gained one line — see
-test_scan_modes.py, test_upc_manual_add.py, test_scan_upc_enrichment.py,
-test_store.py and test_intake.py.
+at all before wishlist membership existed as its own concept: the film UPC
+branch, the store's unreadable and bare-fallback rows, periodicals confirm,
+and music add. Everywhere else that already had a wishlist-mode test gained
+one line — see test_scan_modes.py, test_upc_manual_add.py,
+test_scan_upc_enrichment.py, test_store.py and test_intake.py.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -30,7 +29,7 @@ from app.services import (
     tmdb,
     upcitemdb,
 )
-from tests.conftest import _assert_wishlist_invariant, _insert_item
+from tests.conftest import _assert_ownership_partition, _insert_item
 from tests.test_komga_records import _candidate as _komga_candidate
 from tests.test_reading_imports import GOODREADS_HEADER, _gr_row, _post_csv
 from tests.test_romm_records import _candidate as _romm_candidate
@@ -117,7 +116,7 @@ class TestFilmUpcWishlistMode:
         assert resp.status_code == 200
         row = db.execute("SELECT * FROM items WHERE upc IS NOT NULL").fetchone()
         assert row["owned"] == 0
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
         assert "wishlisted" in resp.text.lower()
 
 
@@ -137,7 +136,7 @@ class TestStoreQueueWishlistMembership:
 
         row = db.execute("SELECT owned FROM items WHERE id = ?", (result["item_id"],)).fetchone()
         assert row["owned"] == 0
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
     def test_bare_fallback_row_is_on_the_wishlist(self, admin_client, db):
         with patch("app.routers.items_common._lookup_metadata",
@@ -148,7 +147,7 @@ class TestStoreQueueWishlistMembership:
 
         row = db.execute("SELECT owned FROM items WHERE id = ?", (result["item_id"],)).fetchone()
         assert row["owned"] == 0
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
 
 class TestPeriodicalsConfirmWishlistMode:
@@ -170,7 +169,7 @@ class TestPeriodicalsConfirmWishlistMode:
         ).fetchone()
         assert row is not None
         assert row["owned"] == 0
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
 
 class TestMusicAddWishlistMode:
@@ -198,7 +197,7 @@ class TestMusicAddWishlistMode:
         ).fetchone()
         assert row is not None
         assert row["owned"] == 0
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
 
 class TestHardcoverWishlistMembership:
@@ -216,7 +215,7 @@ class TestHardcoverWishlistMembership:
         row = db.execute("SELECT owned FROM items WHERE id = ?", (body["item_id"],)).fetchone()
         assert row["owned"] == 0
         assert lists.is_member(db, lists.WISHLIST, body["item_id"])
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
     def test_sync_want_to_read_book_is_a_member(self, db):
         result, _cover_job = hc_router._import_single_book_metadata(
@@ -230,7 +229,7 @@ class TestHardcoverWishlistMembership:
         ).fetchone()
         assert item["owned"] == 0
         assert lists.is_member(db, lists.WISHLIST, item["id"])
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
     def test_sync_read_book_is_not_a_member(self, db):
         result, _cover_job = hc_router._import_single_book_metadata(
@@ -244,7 +243,7 @@ class TestHardcoverWishlistMembership:
         ).fetchone()
         assert item["owned"] == 1
         assert not lists.is_member(db, lists.WISHLIST, item["id"])
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
 
 class TestCsvImportWishlistMembership:
@@ -262,9 +261,11 @@ class TestCsvImportWishlistMembership:
         ).fetchone()
         assert item["owned"] == 0
         assert lists.is_member(db, lists.WISHLIST, item["id"])
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
-    def test_tracker_update_to_unowned_makes_it_a_member(self, admin_client, db):
+    def test_tracker_update_to_unowned_is_neither(self, admin_client, db):
+        """With the to-read option off, a zero-owned tracker row is neither
+        (#125) — un-owning no longer implies wishing."""
         item_id = _insert_item(
             db, title="Tracker To Unowned", isbn="9780553283686", media_type="book", owned=1
         )
@@ -278,12 +279,13 @@ class TestCsvImportWishlistMembership:
 
         row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
         assert row["owned"] == 0
-        assert lists.is_member(db, lists.WISHLIST, item_id)
-        _assert_wishlist_invariant(db)
+        assert not lists.is_member(db, lists.WISHLIST, item_id)
+        _assert_ownership_partition(db)
 
     def test_tracker_update_to_owned_removes_membership(self, admin_client, db):
         item_id = _insert_item(
-            db, title="Tracker To Owned", isbn="9780553283686", media_type="book", owned=0
+            db, title="Tracker To Owned", isbn="9780553283686", media_type="book", owned=0,
+            wishlisted=True,
         )
         db.execute("COMMIT")
 
@@ -296,41 +298,124 @@ class TestCsvImportWishlistMembership:
         row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
         assert row["owned"] == 1
         assert not lists.is_member(db, lists.WISHLIST, item_id)
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
 
 class TestEditFormWishlistMembership:
-    """items.py's edit form — the owned checkbox (T6)."""
+    """items.py's edit form — two independent checkboxes, owned and wishlisted
+    (#125 plan 2). The only coupling left is that owned = 1 is never a member.
+    """
 
-    def test_owned_one_to_zero_is_a_member(self, editor_client, db):
-        item_id = _insert_item(db, title="Edit To Unowned", isbn="9780000000026", owned=1)
+    def _post(self, client, item_id, data):
+        resp = client.post(f"/api/items/{item_id}", data=data, follow_redirects=False)
+        return resp
+
+    def _state(self, db, item_id):
+        row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
+        return row["owned"], lists.is_member(db, lists.WISHLIST, item_id)
+
+    def test_owned_one_to_zero_with_wishlist_unchecked_is_neither(self, editor_client, db):
+        item_id = _insert_item(db, title="Edit To Neither", isbn="9780000000026", owned=1)
         db.commit()
 
-        resp = editor_client.post(f"/api/items/{item_id}", data={"owned": "0"},
-                                  follow_redirects=False)
+        resp = self._post(editor_client, item_id, {"owned": "0", "wishlisted": "0"})
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/item/{item_id}"
+
+        assert self._state(db, item_id) == (0, False)
+        _assert_ownership_partition(db)
+
+    def test_owned_zero_alone_leaves_membership_alone(self, editor_client, db):
+        """An absent `wishlisted` key means "leave membership alone" (G87):
+        un-owning no longer implies wishing."""
+        item_id = _insert_item(db, title="Unown Only", isbn="9780000000026", owned=1)
+        db.commit()
+
+        resp = self._post(editor_client, item_id, {"owned": "0"})
         assert resp.status_code == 303
 
-        row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
-        assert row["owned"] == 0
-        assert lists.is_member(db, lists.WISHLIST, item_id)
-        _assert_wishlist_invariant(db)
+        assert self._state(db, item_id) == (0, False)
+        _assert_ownership_partition(db)
+
+    def test_owned_zero_with_wishlist_checked_is_a_member(self, editor_client, db):
+        item_id = _insert_item(db, title="Edit To Wishlist", isbn="9780000000026", owned=1)
+        db.commit()
+
+        resp = self._post(editor_client, item_id, {"owned": "0", "wishlisted": "1"})
+        assert resp.status_code == 303
+
+        assert self._state(db, item_id) == (0, True)
+        _assert_ownership_partition(db)
+
+    def test_unchecking_the_wishlist_removes_membership_and_keeps_unowned(self, editor_client, db):
+        item_id = _insert_item(db, title="Edit Off Wishlist", isbn="9780000000026", owned=0,
+                               wishlisted=True)
+        db.commit()
+
+        resp = self._post(editor_client, item_id, {"owned": "0", "wishlisted": "0"})
+        assert resp.status_code == 303
+
+        assert self._state(db, item_id) == (0, False)
+        _assert_ownership_partition(db)
+
+    def test_wishlisted_alone_no_longer_flips_owned(self, editor_client, db):
+        item_id = _insert_item(db, title="Neither To Wishlist", isbn="9780000000026", owned=0)
+        db.commit()
+
+        resp = self._post(editor_client, item_id, {"wishlisted": "1"})
+        assert resp.status_code == 303
+
+        assert self._state(db, item_id) == (0, True)
+        _assert_ownership_partition(db)
+
+    def test_owned_and_wishlisted_together_is_refused(self, editor_client, db):
+        item_id = _insert_item(db, title="Both Refused", isbn="9780000000026", owned=0,
+                               wishlisted=True)
+        db.commit()
+
+        resp = self._post(editor_client, item_id,
+                          {"owned": "1", "wishlisted": "1", "title": "Changed"})
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/item/{item_id}/edit?error=invalid_wishlisted"
+
+        assert self._state(db, item_id) == (0, True)
+        title = db.execute("SELECT title FROM items WHERE id = ?", (item_id,)).fetchone()["title"]
+        assert title == "Both Refused"
+        banner = editor_client.get(resp.headers["location"]).text
+        assert 'data-testid="edit-error"' in banner
+        assert "can't also be on your wishlist" in banner
+        _assert_ownership_partition(db)
 
     def test_owned_zero_to_one_removes_membership(self, editor_client, db):
-        item_id = _insert_item(db, title="Edit To Owned", isbn="9780000000026", owned=0)
+        item_id = _insert_item(db, title="Edit To Owned", isbn="9780000000026", owned=0,
+                                wishlisted=True)
         db.commit()
 
-        resp = editor_client.post(f"/api/items/{item_id}", data={"owned": "1"},
-                                  follow_redirects=False)
+        # The browser posts wishlisted=0 here: the box is disabled once owned
+        # is checked, so only the hidden input submits (G90).
+        resp = self._post(editor_client, item_id, {"owned": "1", "wishlisted": "0"})
         assert resp.status_code == 303
 
-        row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
-        assert row["owned"] == 1
-        assert not lists.is_member(db, lists.WISHLIST, item_id)
-        _assert_wishlist_invariant(db)
+        assert self._state(db, item_id) == (1, False)
+        _assert_ownership_partition(db)
+
+    def test_owned_one_alone_removes_membership(self, editor_client, db):
+        item_id = _insert_item(db, title="Edit To Owned Alone", isbn="9780000000026", owned=0,
+                                wishlisted=True)
+        db.commit()
+
+        resp = self._post(editor_client, item_id, {"owned": "1"})
+        assert resp.status_code == 303
+
+        assert self._state(db, item_id) == (1, False)
+        _assert_ownership_partition(db)
 
 
 class TestBulkEditWishlistMembership:
-    """items.py's /api/items/bulk-update — the owned field (T6)."""
+    """items.py's /api/items/bulk-update — the owned and wishlisted fields
+    (T3). `wishlisted` is a submitted key passed straight to the funnel, not
+    derived from `owned` — see `app/services/item_write.py::_pop_wishlisted`
+    and `_refuse_owned_wishlist`."""
 
     def _three_owned_items(self, db):
         ids = [
@@ -340,7 +425,10 @@ class TestBulkEditWishlistMembership:
         db.commit()
         return ids
 
-    def test_bulk_owned_zero_makes_all_members(self, admin_client, db):
+    def test_bulk_owned_zero_leaves_them_neither(self, admin_client, db):
+        """Bulk `{"owned": 0}` alone writes no membership — a neither row,
+        not an implicit wishlist add (issue #125 replaces the old
+        `wishlisted = (owned == 0)` derivation)."""
         ids = self._three_owned_items(db)
 
         resp = admin_client.post(
@@ -353,12 +441,13 @@ class TestBulkEditWishlistMembership:
         for item_id in ids:
             row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
             assert row["owned"] == 0
-            assert lists.is_member(db, lists.WISHLIST, item_id)
-        _assert_wishlist_invariant(db)
+            assert not lists.is_member(db, lists.WISHLIST, item_id)
+        _assert_ownership_partition(db)
 
     def test_bulk_owned_one_removes_all_membership(self, admin_client, db):
         ids = [
-            _insert_item(db, title=f"Bulk Unowned {i}", isbn=f"978000001{i:04d}", owned=0)
+            _insert_item(db, title=f"Bulk Unowned {i}", isbn=f"978000001{i:04d}", owned=0,
+                         wishlisted=True)
             for i in range(3)
         ]
         db.commit()
@@ -374,7 +463,7 @@ class TestBulkEditWishlistMembership:
             row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
             assert row["owned"] == 1
             assert not lists.is_member(db, lists.WISHLIST, item_id)
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
     def test_bulk_invalid_owned_is_still_refused(self, admin_client, db):
         ids = self._three_owned_items(db)
@@ -391,7 +480,95 @@ class TestBulkEditWishlistMembership:
         for item_id in ids:
             row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
             assert row["owned"] == 1
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
+
+    def test_bulk_wishlisted_false_removes_membership(self, admin_client, db):
+        isbns = ["9780000003003", "9780000003010", "9780000003027"]
+        ids = [
+            _insert_item(db, title=f"Bulk Member {i}", isbn=isbn, owned=0, wishlisted=True)
+            for i, isbn in enumerate(isbns)
+        ]
+        db.commit()
+
+        resp = admin_client.post(
+            "/api/items/bulk-update",
+            json={"item_ids": ids, "updates": {"wishlisted": False}},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+        for item_id in ids:
+            row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
+            assert row["owned"] == 0
+            assert not lists.is_member(db, lists.WISHLIST, item_id)
+        _assert_ownership_partition(db)
+
+    def test_bulk_wishlisted_true_over_neither_rows_makes_members(self, admin_client, db):
+        isbns = ["9780000003034", "9780000003041", "9780000003058"]
+        ids = [
+            _insert_item(db, title=f"Bulk Neither {i}", isbn=isbn, owned=0)
+            for i, isbn in enumerate(isbns)
+        ]
+        db.commit()
+
+        resp = admin_client.post(
+            "/api/items/bulk-update",
+            json={"item_ids": ids, "updates": {"wishlisted": True}},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+        for item_id in ids:
+            row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
+            assert row["owned"] == 0
+            assert lists.is_member(db, lists.WISHLIST, item_id)
+        _assert_ownership_partition(db)
+
+    def test_bulk_owned_and_wishlisted_together_is_refused(self, admin_client, db):
+        ids = self._three_owned_items(db)
+
+        resp = admin_client.post(
+            "/api/items/bulk-update",
+            json={"item_ids": ids, "updates": {"owned": 1, "wishlisted": True}},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+
+        for item_id in ids:
+            row = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
+            assert row["owned"] == 1
+            assert not lists.is_member(db, lists.WISHLIST, item_id)
+        _assert_ownership_partition(db)
+
+    def test_bulk_wishlisted_true_over_mixed_selection_refuses_whole(self, admin_client, db):
+        neither_id_1 = _insert_item(db, title="Mixed Neither 1",
+                                     isbn="9780000003096", owned=0)
+        owned_id = _insert_item(db, title="Mixed Owned",
+                                 isbn="9780000003102", owned=1)
+        neither_id_2 = _insert_item(db, title="Mixed Neither 2",
+                                     isbn="9780000003119", owned=0)
+        db.commit()
+        ids = [neither_id_1, owned_id, neither_id_2]
+
+        resp = admin_client.post(
+            "/api/items/bulk-update",
+            json={"item_ids": ids, "updates": {"wishlisted": True}},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+
+        for item_id in ids:
+            assert not lists.is_member(db, lists.WISHLIST, item_id)
+        assert db.execute(
+            "SELECT owned FROM items WHERE id = ?", (owned_id,)
+        ).fetchone()["owned"] == 1
+        for item_id in (neither_id_1, neither_id_2):
+            assert db.execute(
+                "SELECT owned FROM items WHERE id = ?", (item_id,)
+            ).fetchone()["owned"] == 0
+        _assert_ownership_partition(db)
 
 
 class TestServiceBackedInsertsAreNeverMembers:
@@ -408,7 +585,7 @@ class TestServiceBackedInsertsAreNeverMembers:
         ).fetchone()
         assert row["owned"] == 1
         assert not lists.is_member(db, lists.WISHLIST, result["item_id"])
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
     def test_komga_insert_is_not_a_member(self, db):
         result = komga_records.persist_candidate(db, _komga_candidate())
@@ -418,4 +595,4 @@ class TestServiceBackedInsertsAreNeverMembers:
         ).fetchone()
         assert row["owned"] == 1
         assert not lists.is_member(db, lists.WISHLIST, result["item_id"])
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)

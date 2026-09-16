@@ -6,6 +6,73 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-09-16
+
+Until now every item in Shelf was either something you own or something on
+your wishlist. A book you read from the library, or borrowed and gave back,
+had to be one or the other — and a Goodreads import put every book you had
+read but did not own onto your wishlist. This release adds the third state:
+an item can be **neither owned nor wishlisted**, and stays in your catalogue
+with its reading status and dates. It finishes the work 0.41.1 started.
+Requested by [@Easily9992](https://github.com/Easily9992) in
+[#125](https://github.com/dgahagan/shelf/issues/125).
+
+### Added
+
+- **Separate "I own this item" and "On my wishlist" checkboxes on the edit
+  page.** Untick both for a book you read but don't own. The wishlist box is
+  greyed out while *I own this item* is ticked: an owned item is never on the
+  wishlist, and Shelf refuses a save that tries it.
+- **A fourth Owned filter in Browse: *Not owned or wishlisted*.** The four
+  counts (All, Owned, Wishlist, Not owned or wishlisted) now always add up.
+- **Add to or remove from the wishlist in bulk.** Browse's bulk bar has a new
+  **Wishlist** control. Removing an item from the wishlist does not delete it
+  or its reading history. A selection that mixes owned and wishlisted items
+  is refused as a whole when you try to wishlist it, and nothing is changed.
+- **Scanning a wishlisted item in Add mode marks it owned.** The scan card
+  says *Now owned — was on your wishlist*, and the item leaves the wishlist
+  instead of being added a second time. This works for ISBNs and for DVDs and
+  games scanned by UPC. Scanning it in Wishlist mode changes nothing.
+- **A way to clean up a wishlist a Goodreads import filled.** The Import and
+  Export guide has a new section, *Cleaning up a wishlist after a Goodreads
+  import*: filter Browse to Wishlist + Read, select all, and remove them from
+  the wishlist. Deliberately, Shelf does not do this for you — a book you read
+  and now want to buy belongs on the wishlist, so the choice is yours.
+
+### Changed
+
+- **Goodreads and StoryGraph imports no longer put books you don't own on
+  the wishlist.** A book you read or are reading but don't own now imports as
+  neither, keeping its status and dates. Only a *to-read* book you don't own
+  goes on the wishlist, and only with **Import "to read" books as wishlist**
+  on — with it off, that book also arrives as neither. Books you already
+  imported are not changed; see the clean-up section above.
+- **CSV import reads the `wishlisted` column.** An owned row is never put on
+  the wishlist (`owned=1, wishlisted=1` imports as owned, without an error);
+  otherwise the row's own `wishlisted` value decides. A file with no `owned`
+  column is read as an export from an earlier Shelf, where `wishlisted=1`
+  meant not owned. In **Update** mode, a file with no `owned` or `wishlisted`
+  column leaves that part of every matched item as it was. Export → import
+  now round-trips all three states.
+- **The valuation counts only what you own.** **Valuate all**, the
+  collection total, the Stats page's **Est. Value** and the insurance report
+  now leave out wishlist items and items you track without owning. **If your
+  wishlist items had values, your totals and reports will be lower after the
+  upgrade by that amount.** The value-over-time chart keeps its earlier
+  points as they were recorded. **Valuate** on a single item still works
+  whether you own it or not.
+- **The Stats page's Owned tile counts owned items directly**, so an item
+  that is neither is not counted as owned.
+- **Store Mode caches only what you own and what you want.** An item you
+  track but neither own nor want reads **Not in library**, and scanning it
+  queues it like any unknown barcode: on the next sync Shelf adds that
+  existing item to your wishlist instead of creating a new one.
+- **Series → Check completeness counts a neither volume as missing.** Its
+  **Add to wishlist** button puts that existing item on the wishlist rather
+  than adding a second copy. A series card reads, for example,
+  *1 owned · 1 wishlisted* instead of counting every unowned volume as
+  wishlisted.
+
 ## [0.41.1] - 2026-09-16
 
 Shelf has always treated "I don't own this" and "this is on my wishlist" as the
@@ -3433,6 +3500,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.42.0]: https://github.com/dgahagan/shelf/releases/tag/v0.42.0
 [0.41.1]: https://github.com/dgahagan/shelf/releases/tag/v0.41.1
 [0.41.0]: https://github.com/dgahagan/shelf/releases/tag/v0.41.0
 [0.40.1]: https://github.com/dgahagan/shelf/releases/tag/v0.40.1

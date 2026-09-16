@@ -28,7 +28,7 @@ class TestRecordFooter:
 class TestWishlistBadge:
     def test_wishlist_badge_present_when_not_owned(self, viewer_client, db):
         item_id = _insert_item(
-            db, title="Wishlist Book", isbn="9789000020027", owned=0,
+            db, title="Wishlist Book", isbn="9789000020027", owned=0, wishlisted=True,
         )
         db.commit()
 
@@ -222,7 +222,7 @@ class TestSeriesProgress:
         first = _insert_item(db, title="Wish One", isbn="9780900002021",
                              series_name="Wish Saga", series_position=1, owned=1)
         _insert_item(db, title="Wish Two", isbn="9789000020225",
-                     series_name="Wish Saga", series_position=2, owned=0)
+                     series_name="Wish Saga", series_position=2, owned=0, wishlisted=True)
         _insert_item(db, title="Wish Three", isbn="9789000020232",
                      series_name="Wish Saga", series_position=3, owned=1)
         db.commit()

@@ -166,7 +166,7 @@ class TestListId:
 
 class TestAddRemove:
     def test_add_is_idempotent(self, db):
-        item_id = _insert_item(db, owned=0)
+        item_id = _insert_item(db, owned=0, wishlisted=True)
         add(db, WISHLIST, item_id)
         add(db, WISHLIST, item_id)
         count = db.execute(
@@ -182,7 +182,7 @@ class TestAddRemove:
         assert not is_member(db, WISHLIST, item_id)
 
     def test_remove_removes_a_member(self, db):
-        item_id = _insert_item(db, owned=0)
+        item_id = _insert_item(db, owned=0, wishlisted=True)
         add(db, WISHLIST, item_id)
         assert is_member(db, WISHLIST, item_id)
         remove(db, WISHLIST, item_id)
@@ -239,7 +239,7 @@ class TestSetMembership:
 
 class TestWishlistedSql:
     def test_true_for_a_wishlisted_item(self, db):
-        item_id = _insert_item(db, owned=0)
+        item_id = _insert_item(db, owned=0, wishlisted=True)
         add(db, WISHLIST, item_id)
         row = db.execute(
             f"SELECT {WISHLISTED_SQL} AS w FROM items i WHERE i.id = ?",

@@ -1,6 +1,7 @@
 """Tests for scan modes: add, wishlist, lend, return, move, inventory, lookup, quick_rate."""
 
 import re
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,7 +12,7 @@ from app.services import item_copies
 from app.services.item_copies import insert_copy
 from app.services.item_write import insert_item
 from tests.conftest import (
-    _assert_wishlist_invariant, _insert_item, _insert_borrower, _insert_location,
+    _assert_ownership_partition, _insert_item, _insert_borrower, _insert_location,
 )
 
 
@@ -33,6 +34,112 @@ class TestAddMode:
         })
         assert resp.status_code == 200
         assert b"Invalid ISBN" in resp.content
+
+
+class TestAddModePromotesWishlisted:
+    """#125: an Add-mode scan of a wishlisted ISBN is the purchase — the item
+    becomes owned and leaves the wishlist. Owned and neither rows, and any
+    Wishlist-mode scan, still answer `duplicate`."""
+
+    ISBN = "9780441013593"
+
+    def _scan(self, client, mode="add"):
+        with patch("app.routers.items_common._lookup_metadata",
+                   new=AsyncMock(side_effect=AssertionError("no lookup for a known ISBN"))):
+            return client.post("/api/scan", data={
+                "isbn": self.ISBN, "media_type": "book", "mode": mode,
+            })
+
+    def _state(self, db, item_id):
+        from app.services import lists
+
+        owned = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()["owned"]
+        return owned, lists.is_member(db, lists.WISHLIST, item_id)
+
+    def _last_scan(self, db):
+        return db.execute(
+            "SELECT result, mode, item_id FROM scan_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    def test_wishlisted_isbn_is_promoted(self, admin_client, db):
+        item_id = _insert_item(db, title="Wished Dune", isbn=self.ISBN, owned=0, wishlisted=True)
+        db.commit()
+
+        resp = self._scan(admin_client)
+
+        assert resp.status_code == 200
+        assert 'data-scan-status="promoted"' in resp.text
+        assert "Now owned" in resp.text
+        assert self._state(db, item_id) == (1, False)
+        log = self._last_scan(db)
+        assert (log["result"], log["mode"], log["item_id"]) == ("promoted", "add", item_id)
+        assert db.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 1
+        _assert_ownership_partition(db)
+
+    @pytest.mark.parametrize("seed", [dict(owned=1), dict(owned=0)], ids=["owned", "neither"])
+    def test_owned_and_neither_isbns_stay_duplicates(self, admin_client, db, seed):
+        item_id = _insert_item(db, title="Known Dune", isbn=self.ISBN, **seed)
+        db.commit()
+
+        resp = self._scan(admin_client)
+
+        assert 'data-scan-status="duplicate"' in resp.text
+        assert self._state(db, item_id) == (seed["owned"], False)
+        assert self._last_scan(db)["result"] == "duplicate"
+        _assert_ownership_partition(db)
+
+    def test_wishlist_mode_leaves_a_wishlisted_isbn_alone(self, admin_client, db):
+        item_id = _insert_item(db, title="Still Wished", isbn=self.ISBN, owned=0, wishlisted=True)
+        db.commit()
+
+        resp = self._scan(admin_client, mode="wishlist")
+
+        assert 'data-scan-status="duplicate"' in resp.text
+        assert self._state(db, item_id) == (0, True)
+        log = self._last_scan(db)
+        assert (log["result"], log["mode"]) == ("duplicate", "wishlist")
+        _assert_ownership_partition(db)
+
+    def test_the_guard_reads_under_the_write_lock(self, admin_client, db, monkeypatch):
+        """G18 — see `_install_lock_probe` in tests/test_intake.py."""
+        from app.routers import items as items_router
+        from tests.test_intake import _install_lock_probe
+
+        _insert_item(db, title="Probe Dune", isbn=self.ISBN, owned=0, wishlisted=True)
+        db.commit()
+        probe_results = []
+        _install_lock_probe(
+            monkeypatch, items_router,
+            lambda sql: "FROM items WHERE isbn = ? AND media_type = ?" in sql,
+            probe_results,
+        )
+
+        resp = self._scan(admin_client)
+
+        assert 'data-scan-status="promoted"' in resp.text
+        assert probe_results, "the guard query never ran — the probe did not fire"
+        assert probe_results[0].startswith("locked"), (
+            f"a rival writer could take the write lock while scan_isbn's duplicate "
+            f"guard was being read (got {probe_results[0]!r}) — BEGIN IMMEDIATE is "
+            "missing or below the guard SELECT (G18)"
+        )
+
+    def test_the_scan_is_logged_after_the_lock_is_released(self, admin_client, db):
+        """G3 — `_log_scan` opens its own connection; called under the
+        request's write lock it waits out SQLite's 5s busy timeout."""
+        _insert_item(db, title="Timed Dune", isbn=self.ISBN, owned=0, wishlisted=True)
+        db.commit()
+
+        start = time.monotonic()
+        resp = self._scan(admin_client)
+        elapsed = time.monotonic() - start
+
+        assert resp.status_code == 200
+        assert self._last_scan(db)["result"] == "promoted"
+        assert elapsed < 2.0, (
+            f"the promoted scan took {elapsed:.2f}s — the scan log is being "
+            "written while the request still holds the write lock (G3)"
+        )
 
 
 class TestWishlistMode:
@@ -793,7 +900,7 @@ class TestScanCoverQueue:
         job = cover_queue._get_queue().get_nowait()
         row = db.execute("SELECT owned FROM items WHERE id = ?", (job.item_id,)).fetchone()
         assert row["owned"] == 0
-        _assert_wishlist_invariant(db)
+        _assert_ownership_partition(db)
 
 
 class TestCoverStatusEndpoint:

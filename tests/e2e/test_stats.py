@@ -53,6 +53,7 @@ def test_stats_dashboard_reflects_real_collection_and_links_back_to_item(
         media_type="dvd",
         isbn=None,
         owned=0,
+        wishlisted=True,
         location_id=location_id,
         estimated_value=15.0,
     )
@@ -96,7 +97,8 @@ def test_stats_dashboard_reflects_real_collection_and_links_back_to_item(
         expect(page.get_by_text("Wishlist", exact=True).locator("..")).to_contain_text("1")
         expect(page.get_by_text(f"Read in {current_year}", exact=True).locator("..")).to_contain_text("1")
         expect(page.get_by_text("Without ISBN", exact=True).locator("..")).to_contain_text("2")
-        expect(page.get_by_text("Est. Value", exact=True).locator("..")).to_contain_text("55")
+        # The wishlist disc's 15 no longer counts — the valuation is owned-only (#125).
+        expect(page.get_by_text("Est. Value", exact=True).locator("..")).to_contain_text("40")
 
         # All four promised dashboard charts are rendered server-side as SVG.
         for test_id in ("chart-read", "chart-growth", "chart-authors", "chart-valuation"):

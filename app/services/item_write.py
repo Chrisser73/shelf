@@ -469,3 +469,21 @@ def update_items_fields(db, item_ids: Iterable[int],
         for item_id in existing_ids:
             item_copies.sync_primary_location(db, item_id, values["location_id"])
     _apply_membership(db, existing_ids, wishlisted, fields)
+
+
+def promote_wishlisted(db, item_id: int) -> bool:
+    """Mark a wishlisted item owned — Add mode scanning a book you bought.
+
+    Returns True when the item was on the wishlist and is now owned (the
+    `owned = 1` write removes the membership, see `_apply_membership`), and
+    False, writing nothing, for an owned or a neither item (#125).
+
+    Runs on the caller's connection and transaction, and callers hold
+    `BEGIN IMMEDIATE` across the duplicate read that found `item_id` (G18).
+    It never logs: a log handler opening its own connection would wait on
+    that same lock (G3).
+    """
+    if not lists.is_member(db, lists.WISHLIST, item_id):
+        return False
+    update_item_fields(db, item_id, {"owned": 1})
+    return True

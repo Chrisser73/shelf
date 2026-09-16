@@ -3,9 +3,9 @@
 The discriminating row is the whole point of this file: an item with
 `owned = 0` and **no** wishlist membership. Under the old readers it was
 indistinguishable from a wishlisted item; under the new ones every reader
-must exclude it. It is seeded with raw SQL on purpose — `tests/conftest.py`'s
-`_insert_item` now seeds membership beside `owned = 0`, which is exactly what
-this file must bypass.
+must exclude it. It is seeded with raw SQL on purpose, so it stays bare even
+after `tests/conftest.py`'s `_insert_item` grows a `wishlisted=True` keyword
+for the member rows in this file to opt into explicitly.
 
 Plan 1 keeps the invariant *on the wishlist ⇔ `owned = 0`*, so this row
 cannot arise through any app writer yet. Plan 2 makes it a real, reachable
@@ -29,7 +29,7 @@ def rows(db):
     sees an empty library and every assertion below passes vacuously.
     """
     member = _insert_item(db, title="Member Wishlist Book", isbn="9780000000019",
-                          owned=0)
+                          owned=0, wishlisted=True)
     bare = db.execute(
         "INSERT INTO items (title, media_type, owned, source) "
         "VALUES ('Bare Unowned Book', 'book', 0, 'test') RETURNING id"
@@ -72,12 +72,34 @@ class TestBrowseAndSearch:
         assert "Owned Book" in html
         assert "Member Wishlist Book" not in html
 
+    def test_api_search_owned_none_returns_exactly_the_bare_row(self, admin_client, rows):
+        html = admin_client.get("/api/search?owned=none").text
+        assert "Bare Unowned Book" in html
+        assert "Member Wishlist Book" not in html
+        assert "Owned Book" not in html
+
+    def test_browse_owned_none_returns_exactly_the_bare_row(self, admin_client, rows):
+        html = admin_client.get("/browse?owned=none").text
+        assert "Bare Unowned Book" in html
+        assert "Member Wishlist Book" not in html
+        assert "Owned Book" not in html
+
 
 class TestCounts:
     def test_browse_wishlist_count_excludes_the_bare_row(self, admin_client, rows):
         html = admin_client.get("/browse").text
         # The filter dropdown carries the cross-filter counts.
         assert "Wishlist (1)" in html, html[html.find("owned-filter") - 200:][:600]
+
+    def test_browse_three_owned_counts_sum_to_the_unfiltered_total(self, admin_client, rows):
+        """Owned, Wishlist and Not owned or wishlisted are 1/1/1 here — the
+        member, the owned row and the bare row each land in exactly one —
+        and must sum to the unfiltered total of 3."""
+        html = admin_client.get("/browse").text
+        chunk = html[html.find("owned-filter") - 200:][:1200]
+        assert "Owned (1)" in chunk, chunk
+        assert "Wishlist (1)" in chunk, chunk
+        assert "Not owned or wishlisted (1)" in chunk, chunk
 
     def test_home_wishlist_count_excludes_the_bare_row(self, db, rows):
         from app.services.home_dashboard import dashboard_summary
@@ -101,13 +123,13 @@ class TestCounts:
         statement about the wishlist."""
         assert _stat(admin_client.get("/stats").text, "Wishlist") == 1
 
-    def test_stats_owned_figure_is_still_the_complement(self, admin_client, rows):
-        """`stats_owned = total - stats_wishlist` (pages.py) is deliberate and
-        the plan keeps it. Under plan 1's invariant it equals possession, so
-        this pins the arithmetic rather than asserting it is *right*: the bare
-        row is owned = 0 yet counts as owned here. Plan 2, which makes that row
-        reachable, has to decide what this figure means."""
-        assert _stat(admin_client.get("/stats").text, "Owned") == 2
+    def test_stats_owned_figure_counts_owned_directly(self, admin_client, rows):
+        """Plan 2 (#125) makes the bare row a real, reachable "neither" state,
+        so `stats_owned = total - stats_wishlist` is no longer correct — that
+        arithmetic would count the bare row as owned. `pages.py` now runs its
+        own `COUNT(*) WHERE owned = 1`, so the figure is 1 (only "Owned
+        Book"), not 2."""
+        assert _stat(admin_client.get("/stats").text, "Owned") == 1
 
 
 class TestShareLink:
@@ -207,7 +229,8 @@ class TestHomeRecent:
     _RIBBON = 'text-black shadow">Wishlist</div>'
 
     def test_recent_grid_badge_present_for_member(self, admin_client, db):
-        _insert_item(db, title="Home Wishlist Item", isbn="9780000000051", owned=0)
+        _insert_item(db, title="Home Wishlist Item", isbn="9780000000051", owned=0,
+                     wishlisted=True)
         db.commit()
 
         html = admin_client.get("/").text
@@ -237,7 +260,7 @@ class TestSeriesPage:
 
     def test_series_badge_present_for_member(self, admin_client, db):
         _insert_item(db, title="Series Wishlist Item", isbn="9780000000052",
-                     owned=0, series_name="Solo Saga")
+                     owned=0, wishlisted=True, series_name="Solo Saga")
         db.commit()
 
         html = admin_client.get("/series").text
@@ -255,15 +278,38 @@ class TestSeriesPage:
         assert "Solo Saga Two" in html
         assert self._RIBBON not in html
 
+    def test_series_page_counts_owned_and_wishlisted_on_their_own(self, admin_client, db):
+        """T4: `series.py` computes `wishlist_count` beside `owned_count`
+        rather than deriving it as `items - owned_count`. A series with one
+        owned volume, one wishlisted volume and one bare "neither" volume
+        must print "1 owned" and "1 wishlisted" — the bare row (#125's third
+        state) is what tells the derivation apart from the direct count:
+        `items - owned_count` would say "2 wishlisted" here, counting the
+        bare row as wishlisted."""
+        _insert_item(db, title="Mixed Saga Owned", isbn="9780000000060",
+                     owned=1, series_name="Mixed Saga")
+        _insert_item(db, title="Mixed Saga Wishlist", isbn="9780000000061",
+                     owned=0, wishlisted=True, series_name="Mixed Saga")
+        _insert_item(db, title="Mixed Saga Neither", isbn="9780000000062",
+                     owned=0, series_name="Mixed Saga")
+        db.commit()
+
+        html = admin_client.get("/series").text
+        assert "Mixed Saga" in html
+        assert "1 owned" in html
+        assert "1 wishlisted" in html
+        assert "2 wishlisted" not in html
+
 
 class TestSeriesCheck:
     """`/api/series/check` answers owned / wishlist / missing per book."""
 
     def test_a_bare_unowned_row_is_not_reported_as_wishlist(self, admin_client, db):
-        """The status arm reads membership now, so the bare row answers
-        `owned` — which is wrong-sounding but correct for plan 1: the arm is
-        a two-way split and the row is not on the wishlist. Plan 2 adds the
-        third arm and this pin is what it will change."""
+        """Plan 2's third arm: a bare `owned = 0` row with no wishlist
+        membership is neither owned nor wishlisted, so the series check
+        answers `missing` for it — not `owned` (plan 1's two-way split,
+        before the third arm existed) and not `wishlist` (the row is not a
+        member)."""
         from unittest.mock import AsyncMock, patch
 
         db.execute(
@@ -271,7 +317,7 @@ class TestSeriesCheck:
             "VALUES ('Bare Sequel', 'book', 0, 'test', 'Test Saga')"
         )
         member = _insert_item(db, title="Wanted Sequel", isbn="9780000000040",
-                              owned=0, series_name="Test Saga")
+                              owned=0, wishlisted=True, series_name="Test Saga")
         assert lists.is_member(db, lists.WISHLIST, member)
         db.commit()
 
@@ -295,5 +341,5 @@ class TestSeriesCheck:
 
         assert data["ok"] is True, data
         by_id = {b["hardcover_book_id"]: b["status"] for b in data["books"]}
-        assert by_id[201] == "owned"      # bare row: not a member
+        assert by_id[201] == "missing"    # bare row: neither owned nor a member
         assert by_id[202] == "wishlist"   # member

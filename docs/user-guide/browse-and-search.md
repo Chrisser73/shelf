@@ -60,7 +60,7 @@ Filter chips along the top, all combinable:
 | **Type** | Book, kids book, audiobook, eBook, DVD / Blu-ray, CD, comic, Manga, video game |
 | **Location** | Any location, or "no location" |
 | **Reading status** | Want to read, reading, read, none |
-| **Owned** | Owned / wishlist |
+| **Owned** | All / Owned / Wishlist / Not owned or wishlisted |
 | **Lent out** | Items currently checked out |
 | **Tag** | Any custom tag |
 | **Language** | Edition language (captured on lookup) |

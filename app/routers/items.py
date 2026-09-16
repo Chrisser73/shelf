@@ -25,7 +25,7 @@ from app.services import lists
 from app.services.item_write import (ItemValueError, insert_item, update_item_fields,
                                      update_items_fields, validate_item_fields,
                                      validated_location_id)
-from app.services import item_write  # for _coerce_owned (bulk-update's owned -> wishlisted)
+from app.services import item_write  # _coerce_owned (bulk update), promote_wishlisted (scan)
 from app.services import openlibrary, googlebooks, hardcover, covers, national
 from app.services import detect
 from app.services import cover_queue
@@ -447,17 +447,24 @@ async def scan_isbn(
     detect_reason = detection.reason
     detect_overrode = media_type != hint
 
-    # Check duplicate
+    # Check duplicate. An Add-mode scan of a wishlisted book is the purchase:
+    # it becomes owned (#125). The read and that write share one write lock,
+    # taken first (G18); the scan is logged after the block (G3).
+    promoted = False
     with get_db() as db:
+        db.execute("BEGIN IMMEDIATE")
         existing = db.execute(
             "SELECT id, title FROM items WHERE isbn = ? AND media_type = ?",
             (isbn13, media_type),
         ).fetchone()
+        if existing and mode != "wishlist":
+            promoted = item_write.promote_wishlisted(db, existing["id"])
     if existing:
-        items_common._log_scan(isbn13, media_type, "duplicate", existing["id"], mode)
+        status = "promoted" if promoted else "duplicate"
+        items_common._log_scan(isbn13, media_type, status, existing["id"], mode)
         return templates.TemplateResponse(
             request, "fragments/scan_result.html",
-            {"status": "duplicate", "isbn": isbn13, "title": existing["title"], "item_id": existing["id"]},
+            {"status": status, "isbn": isbn13, "title": existing["title"], "item_id": existing["id"]},
         )
 
     # Get optional metadata-provider credentials — and refuse a stale location
@@ -654,7 +661,11 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
     # `insert_item` raises `ItemValueError` and the card carries its message.
     # Rendered after the block so nothing runs under the write.
     value_error = None
+    promoted = False
     with get_db() as db:
+        # The duplicate guard and the insert (or the promotion below) share
+        # one write lock, taken before the guard reads (G18).
+        db.execute("BEGIN IMMEDIATE")
         existing = _find_duplicate_item(db, isbn13, upc_code, media_type)
         if existing is None:
             try:
@@ -682,6 +693,9 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
                 existing = _find_duplicate_item(db, isbn13, upc_code, media_type)
                 if existing is None:
                     raise
+        # Adding a wishlisted item in Add mode is buying it (#125).
+        if existing and mode != "wishlist":
+            promoted = item_write.promote_wishlisted(db, existing["id"])
 
     if value_error:
         return templates.TemplateResponse(
@@ -691,10 +705,11 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
 
     if existing:
         code = isbn13 or upc_code or ""
-        items_common._log_scan(code, media_type, "duplicate", existing["id"])
+        status = "promoted" if promoted else "duplicate"
+        items_common._log_scan(code, media_type, status, existing["id"], mode)
         return templates.TemplateResponse(
             request, "fragments/scan_result.html",
-            {"status": "duplicate", "isbn": code, "title": existing["title"],
+            {"status": status, "isbn": code, "title": existing["title"],
              "item_id": existing["id"]},
         )
 
@@ -905,7 +920,7 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
     except (ValueError, TypeError):
         return {"ok": False, "message": "Invalid item IDs"}
 
-    allowed = {"media_type", "location_id", "reading_status", "owned", "series_name"}
+    allowed = {"media_type", "location_id", "reading_status", "owned", "wishlisted", "series_name"}
     filtered = {k: v for k, v in updates.items() if k in allowed}
     if not filtered:
         return {"ok": False, "message": "No valid fields to update"}
@@ -933,10 +948,14 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
                 # Same coercion the funnel applies to "owned" itself (issue
                 # #125) — an invalid value raises InvalidOwned here, caught
                 # below exactly as it would be if raised inside the funnel,
-                # so the error contract is unchanged.
+                # so the error contract is unchanged. A submitted
+                # "wishlisted" is passed straight through to the funnel
+                # rather than derived from "owned" — `_pop_wishlisted`
+                # judges it and `_refuse_owned_wishlist` refuses the
+                # combination (and a wishlisted=true over a selection that
+                # includes an owned row) whole, before any write (G96).
                 coerced = item_write._coerce_owned(filtered["owned"])
                 filtered["owned"] = coerced
-                filtered["wishlisted"] = (coerced == 0)
             update_items_fields(db, item_ids, filtered)
         except ItemValueError as e:
             return {"ok": False, "message": str(e)}
@@ -1052,11 +1071,17 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         for key in ("title", "subtitle", "authors", "isbn", "upc", "media_type", "publisher",
                     "publish_year", "page_count", "description", "series_name",
                     "series_position", "narrator", "duration_mins", "location_id", "notes",
-                    "reading_status", "date_started", "date_finished", "owned", "platform",
-                    "manual_value", "language"):
+                    "reading_status", "date_started", "date_finished", "owned", "wishlisted",
+                    "platform", "manual_value", "language"):
             val = form.get(key)
             if val is not None:
-                if val == "" and key != "owned":
+                if key == "wishlisted":
+                    # Independent of `owned` (#125): the form posts it on its
+                    # own, and an absent key leaves membership alone (G87).
+                    if val not in ("0", "1"):
+                        return _refused("invalid_wishlisted")
+                    fields[key] = val == "1"
+                elif val == "" and key != "owned":
                     fields[key] = None
                 elif key in ("publish_year", "page_count", "duration_mins", "location_id"):
                     fields[key] = int(val) if val else None
@@ -1064,7 +1089,6 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
                     fields[key] = float(val) if val else None
                 elif key == "owned":
                     fields[key] = int(val) if val else 0
-                    fields["wishlisted"] = fields["owned"] == 0
                 else:
                     fields[key] = val
     except (TypeError, ValueError):

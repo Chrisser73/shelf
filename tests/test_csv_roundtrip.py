@@ -43,7 +43,7 @@ class TestWishlistedColumn:
 
     def test_wishlist_item_exports_one_owned_item_exports_zero(self, admin_client, db):
         _insert_item(db, title="Owned Book", isbn="9780441013593", media_type="book", owned=1)
-        _insert_item(db, title="Wishlist Book", isbn="9780553283686", media_type="book", owned=0)
+        _insert_item(db, title="Wishlist Book", isbn="9780553283686", media_type="book", owned=0, wishlisted=True)
         db.execute("COMMIT")
 
         rows = list(csv.DictReader(io.StringIO(_export(admin_client))))
@@ -52,6 +52,42 @@ class TestWishlistedColumn:
 
         assert owned_row["wishlisted"] == "0"
         assert wishlist_row["wishlisted"] == "1"
+
+
+class TestOwnershipStatesRoundTrip:
+    """#125: owned, wishlisted and neither all survive export → import."""
+
+    def test_header_carries_owned_before_wishlisted(self, admin_client):
+        header = _export(admin_client).splitlines()[0].split(",")
+        assert header[-2:] == ["owned", "wishlisted"]
+
+    def test_all_three_states_survive_into_a_fresh_library(self, admin_client, db):
+        from app.services import lists
+        from tests.conftest import _assert_ownership_partition
+
+        _insert_item(db, title="State Owned", isbn="9780441013593", media_type="book", owned=1)
+        _insert_item(db, title="State Wished", isbn="9780553283686", media_type="book",
+                     owned=0, wishlisted=True)
+        _insert_item(db, title="State Neither", isbn=None, authors="N. Body",
+                     media_type="book", owned=0)
+        db.execute("COMMIT")
+
+        exported = _export(admin_client)
+        db.execute("DELETE FROM list_items")
+        db.execute("DELETE FROM items")
+        db.execute("COMMIT")
+
+        result = _import(admin_client, exported)
+        assert (result["imported"], result["errors"]) == (3, [])
+
+        def state(title):
+            row = db.execute("SELECT id, owned FROM items WHERE title = ?", (title,)).fetchone()
+            return row["owned"], lists.is_member(db, lists.WISHLIST, row["id"])
+
+        assert state("State Owned") == (1, False)
+        assert state("State Wished") == (0, True)
+        assert state("State Neither") == (0, False)
+        _assert_ownership_partition(db)
 
 
 class TestRoundTrip:
