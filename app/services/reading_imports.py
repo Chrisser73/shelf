@@ -18,6 +18,7 @@ Each normalizer returns the shelf-native shape consumed by the CSV import:
         "reading_status": str | None,   # read / reading / want_to_read
         "date_finished": str | None,    # ISO date
         "owned": bool,
+        "wishlisted": bool | None,   # generic only; None when absent/blank
     }
 """
 
@@ -84,6 +85,26 @@ def _clean_date(value: str | None) -> str | None:
     return None
 
 
+_TRUTHY = {"1", "true", "yes"}
+_FALSY = {"0", "false", "no"}
+
+
+def _parse_wishlisted(value: str | None) -> bool | None:
+    """Parse a generic CSV's own `wishlisted` column.
+
+    Accepts 1/0, true/false, yes/no, case-insensitive. Blank or absent (the
+    column itself may not exist in the row dict) yields None — the importer
+    does not read this value in plan 1 (see items_csv.py); it exists so a
+    later plan can.
+    """
+    v = (value or "").strip().lower()
+    if v in _TRUTHY:
+        return True
+    if v in _FALSY:
+        return False
+    return None
+
+
 def _media_type_from(binding: str | None) -> str:
     b = (binding or "").strip().lower()
     if "audio" in b:
@@ -134,6 +155,7 @@ def normalize_goodreads(row: dict) -> dict:
         # count instead of assuming everything on a shelf is on a shelf.
         "owned": (row.get("owned_copies") or "").strip().isdigit()
                  and int(row["owned_copies"]) > 0,
+        "wishlisted": None,  # generic-only column; Goodreads has no equivalent
     }
 
 
@@ -156,6 +178,7 @@ def normalize_storygraph(row: dict) -> dict:
         "date_finished": _clean_date(row.get("last_date_read")),
         # Only an explicit "No" marks the book as not owned (wishlist)
         "owned": owned_raw != "no",
+        "wishlisted": None,  # generic-only column; StoryGraph has no equivalent
     }
 
 
@@ -174,6 +197,7 @@ def normalize_generic(row: dict) -> dict:
         "reading_status": None,
         "date_finished": None,
         "owned": True,
+        "wishlisted": _parse_wishlisted(row.get("wishlisted")),
     }
 
 

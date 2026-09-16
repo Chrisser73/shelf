@@ -171,6 +171,7 @@ async def confirm_periodical_issue(
                 publish_year=_issue_year(issue_date),
                 location_id=location_id,
                 owned=0 if mode == "wishlist" else 1,
+                wishlisted=(mode == "wishlist"),
                 source="issn",
             )
             periodical_records.link_issue(

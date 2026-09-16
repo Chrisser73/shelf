@@ -29,7 +29,7 @@ from app import browse_filters
 from app.config import HTTP_TIMEOUT, MEDIA_TYPES
 from app.database import get_db, get_setting
 from app.services import covers, detect, googlebooks, hardcover, national, openlibrary, provider_result
-from app.services import cover_queue
+from app.services import cover_queue, lists
 from app.services import authors as authors_svc
 from app.services import igdb, scan_outcome, title_lookup, tmdb, upcitemdb
 from app.services import upc as upc_svc
@@ -77,7 +77,7 @@ def filter_counts(db, values: dict, total: int) -> dict:
         own_params,
     ).fetchone()["c"]
     wishlist_count = db.execute(
-        f"SELECT COUNT(*) as c FROM items i {own_where}{_own_join} i.owned = 0",
+        f"SELECT COUNT(*) as c FROM items i {own_where}{_own_join} {lists.WISHLISTED_SQL}",
         own_params,
     ).fetchone()["c"]
 
@@ -654,6 +654,7 @@ async def _scan_upc(request: Request, templates, upc_code: str, media_type: str,
                     # Was a follow-up UPDATE in a second transaction; owned is
                     # an item-creation field, so it belongs in the insert.
                     owned=0 if mode == "wishlist" else 1,
+                    wishlisted=(mode == "wishlist"),
                 )
             except ItemValueError as e:  # a stale location (#54)
                 value_error = str(e)
@@ -829,6 +830,7 @@ async def _scan_upc_game(request: Request, templates, upc_norm: str, product: di
                     upc=upc_key,
                     source=source,
                     owned=0 if mode == "wishlist" else 1,
+                    wishlisted=(mode == "wishlist"),
                 )
             except ItemValueError as e:  # unknown platform or stale location (#54)
                 value_error = str(e)

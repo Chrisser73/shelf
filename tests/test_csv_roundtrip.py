@@ -10,6 +10,7 @@ library — was inserted again with no check against the file or the database.
 round-tripped an export containing ISBN-less rows (G33).
 """
 
+import csv
 import io
 
 from tests.conftest import _insert_item
@@ -33,6 +34,24 @@ def _import(client, content, mode="skip"):
 
 def _count(db):
     return db.execute("SELECT COUNT(*) AS c FROM items").fetchone()["c"]
+
+
+class TestWishlistedColumn:
+    def test_header_last_column_is_wishlisted(self, admin_client):
+        header = _export(admin_client).splitlines()[0]
+        assert header.split(",")[-1] == "wishlisted"
+
+    def test_wishlist_item_exports_one_owned_item_exports_zero(self, admin_client, db):
+        _insert_item(db, title="Owned Book", isbn="9780441013593", media_type="book", owned=1)
+        _insert_item(db, title="Wishlist Book", isbn="9780553283686", media_type="book", owned=0)
+        db.execute("COMMIT")
+
+        rows = list(csv.DictReader(io.StringIO(_export(admin_client))))
+        owned_row = next(r for r in rows if r["title"] == "Owned Book")
+        wishlist_row = next(r for r in rows if r["title"] == "Wishlist Book")
+
+        assert owned_row["wishlisted"] == "0"
+        assert wishlist_row["wishlisted"] == "1"
 
 
 class TestRoundTrip:

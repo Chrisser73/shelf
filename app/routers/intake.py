@@ -234,7 +234,7 @@ async def _confirm_one(
                     raise
                 if not owned:
                     with get_db() as db:
-                        update_item_fields(db, item_id, {"owned": 0})
+                        update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
                 # The catalogue's title is the record; the row's was the query.
                 return "added", {
                     "title": metadata["title"], "id": item_id, "matched": True,
@@ -410,6 +410,7 @@ async def _confirm_one(
                 series_name=meta.get("series_name"),
                 location_id=location_id,
                 owned=int(owned),
+                wishlisted=not owned,
                 source="photo_intake",
                 language=language,
             )

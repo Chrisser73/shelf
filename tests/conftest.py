@@ -231,7 +231,30 @@ def _insert_item(db, title="Test Book", isbn="9780000000026", media_type="book",
     cols = ", ".join(fields.keys())
     placeholders = ", ".join("?" for _ in fields)
     cursor = db.execute(f"INSERT INTO items ({cols}) VALUES ({placeholders})", list(fields.values()))
+    if fields.get("owned") == 0:
+        from app.services import lists
+
+        lists.add(db, lists.WISHLIST, cursor.lastrowid)
     return cursor.lastrowid
+
+
+def _assert_wishlist_invariant(db):
+    """Assert `owned = 0` and wishlist membership agree for every item.
+
+    Raw-SQL test seeds bypass the app's write funnel, so this is a fixture
+    sanity check, not app-code coverage: T4-T7 call it after every writer
+    that touches either side of the invariant once enforcement lands.
+    """
+    from app.services.lists import WISHLISTED_SQL
+
+    rows = db.execute(
+        f"SELECT i.id, i.title, i.owned FROM items i "
+        f"WHERE (i.owned = 0) != ({WISHLISTED_SQL})"
+    ).fetchall()
+    assert not rows, (
+        "owned=0/wishlist-membership mismatch for: "
+        + ", ".join(f"#{r['id']} {r['title']!r} (owned={r['owned']})" for r in rows)
+    )
 
 
 def _insert_borrower(db, name="Test Borrower"):

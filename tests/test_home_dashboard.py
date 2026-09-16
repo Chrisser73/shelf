@@ -17,7 +17,7 @@ def test_empty_library_summary_is_zeroed(db):
 
 def test_summary_counts_owned_wishlist_and_missing_covers(db):
     insert_item(db, title="Owned Book", media_type="book", owned=1, cover_path="covers/1.jpg")
-    insert_item(db, title="Wishlist Book", media_type="book", owned=0)
+    insert_item(db, title="Wishlist Book", media_type="book", owned=0, wishlisted=True)
     insert_item(db, title="Disc", media_type="dvd", owned=1)
 
     summary = home_dashboard.dashboard_summary(db)
@@ -29,7 +29,7 @@ def test_summary_counts_owned_wishlist_and_missing_covers(db):
 
 def test_media_type_breakdown_is_data_driven(db):
     insert_item(db, title="Book A", media_type="book", owned=1)
-    insert_item(db, title="Book B", media_type="book", owned=0)
+    insert_item(db, title="Book B", media_type="book", owned=0, wishlisted=True)
     insert_item(db, title="DVD", media_type="dvd", owned=1)
 
     breakdown = home_dashboard.dashboard_summary(db)["media_types"]

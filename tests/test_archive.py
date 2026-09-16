@@ -15,6 +15,7 @@ from app import config
 from app.database import get_db
 from app.services import archive as archive_svc
 from app.services import item_copies
+from app.services import lists
 from app.services.archive import (
     ArchiveError,
     apply_plan,
@@ -2637,3 +2638,202 @@ class TestArchiveCopiesImport:
         assert db.execute(
             "SELECT COUNT(*) AS n FROM tags WHERE name = 'only-for-this-item'"
         ).fetchone()["n"] == 0
+
+
+def _one_item_archive(tmp_path, item, *, name="wl.zip"):
+    """A minimal archive carrying exactly one item dict, verbatim.
+
+    The item is written as given — no normalisation — so a test can put an
+    absent key, a present null or an outright invalid value into the file and
+    see what the importer makes of it.
+    """
+    library = json.dumps({"locations": [], "tags": [], "borrowers": [],
+                          "series": [], "items": [item]})
+    return _write_zip(tmp_path / name, [], library=library)
+
+
+class TestWishlistMembershipRoundTrip:
+    """`wishlisted` travels in the archive as its own boolean (#125)."""
+
+    def test_a_wishlist_item_exports_true_and_imports_as_a_member(self, db):
+        _insert_item(db, title="Wanted Book", isbn="9780000000019", owned=0)
+        db.execute("COMMIT")
+
+        path = build_archive(db)
+        with zipfile.ZipFile(path) as zf:
+            library = json.loads(zf.read("library.json"))
+        assert library["items"][0]["wishlisted"] is True
+
+        _wipe_library(db)
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader, mode="skip")
+        db.execute("COMMIT")
+        assert report["errors"] == []
+
+        row = db.execute(
+            "SELECT id, owned FROM items WHERE title = 'Wanted Book'"
+        ).fetchone()
+        assert row["owned"] == 0
+        assert lists.is_member(db, lists.WISHLIST, row["id"])
+
+    def test_an_owned_item_exports_false(self, db):
+        _insert_item(db, title="Owned Book", isbn="9780000000033", owned=1)
+        db.execute("COMMIT")
+        path = build_archive(db)
+        with zipfile.ZipFile(path) as zf:
+            library = json.loads(zf.read("library.json"))
+        assert library["items"][0]["wishlisted"] is False
+
+    def test_a_matched_item_is_overwritten_in_both_directions(self, db):
+        """G27: an overwrite, not an undo — membership follows `owned`
+        exactly as `owned` itself always overwrites."""
+        owned_id = _insert_item(db, title="Flip Me", isbn="9780000000040", owned=1)
+        db.execute("COMMIT")
+
+        path = _one_item_archive(
+            config.DATA_DIR,
+            {"id": 1, "title": "Flip Me", "isbn": "9780000000040",
+             "media_type": "book", "owned": 0, "wishlisted": True},
+        )
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader, mode="update")
+        db.execute("COMMIT")
+        assert report["errors"] == []
+
+        row = db.execute("SELECT owned FROM items WHERE id = ?", (owned_id,)).fetchone()
+        assert row["owned"] == 0
+        assert lists.is_member(db, lists.WISHLIST, owned_id)
+
+        back = _one_item_archive(
+            config.DATA_DIR,
+            {"id": 1, "title": "Flip Me", "isbn": "9780000000040",
+             "media_type": "book", "owned": 1, "wishlisted": False},
+            name="back.zip",
+        )
+        with read_archive(back) as reader:
+            report = merge_archive(db, reader, mode="update")
+        db.execute("COMMIT")
+        assert report["errors"] == []
+        assert not lists.is_member(db, lists.WISHLIST, owned_id)
+
+
+class TestWishlistedKeyPresence:
+    """G87: an absent key and a present-but-invalid one are different answers.
+
+    A missing `wishlisted` means "this archive predates the key — derive it
+    from owned". A present one belongs to the boolean contract. Collapsing
+    the two is the bug this file already shipped once, on `copies` (#116),
+    and one test covering "absent or empty" would pass under that bug.
+    """
+
+    @pytest.mark.parametrize("owned,expect_member", [(0, True), (1, False)])
+    def test_an_absent_key_is_derived_from_owned(self, db, owned, expect_member):
+        path = _one_item_archive(
+            config.DATA_DIR,
+            {"id": 1, "title": "Legacy Row", "media_type": "book", "owned": owned},
+            name=f"legacy-{owned}.zip",
+        )
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader, mode="skip")
+        db.execute("COMMIT")
+        assert report["errors"] == []
+
+        row = db.execute("SELECT id FROM items WHERE title = 'Legacy Row'").fetchone()
+        assert lists.is_member(db, lists.WISHLIST, row["id"]) is expect_member
+
+    @pytest.mark.parametrize("bad", [None, "false", "true", [], {}, 2, "yes"])
+    def test_a_present_invalid_value_is_an_item_error(self, db, bad):
+        """Each of these would be silently truth-coerced by `bool(...)`:
+        `"false"` and `{}` to True, `[]` and `None` to False."""
+        before = db.execute("SELECT COUNT(*) AS c FROM items").fetchone()["c"]
+        path = _one_item_archive(
+            config.DATA_DIR,
+            {"id": 1, "title": "Bad Wishlisted", "media_type": "book",
+             "owned": 0, "wishlisted": bad},
+            name=f"bad-{type(bad).__name__}-{bad!r}.zip".replace("/", "_"),
+        )
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader, mode="skip")
+        db.commit()
+
+        assert report["errors"], f"{bad!r} was accepted silently"
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items"
+        ).fetchone()["c"] == before
+
+
+class TestArchiveRefusesTheContradiction:
+    """G85: apply_plan catches per-item exceptions and carries on inside one
+    transaction, so a refusal raised *after* a write would leave the record
+    half-imported while the report said it failed. The funnel refuses before
+    writing; this is the pin that fails if that ordering is ever undone.
+    """
+
+    def test_owned_and_wishlisted_leaves_nothing_behind(self, db):
+        loc_before = db.execute("SELECT COUNT(*) AS c FROM locations").fetchone()["c"]
+        path = _one_item_archive(
+            config.DATA_DIR,
+            {"id": 1, "title": "Contradiction", "media_type": "book",
+             "owned": 1, "wishlisted": True,
+             "location": "Nowhere Shelf", "tags": ["sci-fi"]},
+            name="contradiction.zip",
+        )
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader, mode="skip")
+        db.commit()
+
+        assert report["errors"], "the contradiction was imported silently"
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE title = 'Contradiction'"
+        ).fetchone()["c"] == 0
+        assert db.execute("SELECT COUNT(*) AS c FROM item_copies").fetchone()["c"] == 0
+        assert db.execute("SELECT COUNT(*) AS c FROM list_items").fetchone()["c"] == 0
+        assert db.execute("SELECT COUNT(*) AS c FROM item_tags").fetchone()["c"] == 0
+        # The get-or-create caches run before the item write, so the location
+        # may exist; what must not exist is a half-written *item*.
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM locations"
+        ).fetchone()["c"] >= loc_before
+
+
+class TestWishlistRoundTripFidelity:
+    def test_round_trip_preserves_wishlist_membership(self, db):
+        """Full-fidelity re-export comparison with a wishlist item present.
+
+        `_seed_full_library`'s item is owned, so the existing round trip only
+        ever compares `wishlisted: false`. Seeding the wishlist case into that
+        shared helper would change the item count for seventeen call sites
+        (one asserts `len(items) == 1`), so it gets its own seed here instead.
+        """
+        # isbn10 is seeded explicitly for the same reason _seed_full_library
+        # does it: a raw seed leaves it NULL, while the importer derives the
+        # canonical pair — an unrelated difference that would otherwise show
+        # up in this comparison and read as a wishlist defect.
+        _insert_item(db, title="Wanted Book", isbn="9780000000019",
+                     isbn10="0000000019", owned=0)
+        _insert_item(db, title="Owned Book", isbn="9780000000033",
+                     isbn10="0000000035", owned=1)
+        db.execute("COMMIT")
+
+        original_path = build_archive(db)
+        with zipfile.ZipFile(original_path) as zf:
+            original_library = json.loads(zf.read("library.json"))
+        by_title = {i["title"]: i for i in original_library["items"]}
+        assert by_title["Wanted Book"]["wishlisted"] is True
+        assert by_title["Owned Book"]["wishlisted"] is False
+
+        _wipe_library(db)
+        with read_archive(original_path) as reader:
+            report = merge_archive(db, reader, mode="skip")
+        db.execute("COMMIT")
+        assert report["errors"] == []
+
+        reimport_path = build_archive(db)
+        with zipfile.ZipFile(reimport_path) as zf:
+            new_library = json.loads(zf.read("library.json"))
+        assert _normalize_library(original_library) == _normalize_library(new_library)
+
+        restored = db.execute(
+            "SELECT id FROM items WHERE title = 'Wanted Book'"
+        ).fetchone()
+        assert lists.is_member(db, lists.WISHLIST, restored["id"])

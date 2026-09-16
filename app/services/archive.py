@@ -6,7 +6,15 @@ Format contract (frozen — see .devdocs/archive/completed/plan-issue-16-portabl
                             "exported_at": <ISO-8601 UTC>, "app_version": null,
                             "counts": {...}}
     library.json            flat data — locations/tags by NAME, items keyed
-                            by an archive-local id (not preserved on import)
+                            by an archive-local id (not preserved on import).
+                            Each item carries a boolean `wishlisted` beside
+                            `owned` (#125): membership of the wishlist list,
+                            which is not a column on `items`. An archive
+                            written before that key existed has it *absent*,
+                            which means "derive it from owned"; a present
+                            value belongs to the boolean contract and the
+                            write funnel judges it. Absent and present-invalid
+                            are deliberately different answers (G87).
     covers/<item id>.jpg    copy of each exported item's cover, keyed by that
                             same archive-local id
 
@@ -29,6 +37,7 @@ from pathlib import Path
 from app import config
 from app.services import isbn as isbn_svc
 from app.services import item_copies
+from app.services import lists
 from app.services.covers import MAX_COVER_SIZE, MIN_COVER_SIZE, _looks_like_image
 from app.services.item_write import insert_item, update_item_fields
 
@@ -302,9 +311,10 @@ def _build_items(db) -> tuple[list[dict], dict[int, int], list[tuple[str, Path]]
     archive; they are not preserved on import.
     """
     rows = db.execute(
-        "SELECT items.*, locations.name AS location_name "
-        "FROM items LEFT JOIN locations ON locations.id = items.location_id "
-        "ORDER BY items.id"
+        "SELECT i.*, locations.name AS location_name, "
+        f"{lists.WISHLISTED_SQL} AS wishlisted "
+        "FROM items i LEFT JOIN locations ON locations.id = i.location_id "
+        "ORDER BY i.id"
     ).fetchall()
     tags_map = _tags_by_item(db)
     copies_map = _copies_by_item(db)
@@ -320,6 +330,10 @@ def _build_items(db) -> tuple[list[dict], dict[int, int], list[tuple[str, Path]]
         obj = {"id": archive_id}
         for col in _ITEM_COLUMNS:
             obj[col] = row[col]
+        # Not in _ITEM_COLUMNS: it is not a column. That whitelist is what
+        # apply_plan maps onto insert_item, and `wishlisted` reaches the
+        # funnel as its virtual field instead.
+        obj["wishlisted"] = bool(row["wishlisted"])
         obj["location"] = row["location_name"]
         obj["tags"] = tags_map.get(real_id, [])
         obj["copies"] = copies_map.get(real_id, [])
@@ -826,6 +840,11 @@ def _apply_item_update(db, item_id: int, item: dict, loc_name: str | None,
         if current is not None and current["location_id"] is None:
             updates["location_id"] = get_location_id(loc_name)
 
+    # G27: an overwrite, not an undo. `owned` is NOT NULL so `_present`
+    # always admits it and it always overwrites; membership is the same
+    # state by another name and follows it rather than being merged.
+    updates["wishlisted"] = item["wishlisted"]
+
     update_item_fields(db, item_id, updates)
 
 
@@ -1291,6 +1310,18 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
             # owned is NOT NULL DEFAULT 1 on the items table; 0 is a real
             # value (wishlist), so only fall back when it's truly absent.
             item_norm["owned"] = item.get("owned") if item.get("owned") is not None else 1
+            # G87: an *absent* key means "this archive predates wishlist
+            # membership — derive it from owned"; a *present* key belongs to
+            # the new boolean contract and is handed through untouched for
+            # the write funnel to judge. `bool(...)` here would destroy
+            # exactly that distinction: a present null, "false" and [] would
+            # each become a silent True or False instead of a reported item
+            # error. This file has already shipped that bug once, on the
+            # `copies` key (issue #116).
+            item_norm["wishlisted"] = (
+                item["wishlisted"] if "wishlisted" in item
+                else item_norm["owned"] == 0
+            )
 
             loc_name = item.get("location")
             cover_arcname = item.get("cover")
@@ -1378,6 +1409,10 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
                 fields["cover_review_dismissed"] = (
                     1 if item_norm.get("cover_review_dismissed") else 0
                 )
+                # Virtual field, not a column — the funnel routes it to
+                # list_items and refuses an owned item on the wishlist
+                # before writing anything (G85).
+                fields["wishlisted"] = item_norm["wishlisted"]
                 fields["created_at"] = created_at
                 fields["updated_at"] = updated_at
                 fields["location_id"] = loc_id

@@ -11,10 +11,12 @@ from app.services.reading_imports import (
     _clean_date,
     _clean_isbn,
     detect_format,
+    normalize_generic,
     normalize_goodreads,
     normalize_storygraph,
     split_series_title,
 )
+from tests.conftest import _assert_wishlist_invariant
 
 # Realistic export headers
 GOODREADS_HEADER = (
@@ -116,6 +118,28 @@ class TestCleanDate:
 # ---------------------------------------------------------------------------
 # Normalizers
 # ---------------------------------------------------------------------------
+
+
+class TestNormalizeGenericWishlisted:
+    """normalize_generic's `wishlisted` column: accepted spellings and the
+    absent/blank -> None cases. The importer does not read this value in
+    plan 1 (items_csv.py) — this pins the parser alone."""
+
+    @pytest.mark.parametrize("spelling", ["1", "true", "True", "TRUE", "yes", "Yes", "YES"])
+    def test_truthy_spellings(self, spelling):
+        n = normalize_generic({"title": "T", "wishlisted": spelling})
+        assert n["wishlisted"] is True
+
+    @pytest.mark.parametrize("spelling", ["0", "false", "False", "FALSE", "no", "No", "NO"])
+    def test_falsy_spellings(self, spelling):
+        n = normalize_generic({"title": "T", "wishlisted": spelling})
+        assert n["wishlisted"] is False
+
+    def test_blank_is_none(self):
+        assert normalize_generic({"title": "T", "wishlisted": ""})["wishlisted"] is None
+
+    def test_absent_column_is_none(self):
+        assert normalize_generic({"title": "T"})["wishlisted"] is None
 
 
 class TestNormalizeGoodreads:
@@ -233,6 +257,7 @@ class TestGoodreadsImport:
         assert item["date_finished"] == "2023-08-15"
         assert item["owned"] == 0  # Owned Copies is 0 in the export
         assert item["source"] == "goodreads_import"
+        _assert_wishlist_invariant(db)
 
     def test_owned_copies_imports_as_owned(self, admin_client, db):
         csv_content = GOODREADS_HEADER + "\n" + _gr_row(
@@ -242,6 +267,7 @@ class TestGoodreadsImport:
         assert data["imported"] == 1
         item = db.execute("SELECT owned FROM items WHERE isbn = '9780441172719'").fetchone()
         assert item["owned"] == 1
+        _assert_wishlist_invariant(db)
 
     def test_series_title_imports_split(self, admin_client, db):
         csv_content = GOODREADS_HEADER + "\n" + _gr_row(
@@ -265,6 +291,7 @@ class TestGoodreadsImport:
         item = db.execute("SELECT * FROM items WHERE isbn = '9780553283686'").fetchone()
         assert item["reading_status"] == "want_to_read"
         assert item["owned"] == 0
+        _assert_wishlist_invariant(db)
 
     def test_in_file_duplicate_skipped(self, admin_client):
         csv_content = GOODREADS_HEADER + "\n" + _gr_row() + "\n" + _gr_row()
@@ -304,6 +331,7 @@ class TestStorygraphImport:
         assert item["media_type"] == "ebook"
         assert item["reading_status"] == "read"
         assert item["source"] == "storygraph_import"
+        _assert_wishlist_invariant(db)
 
     def test_not_owned_imports_as_wishlist(self, admin_client, db):
         csv_content = STORYGRAPH_HEADER + "\n" + _sg_row(
@@ -410,6 +438,7 @@ class TestCsvValueFunnel:
         ).fetchone()
         assert item["reading_status"] == "want_to_read"
         assert item["owned"] == 0
+        _assert_wishlist_invariant(db)
 
 
 # ---------------------------------------------------------------------------

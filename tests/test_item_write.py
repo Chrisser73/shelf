@@ -19,6 +19,7 @@ from app.services.item_write import (
     InvalidIsbn,
     InvalidOwned,
     InvalidReadingStatus,
+    InvalidWishlisted,
     ItemValueError,
     UnknownLocationError,
     UnknownMediaType,
@@ -570,7 +571,8 @@ class TestValueStageProbe:
 
         for name in ("ItemValueError", "InvalidIsbn", "UnknownMediaType",
                      "UnknownLocationError", "UnknownPlatform",
-                     "InvalidReadingStatus", "InvalidOwned"):
+                     "InvalidReadingStatus", "InvalidOwned",
+                     "InvalidWishlisted"):
             cls = getattr(item_write, name)
             assert issubclass(cls, ValueError)
             assert isinstance(cls.code, str) and cls.code
@@ -741,3 +743,128 @@ class TestUpdateItemsFields:
 
     def test_empty_id_list_is_a_no_op(self, db):
         update_items_fields(db, [], {"media_type": "widget"})  # not even validated
+
+
+def _is_member(db, item_id):
+    from app.services import lists
+    return lists.is_member(db, lists.WISHLIST, item_id)
+
+
+def _snapshot(db):
+    """Everything the refusal pins must prove was left untouched."""
+    return (
+        db.execute("SELECT COUNT(*) AS c FROM items").fetchone()["c"],
+        db.execute(
+            "SELECT id, owned, title FROM items ORDER BY id"
+        ).fetchall(),
+        db.execute("SELECT COUNT(*) AS c FROM item_copies").fetchone()["c"],
+        db.execute(
+            "SELECT list_id, item_id FROM list_items ORDER BY list_id, item_id"
+        ).fetchall(),
+    )
+
+
+class TestWishlisted:
+    """The virtual `wishlisted` field on all three funnels (#125)."""
+
+    def test_insert_unowned_and_wishlisted_creates_membership(self, db):
+        item_id = insert_item(db, title="Wanted", owned=0, wishlisted=True)
+        assert _is_member(db, item_id)
+
+    def test_insert_via_the_dict_shape_creates_membership(self, db):
+        item_id = insert_item(db, {"title": "Wanted", "owned": 0, "wishlisted": True})
+        assert _is_member(db, item_id)
+
+    def test_insert_unowned_without_the_field_creates_no_membership(self, db):
+        """The deliberate gap: owned = 0 alone says nothing about the list.
+        A writer that forgets the field is a bug the per-writer pins catch."""
+        item_id = insert_item(db, title="Unowned", owned=0)
+        assert not _is_member(db, item_id)
+
+    def test_wishlisted_false_removes_membership(self, db):
+        item_id = insert_item(db, title="Wanted", owned=0, wishlisted=True)
+        update_item_fields(db, item_id, {"wishlisted": False})
+        assert not _is_member(db, item_id)
+
+    def test_bulk_update_sets_membership_both_ways(self, db):
+        ids = [insert_item(db, title=f"W{i}", owned=0, wishlisted=True)
+               for i in range(3)]
+        update_items_fields(db, ids, {"wishlisted": False})
+        assert not any(_is_member(db, i) for i in ids)
+        update_items_fields(db, ids, {"wishlisted": True})
+        assert all(_is_member(db, i) for i in ids)
+
+    def test_promoting_to_owned_removes_membership(self, db):
+        item_id = insert_item(db, title="Bought", owned=0, wishlisted=True)
+        update_item_fields(db, item_id, {"owned": 1})
+        assert not _is_member(db, item_id)
+
+    def test_promoting_to_owned_as_a_string_removes_membership(self, db):
+        """The funnel accepts "1" as well as 1, and `_apply_membership` sees
+        the caller's raw mapping — `validate_item_fields` normalises a copy.
+        A bare `== 1` there leaves the item on the wishlist."""
+        item_id = insert_item(db, title="Bought", owned=0, wishlisted=True)
+        update_item_fields(db, item_id, {"owned": "1"})
+        assert not _is_member(db, item_id)
+
+    def test_a_bad_wishlisted_value_is_refused(self, db):
+        with pytest.raises(InvalidWishlisted):
+            insert_item(db, title="X", owned=0, wishlisted="yes")
+
+    def test_updating_a_nonexistent_id_writes_no_membership(self, db):
+        update_item_fields(db, 99999, {"wishlisted": True})
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM list_items WHERE item_id = 99999"
+        ).fetchone()["c"] == 0
+
+    def test_wishlisted_never_reaches_the_name_check(self, db):
+        """It is not a column; popping it is what keeps `_validated_names`
+        from rejecting it as "not on the items table"."""
+        item_id = insert_item(db, title="Wanted", owned=0, wishlisted=True)
+        assert _row(db, item_id, "title")["title"] == "Wanted"
+
+
+class TestWishlistedRefusals:
+    """The one contradiction the funnel refuses — and it refuses it *before*
+    writing anything, so every pin here asserts an unchanged database."""
+
+    def test_insert_owned_and_wishlisted_writes_nothing(self, db):
+        before = _snapshot(db)
+        with pytest.raises(InvalidWishlisted):
+            insert_item(db, {"title": "Contradiction", "owned": 1, "wishlisted": True})
+        assert _snapshot(db) == before
+
+    @pytest.mark.parametrize("owned", ["1", True, 1])
+    def test_the_refusal_uses_the_same_coercion_as_owned(self, db, owned):
+        before = _snapshot(db)
+        with pytest.raises(InvalidWishlisted):
+            insert_item(db, {"title": "Contradiction", "owned": owned,
+                             "wishlisted": True})
+        assert _snapshot(db) == before
+
+    def test_insert_wishlisted_with_no_owned_key_writes_nothing(self, db):
+        """`owned` omitted means the SCHEMA default, which is 1 — so this is
+        the forbidden state even though no `owned` key was submitted. The
+        pre-fix check read `values.get("owned")` and let this through."""
+        before = _snapshot(db)
+        with pytest.raises(InvalidWishlisted):
+            insert_item(db, title="Wanted", wishlisted=True)
+        assert _snapshot(db) == before
+
+    def test_wishlisting_an_owned_row_writes_nothing(self, db):
+        item_id = insert_item(db, title="Owned", owned=1)
+        before = _snapshot(db)
+        with pytest.raises(InvalidWishlisted):
+            update_item_fields(db, item_id, {"wishlisted": True})
+        assert _snapshot(db) == before
+
+    def test_a_mixed_bulk_selection_does_not_half_apply(self, db):
+        unowned_a = insert_item(db, title="A", owned=0)
+        owned = insert_item(db, title="B", owned=1)
+        unowned_b = insert_item(db, title="C", owned=0)
+        before = _snapshot(db)
+        with pytest.raises(InvalidWishlisted):
+            update_items_fields(db, [unowned_a, owned, unowned_b],
+                                {"wishlisted": True})
+        assert _snapshot(db) == before
+        assert not any(_is_member(db, i) for i in (unowned_a, owned, unowned_b))

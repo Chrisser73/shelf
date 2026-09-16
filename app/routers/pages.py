@@ -7,6 +7,7 @@ from app import browse_filters, nav
 from app.auth import require_role
 from app.config import MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES
 from app.currency import get_currency
+from app.services import lists
 from app.database import get_db, get_setting, get_game_platforms, get_reading_history
 from app.routers import items_common
 from app.routers.items_common import SORT_OPTIONS
@@ -62,7 +63,8 @@ async def browse(
             f"SELECT i.*, l.name as location_name, "
             f"(SELECT b.name FROM checkouts c JOIN borrowers b ON c.borrower_id = b.id "
             f" WHERE c.item_id = i.id AND c.checked_in IS NULL LIMIT 1) AS lent_to, "
-            f"(SELECT 1 FROM checkouts c WHERE c.item_id = i.id AND {OVERDUE_CONDITION} LIMIT 1) AS lent_overdue "
+            f"(SELECT 1 FROM checkouts c WHERE c.item_id = i.id AND {OVERDUE_CONDITION} LIMIT 1) AS lent_overdue, "
+            f"{lists.WISHLISTED_SQL} AS wishlisted "
             f"FROM items i "
             f"LEFT JOIN locations l ON i.location_id = l.id "
             f"{where} ORDER BY {order_clause} LIMIT ?",
@@ -229,7 +231,9 @@ async def item_detail(
     back = nav.back_target(from_)
     with get_db() as db:
         item = db.execute(
-            "SELECT i.*, l.name as location_name FROM items i "
+            f"SELECT i.*, l.name as location_name, "
+            f"{lists.WISHLISTED_SQL} AS wishlisted "
+            "FROM items i "
             "LEFT JOIN locations l ON i.location_id = l.id "
             "WHERE i.id = ?",
             (item_id,),
@@ -401,7 +405,9 @@ async def stats(request: Request, _=Depends(require_role("viewer"))):
             "GROUP BY l.name ORDER BY c DESC"
         ).fetchall()
         total = db.execute("SELECT COUNT(*) as c FROM items").fetchone()["c"]
-        stats_wishlist = db.execute("SELECT COUNT(*) as c FROM items WHERE owned = 0").fetchone()["c"]
+        stats_wishlist = db.execute(
+            f"SELECT COUNT(*) as c FROM items i WHERE {lists.WISHLISTED_SQL}"
+        ).fetchone()["c"]
         stats_owned = total - stats_wishlist
         with_covers = db.execute(
             "SELECT COUNT(*) as c FROM items WHERE cover_path IS NOT NULL"

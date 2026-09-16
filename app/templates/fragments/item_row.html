@@ -46,7 +46,7 @@
         <div class="flex items-center gap-2">
             <a href="/item/{{ item.id }}" @click.prevent
                class="text-shelf-text text-sm font-medium truncate max-w-xs hover:underline">{{ item.title }}</a>
-            {% if not item.owned %}
+            {% if item.wishlisted %}
             <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-warning/90 text-black shrink-0">Wishlist</span>
             {% endif %}
             {% if item.lent_to %}

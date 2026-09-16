@@ -14,7 +14,10 @@ All under Settings → Data. Four mechanisms, each for a different job.
 **Import / Export → Export CSV** writes one row per item:
 
 `title, authors, isbn, media_type, platform, publisher, publish_year,
-page_count, series_name, location, source, estimated_value, manual_value`
+page_count, series_name, location, source, estimated_value, manual_value,
+wishlisted`
+
+`wishlisted` is `1` for an item on your wishlist and `0` otherwise.
 
 ## CSV import
 
@@ -72,9 +75,10 @@ are planned.
 ## Portable archive
 
 **Portable archive → Export** produces a zip of your items, tags, locations,
-series, reading log, checkouts, **your physical copies** and **the cover
-images**. No users, passwords, API credentials, settings or certificates — so
-it's safe to hand to someone else or keep in a shared drive.
+series, reading log, checkouts, **your physical copies**, **which items are
+on your wishlist** and **the cover images**. No users, passwords, API
+credentials, settings or certificates — so it's safe to hand to someone else
+or keep in a shared drive.
 
 Three things to know about how copies come back:
 

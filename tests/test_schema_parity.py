@@ -16,9 +16,10 @@ import sqlite3
 
 import pytest
 
-from app.database import MIGRATIONS, get_db
+from app.database import MIGRATION_TABLES, MIGRATIONS, get_db
 
 _ALTER = re.compile(r"ALTER TABLE (\w+) ADD COLUMN (\w+)", re.I)
+_CREATE = re.compile(r"CREATE TABLE IF NOT EXISTS (\w+)", re.I)
 
 
 def _columns(db, table):
@@ -33,6 +34,17 @@ def _alter_migration_columns():
         m = _ALTER.search(sql or "")
         if m:
             out.append((m.group(1), m.group(2)))
+    return out
+
+
+def _create_migration_tables():
+    """Every table created by a CREATE TABLE entry in MIGRATIONS."""
+    out = []
+    for entry in MIGRATIONS:
+        sql = entry[2] if len(entry) > 2 else entry[-1]
+        m = _CREATE.search(sql or "")
+        if m:
+            out.append(m.group(1))
     return out
 
 
@@ -109,3 +121,41 @@ def test_cover_review_dismissed_defaults_to_zero_on_a_fresh_bootstrap(db):
         "SELECT cover_review_dismissed FROM items WHERE title = 'No flag supplied'"
     ).fetchone()
     assert stored["cover_review_dismissed"] == 0
+
+
+def test_migrations_create_table_list_is_parseable():
+    """If this returns nothing the two table checks below are vacuously green."""
+    assert _create_migration_tables(), (
+        "No CREATE TABLE IF NOT EXISTS found in MIGRATIONS — either the tuple "
+        "shape changed or this test's regex no longer matches it. Either way "
+        "the table-parity checks below are silently disarmed."
+    )
+
+
+def test_every_migration_table_is_also_in_migration_tables():
+    """A table created only by a numbered migration is missing on fresh
+    installs; one created only in MIGRATION_TABLES lets its seed entries be
+    recorded as applied without running (`_is_benign_migration_error` answers
+    benign for `no such table` whenever MIGRATION_TABLES names the table).
+    Both halves are required — this is G1 at table granularity."""
+    bootstrap = set(_CREATE.findall(MIGRATION_TABLES))
+    missing = [t for t in _create_migration_tables() if t not in bootstrap]
+    assert not missing, (
+        f"Tables created by MIGRATIONS but not by MIGRATION_TABLES: "
+        f"{sorted(missing)}. A fresh database never replays migrations one by "
+        "one in the upgrade sense, so add the same CREATE to MIGRATION_TABLES "
+        "as well (G1)."
+    )
+
+
+def test_every_migration_table_exists_on_a_fresh_database(db):
+    """The `db` fixture bootstraps a fresh database — the other route."""
+    live = {
+        r["name"]
+        for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    missing = [t for t in _create_migration_tables() if t not in live]
+    assert not missing, (
+        f"Tables reachable only via MIGRATIONS are missing on a fresh "
+        f"database: {sorted(missing)} (G1)."
+    )

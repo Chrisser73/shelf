@@ -40,6 +40,26 @@ A null location never invents a copy, and secondary copies are never moved by
 the legacy field. This keeps every existing add/edit/import surface working
 while copy-specific UI can be introduced separately.
 
+**The virtual `wishlisted` field** (issue #125). Wishlist membership is not a
+column on `items` — it is a row in `list_items`, and `app/services/lists.py`
+is the only module that writes that table. All three funnels accept
+`wishlisted: bool` anyway, popped before the name check so it never reaches
+the statement, and applied through `lists.set_membership` on the same
+connection inside the caller's transaction. One rule lives here and survives
+the follow-on plan: **writing `owned = 1` removes wishlist membership** — you
+do not wish for what you have — which is what makes Shelf Fill's promotion
+correct without it knowing the list exists.
+
+The single contradiction the funnel refuses is an *owned* item on the
+wishlist, and it is refused **before anything is written** (G85): an archive
+import catches per-item exceptions and carries on, so a raise after the
+insert would leave a half-written record behind. Ownership is judged
+effective rather than submitted — the `SCHEMA` default on insert, the row's
+current value on a partial update — so `wishlisted=True` with no `owned` key
+is a refusal, not a silent contradiction. `owned = 0` *without* `wishlisted`
+writes no membership at all: a writer that forgets the field is a bug the
+per-writer pins catch, not something this funnel papers over.
+
 A field that is not present is not validated: an update that touches only
 `notes` never reads `isbn`. Callers that hold a *provider's* value (an
 Audiobookshelf ASIN, a Hardcover edition ISBN) pre-clean it with
@@ -59,6 +79,7 @@ from app.config import MEDIA_TYPES
 from app.database import get_game_platforms
 from app.services import isbn as isbn_svc
 from app.services import item_copies
+from app.services import lists
 from app.services.write_targets import (  # noqa: F401 — re-exported
     ItemValueError,
     UnknownLocationError,
@@ -93,6 +114,11 @@ class InvalidReadingStatus(ItemValueError):
 class InvalidOwned(ItemValueError):
     code = "invalid_owned"
     field = "owned"
+
+
+class InvalidWishlisted(ItemValueError):
+    code = "invalid_wishlisted"
+    field = "wishlisted"
 
 
 #: Columns a caller may never set on insert — the database owns them.
@@ -227,18 +253,106 @@ def validate_item_fields(db, fields: Mapping[str, Any]) -> dict[str, Any]:
         out["reading_status"] = status
 
     if "owned" in out:
-        owned = out["owned"]
-        if isinstance(owned, bool):
-            owned = int(owned)
-        elif isinstance(owned, str) and owned.strip() in ("0", "1"):
-            owned = int(owned.strip())
-        elif isinstance(owned, int) and owned in (0, 1):
-            pass
-        else:
-            raise InvalidOwned("Owned must be 0 or 1", value=owned)
-        out["owned"] = owned
+        out["owned"] = _coerce_owned(out["owned"])
 
     return out
+
+
+def _coerce_owned(value: Any) -> int:
+    """`owned` as 0 or 1, or raise `InvalidOwned`.
+
+    Factored out of `validate_item_fields` because two other callers need the
+    *same* acceptance before validation has run: `_refuse_owned_wishlist`
+    below, and `_apply_membership`'s promotion arm. Both see the caller's raw
+    mapping — `validate_item_fields` normalises a copy — so a bare
+    `values.get("owned") == 1` there would miss the `"1"` this funnel
+    deliberately accepts, and silently leave a promoted item on the wishlist.
+    """
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, str) and value.strip() in ("0", "1"):
+        return int(value.strip())
+    if isinstance(value, int) and value in (0, 1):
+        return value
+    raise InvalidOwned("Owned must be 0 or 1", value=value)
+
+
+def _pop_wishlisted(values: dict[str, Any]) -> bool | None:
+    """Remove the virtual `wishlisted` key and return it as a bool, or None.
+
+    `wishlisted` is not a column on `items` — it is membership of the wishlist
+    in `list_items`. Popping it here is what keeps `_validated_names` from
+    rejecting it as "not on the items table" and keeps it out of the SQL
+    statement, exactly as `_execute_update` already pops `updated_at`.
+    """
+    if "wishlisted" not in values:
+        return None
+    value = values.pop("wishlisted")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    raise InvalidWishlisted("Wishlisted must be true or false", value=value)
+
+
+def _refuse_owned_wishlist(db, wishlisted: bool | None, values: Mapping[str, Any],
+                          item_ids: Iterable[int] | None = None) -> None:
+    """Refuse the one contradiction the funnel does not allow: an owned item
+    on the wishlist. **Runs before any SQL this call writes.**
+
+    Ordering is the whole point (G85). `archive.py`'s `apply_plan` catches
+    per-item exceptions into an `errors` list and carries on inside one shared
+    transaction, so a raise *after* the insert leaves the item, its copies and
+    its tags committed while the report tells the user that item failed. The
+    same shape makes an "unchanged row" test untrue: the `db` fixture is one
+    `get_db()` block per test and `pytest.raises` swallows the exception
+    inside it.
+
+    Ownership is judged *effective*, not submitted. On insert an absent
+    `owned` means the `SCHEMA` default of 1, and on a partial update it means
+    whatever the row already holds — so `values.get("owned")` alone would let
+    `insert_item(db, title="X", wishlisted=True)` create the forbidden state.
+    """
+    if wishlisted is not True:
+        return
+
+    if "owned" in values:
+        if _coerce_owned(values["owned"]) == 1:
+            raise InvalidWishlisted("An owned item cannot be on the wishlist")
+        return
+
+    if item_ids is None:
+        # Insert with no `owned` key: the column default applies, and it is 1.
+        raise InvalidWishlisted("An owned item cannot be on the wishlist")
+
+    ids = list(item_ids)
+    if not ids:
+        return
+    marks = ", ".join("?" for _ in ids)
+    if db.execute(
+        f"SELECT 1 FROM items WHERE id IN ({marks}) AND owned = 1", ids
+    ).fetchone():
+        raise InvalidWishlisted("An owned item cannot be on the wishlist")
+
+
+def _apply_membership(db, item_ids: Iterable[int], wishlisted: bool | None,
+                      values: Mapping[str, Any]) -> None:
+    """Write wishlist membership after the row write.
+
+    Ordered after the item statement and after `sync_primary_location` (G96 —
+    the two side tables are independent, but the order is stated so nobody
+    moves it). This function only writes; the contradiction was already
+    refused by `_refuse_owned_wishlist` before anything was written.
+    """
+    ids = list(item_ids)
+    if not ids:
+        return
+    if wishlisted is not None:
+        lists.set_membership(db, lists.WISHLIST, ids, wishlisted)
+    elif "owned" in values and _coerce_owned(values["owned"]) == 1:
+        # You do not wish for what you have. This is what makes Shelf Fill's
+        # promotion correct without it knowing the list exists.
+        lists.set_membership(db, lists.WISHLIST, ids, False)
 
 
 def insert_item(db, fields: Mapping[str, Any] | None = None, **kwargs) -> int:
@@ -263,6 +377,7 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, **kwargs) -> int:
     """
     values: dict[str, Any] = dict(fields or {})
     values.update(kwargs)
+    wishlisted = _pop_wishlisted(values)
 
     if not values.get("title"):
         raise ValueError(
@@ -272,6 +387,7 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, **kwargs) -> int:
 
     _validated_names(db, values, _MANAGED, "insert_item")
     values = validate_item_fields(db, values)
+    _refuse_owned_wishlist(db, wishlisted, values)
 
     names = list(values)
     placeholders = ", ".join("?" for _ in names)
@@ -282,6 +398,7 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, **kwargs) -> int:
     item_id = cursor.lastrowid
     if "location_id" in values:
         item_copies.sync_primary_location(db, item_id, values["location_id"])
+    _apply_membership(db, [item_id], wishlisted, values)
     return item_id
 
 
@@ -313,11 +430,21 @@ def update_item_fields(db, item_id: int, fields: Mapping[str, Any]) -> None:
     `created_at`); always stamps `updated_at`. Raises `ItemValueError` on a
     bad value, `ValueError` on a bad name.
     """
+    fields = dict(fields)
+    wishlisted = _pop_wishlisted(fields)
+    _refuse_owned_wishlist(db, wishlisted, fields, [item_id])
+
     values = _execute_update(db, fields, "id = ?", [item_id], "update_item_fields")
     if "location_id" in values and db.execute(
         "SELECT 1 FROM items WHERE id = ?", (item_id,)
     ).fetchone():
         item_copies.sync_primary_location(db, item_id, values["location_id"])
+    existing = [
+        row["id"] for row in db.execute(
+            "SELECT id FROM items WHERE id = ?", (item_id,)
+        ).fetchall()
+    ]
+    _apply_membership(db, existing, wishlisted, fields)
 
 
 def update_items_fields(db, item_ids: Iterable[int],
@@ -327,12 +454,18 @@ def update_items_fields(db, item_ids: Iterable[int],
     if not ids:
         return
     marks = ", ".join("?" for _ in ids)
+
+    fields = dict(fields)
+    wishlisted = _pop_wishlisted(fields)
+    _refuse_owned_wishlist(db, wishlisted, fields, ids)
+
     values = _execute_update(db, fields, f"id IN ({marks})", ids, "update_items_fields")
+    existing_ids = [
+        row["id"] for row in db.execute(
+            f"SELECT id FROM items WHERE id IN ({marks})", ids
+        ).fetchall()
+    ]
     if "location_id" in values:
-        existing_ids = [
-            row["id"] for row in db.execute(
-                f"SELECT id FROM items WHERE id IN ({marks})", ids
-            ).fetchall()
-        ]
         for item_id in existing_ids:
             item_copies.sync_primary_location(db, item_id, values["location_id"])
+    _apply_membership(db, existing_ids, wishlisted, fields)

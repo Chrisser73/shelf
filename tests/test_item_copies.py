@@ -11,11 +11,16 @@ def _location(db, name="Living Room"):
 
 
 def _item(db, title="Copy Test", *, owned=1, location_id=None, media_type="book"):
-    return db.execute(
+    item_id = db.execute(
         "INSERT INTO items (title, media_type, source, owned, location_id) "
         "VALUES (?, ?, 'test', ?, ?)",
         (title, media_type, owned, location_id),
     ).lastrowid
+    if owned == 0:
+        from app.services import lists
+
+        lists.add(db, lists.WISHLIST, item_id)
+    return item_id
 
 
 def _copy(db, copy_id):

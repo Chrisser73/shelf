@@ -26,6 +26,25 @@ Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
 
+### After upgrading to 0.41.1
+
+**Four migrations run.** They add two tables (`lists` and `list_items`), seed
+one list named *Wishlist*, and put every item you had marked as not owned onto
+it. They write one row per wishlist item, so they are quick even on a large
+library, and they need no action from you.
+
+**Nothing changes on screen.** Every wishlist badge, filter, count and share
+link shows exactly what it showed before. What changed is underneath: being on
+the wishlist is now its own fact rather than a side effect of *not owned*.
+That is groundwork — a later release uses it to let an item be neither owned
+nor wishlisted, for books you have read but do not own.
+
+Portable archives and CSV exports carry it. Each item in an archive gains a
+`wishlisted` key, and the CSV export gains a `wishlisted` column at the end.
+An archive or CSV written *before* this release imports normally: without the
+key, Shelf derives wishlist membership from the item's owned flag, exactly as
+that file already meant.
+
 ### After upgrading to 0.39.0
 
 **One migration runs.** It adds a single column (`items.cover_review_dismissed`)

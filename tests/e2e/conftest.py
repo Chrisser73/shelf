@@ -781,6 +781,12 @@ def insert_item(data_dir: Path, **kwargs) -> int:
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.execute(f"INSERT INTO items ({cols}) VALUES ({placeholders})", list(fields.values()))
+        if fields.get("owned") == 0:
+            conn.execute(
+                "INSERT OR IGNORE INTO list_items (list_id, item_id) "
+                "SELECT id, ? FROM lists WHERE slug = 'wishlist'",
+                (cur.lastrowid,),
+            )
         conn.commit()
         return cur.lastrowid
     finally:

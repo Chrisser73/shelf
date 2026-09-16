@@ -1,5 +1,7 @@
 from app.routers import shelf_fill
+from app.services import lists
 from app.services import locations as location_svc
+from tests.conftest import _assert_wishlist_invariant
 
 
 def _item(db, *, title="Filed book", owned=1, isbn=None):
@@ -7,6 +9,10 @@ def _item(db, *, title="Filed book", owned=1, isbn=None):
         "INSERT INTO items (title, media_type, owned, isbn) VALUES (?, 'book', ?, ?)",
         (title, owned, isbn),
     )
+    if owned == 0:
+        from app.services import lists
+
+        lists.add(db, lists.WISHLIST, cur.lastrowid)
     return cur.lastrowid
 
 
@@ -42,6 +48,45 @@ def test_place_item_promotes_wishlist_to_owned(db):
     item = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
     assert item["owned"] == 1
     assert result["was_wishlist"] is True
+    assert not lists.is_member(db, lists.WISHLIST, item_id)
+    _assert_wishlist_invariant(db)
+
+
+def test_place_exact_copy_promotes_wishlist_and_removes_membership(db):
+    """`_place_exact_copy`'s secondary-copy branch (app/routers/shelf_fill.py)
+    has no pin today. The wishlist item here carries only a
+    secondary (non-primary) copy — no primary copy row at all — which is the
+    G96-shaped danger: if the promotion's `owned = 1` write ever grew a
+    `location_id` key, it would re-enter `item_copies.sync_primary_location`,
+    which *creates* a primary copy when none exists. Asserting the copy count
+    and its `is_primary` flag stay put, not just that `owned` flipped, is what
+    would catch that.
+    """
+    first = location_svc.create_location(db, "Shelf A")
+    target = location_svc.create_location(db, "Shelf B")
+    item_id = _item(db, owned=0)
+    secondary_id = db.execute(
+        "INSERT INTO item_copies (item_id, copy_number, location_id, copy_barcode, is_primary) "
+        "VALUES (?, 1, ?, 'WISH-COPY-1', 0)", (item_id, first),
+    ).lastrowid
+
+    exact = shelf_fill._copy_by_barcode(db, "WISH-COPY-1")
+    assert exact["is_primary"] == 0
+    result = shelf_fill._place_exact_copy(db, exact, target)
+
+    item = db.execute("SELECT owned FROM items WHERE id = ?", (item_id,)).fetchone()
+    assert item["owned"] == 1
+    assert result["was_wishlist"] is True
+    assert not lists.is_member(db, lists.WISHLIST, item_id)
+
+    copies = db.execute(
+        "SELECT id, is_primary, location_id FROM item_copies WHERE item_id = ?",
+        (item_id,),
+    ).fetchall()
+    assert [row["id"] for row in copies] == [secondary_id]
+    assert copies[0]["is_primary"] == 0
+    assert copies[0]["location_id"] == target
+    _assert_wishlist_invariant(db)
 
 
 def test_copy_barcode_moves_exact_secondary_without_moving_primary(db):

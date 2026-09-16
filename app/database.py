@@ -182,6 +182,33 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
      "ALTER TABLE item_copies ADD COLUMN position_order INTEGER DEFAULT NULL"),
     (32, "Add durable cover-review dismissal",
      "ALTER TABLE items ADD COLUMN cover_review_dismissed INTEGER NOT NULL DEFAULT 0"),
+    # 33 and 34 are numbered entries *as well as* MIGRATION_TABLES copies, so
+    # that 35 and 36 find their tables on the upgrade path. The loop above runs
+    # before executescript(MIGRATION_TABLES), and _is_benign_migration_error
+    # answers "benign" for `no such table` whenever the table is named in
+    # MIGRATION_TABLES — so a CREATE that lived only there would let the seeds
+    # be recorded as applied without ever running. The next person will reach
+    # for MIGRATION_TABLES alone; this is why that is not enough.
+    (33, "Add named lists",
+     """CREATE TABLE IF NOT EXISTS lists (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug       TEXT NOT NULL UNIQUE,
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)"""),
+    (34, "Add list membership",
+     """CREATE TABLE IF NOT EXISTS list_items (
+    list_id  INTEGER NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+    item_id  INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (list_id, item_id)
+)"""),
+    (35, "Seed the wishlist",
+     "INSERT OR IGNORE INTO lists (slug, name) VALUES ('wishlist', 'Wishlist')"),
+    (36, "Put every unowned item on the wishlist",
+     """INSERT OR IGNORE INTO list_items (list_id, item_id)
+        SELECT (SELECT id FROM lists WHERE slug = 'wishlist'), id
+        FROM items WHERE owned = 0"""),
 )
 
 MIGRATION_TABLES = """
@@ -460,6 +487,22 @@ CREATE TABLE IF NOT EXISTS music_identifiers (
 CREATE INDEX IF NOT EXISTS idx_music_identifiers_item ON music_identifiers(item_id);
 CREATE INDEX IF NOT EXISTS idx_music_identifiers_value
     ON music_identifiers(value COLLATE NOCASE);
+
+-- Named lists and their membership (#125). Also created by migrations 33 and
+-- 34 for upgrades; the index lives only here, as item_copies' do.
+CREATE TABLE IF NOT EXISTS lists (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug       TEXT NOT NULL UNIQUE,
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS list_items (
+    list_id  INTEGER NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+    item_id  INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (list_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_list_items_item ON list_items(item_id);
 """
 
 

@@ -218,6 +218,7 @@ async def add_music_release(
                 publish_year=publish_year,
                 location_id=loc_id,
                 owned=1 if owned else 0,
+                wishlisted=not owned,
                 source="musicbrainz",
             )
             music_catalog.save_release(db, item_id, release)

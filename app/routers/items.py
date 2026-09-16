@@ -21,9 +21,11 @@ from app.routers import items_common
 from app.routers import items_scan_modes
 from app.routers.items_common import SORT_OPTIONS  # re-exported for pages.py
 from app.services import isbn as isbn_svc
+from app.services import lists
 from app.services.item_write import (ItemValueError, insert_item, update_item_fields,
                                      update_items_fields, validate_item_fields,
                                      validated_location_id)
+from app.services import item_write  # for _coerce_owned (bulk-update's owned -> wishlisted)
 from app.services import openlibrary, googlebooks, hardcover, covers, national
 from app.services import detect
 from app.services import cover_queue
@@ -537,7 +539,7 @@ async def scan_isbn(
         # Wishlist mode: set owned = 0
         if mode == "wishlist":
             with get_db() as db:
-                update_item_fields(db, item_id, {"owned": 0})
+                update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
 
         # Queue the cover instead of downloading it in-request. The
         # hints are the exact three inputs the download used to take, so
@@ -696,10 +698,10 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
              "item_id": existing["id"]},
         )
 
-    # Wishlist mode: set owned = 0 (mirrors /api/scan, items.py:530-532).
+    # Wishlist mode: set owned = 0 (mirrors /api/scan, items.py:538-540).
     if mode == "wishlist":
         with get_db() as db:
-            update_item_fields(db, item_id, {"owned": 0})
+            update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
 
     status = "wishlisted" if mode == "wishlist" else "added"
 
@@ -842,7 +844,8 @@ async def search_items(
             f"SELECT i.*, l.name as location_name, "
             f"(SELECT b.name FROM checkouts c JOIN borrowers b ON c.borrower_id = b.id "
             f" WHERE c.item_id = i.id AND c.checked_in IS NULL LIMIT 1) AS lent_to, "
-            f"(SELECT 1 FROM checkouts c WHERE c.item_id = i.id AND {OVERDUE_CONDITION} LIMIT 1) AS lent_overdue "
+            f"(SELECT 1 FROM checkouts c WHERE c.item_id = i.id AND {OVERDUE_CONDITION} LIMIT 1) AS lent_overdue, "
+            f"{lists.WISHLISTED_SQL} AS wishlisted "
             f"FROM items i "
             f"LEFT JOIN locations l ON i.location_id = l.id "
             f"{where} ORDER BY {order_clause} LIMIT ? OFFSET ?",
@@ -926,6 +929,14 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
             ]
 
         try:
+            if "owned" in filtered:
+                # Same coercion the funnel applies to "owned" itself (issue
+                # #125) — an invalid value raises InvalidOwned here, caught
+                # below exactly as it would be if raised inside the funnel,
+                # so the error contract is unchanged.
+                coerced = item_write._coerce_owned(filtered["owned"])
+                filtered["owned"] = coerced
+                filtered["wishlisted"] = (coerced == 0)
             update_items_fields(db, item_ids, filtered)
         except ItemValueError as e:
             return {"ok": False, "message": str(e)}
@@ -1053,6 +1064,7 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
                     fields[key] = float(val) if val else None
                 elif key == "owned":
                     fields[key] = int(val) if val else 0
+                    fields["wishlisted"] = fields["owned"] == 0
                 else:
                     fields[key] = val
     except (TypeError, ValueError):

@@ -39,7 +39,9 @@ Main tables: `items` (everything — books, discs, games; ~36 columns incl.
 `locations`, `borrowers` + `checkouts`, `tags` + `item_tags`, `series_meta` (Hardcover
 completeness), `reading_log`, `users`, `settings` (k/v, secrets encrypted),
 `share_links`, `scan_log`, `game_platforms`, `valuation_history`,
-`cover_queue`, `legacy_book_mappings` (a confirmed legacy price-point
+`cover_queue`, `lists` (named lists — one seeded row, `wishlist`) +
+`list_items` (which items are on which list),
+`legacy_book_mappings` (a confirmed legacy price-point
 barcode -> ISBN-13 choice, constrained in the schema to a 17-digit barcode
 and a 978/979 ISBN), `item_links`, and the per-family side tables described
 below — `music_releases` + `music_media` + `music_tracks` +
@@ -852,6 +854,26 @@ either ISBN column rewrites **both** from the canonical 13/10 pair
 configured game platform; `reading_status` is one of `want_to_read`,
 `reading`, `read`; `owned` is 0 or 1. A field an update does not carry is not
 validated, so touching `notes` never reads `isbn`.
+
+**Wishlist membership is a list, not a column.** All three funnels accept a
+virtual `wishlisted: bool` field, popped before the name check so it never
+reaches the statement and applied through `app/services/lists.py` — the only
+module that writes `list_items`, enforced by a source guard the way
+`item_copies.py` is for copies. One rule lives in the funnel: **writing
+`owned = 1` removes membership**, which is what makes every promotion path
+correct without knowing the list exists. The single contradiction the funnel
+refuses is an *owned* item on the wishlist (`InvalidWishlisted`), and it is
+refused **before anything is written** — an archive import catches per-item
+exceptions and carries on, so a raise after the insert would leave a
+half-written record behind (`GOTCHAS.md` G85). Ownership is judged
+*effective*, not submitted: an absent `owned` on insert means the `SCHEMA`
+default of 1, and a partial update means the row's current value.
+
+> **Invariant.** `owned` answers *do I have a copy?*; wishlist membership
+> answers *do I want one?* They are separate states. Until the follow-on
+> plan ships the user-visible "neither" state, every writer keeps the two
+> equal — on the wishlist ⇔ `owned = 0` — and `tests/conftest.py`'s
+> `_assert_wishlist_invariant` is called after every writer to prove it.
 
 **When a route decides on a `SELECT`, the transaction is the third.** Every
 add path that reads a duplicate guard and then inserts on the answer runs both

@@ -134,6 +134,7 @@ async def store_queue(request: Request, _=Depends(require_role("editor"))):
                         title=f"Unreadable barcode — {label}",
                         media_type="book",
                         owned=0,
+                        wishlisted=True,
                         source="store_queue",
                     )
                 items_common._log_scan(label, "book", "unreadable", item_id, "wishlist")
@@ -172,7 +173,7 @@ async def store_queue(request: Request, _=Depends(require_role("editor"))):
                 try:
                     item_id = items_common._save_item(metadata, isbn13, "book", None, source, hc_ids)
                     with get_db() as db:
-                        update_item_fields(db, item_id, {"owned": 0})
+                        update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
                     try:
                         hc_cover = metadata.get("cover_url") if source == "hardcover" else hc_ids.get("cover_url")
                         cover_path = await covers.download_cover(
@@ -203,6 +204,7 @@ async def store_queue(request: Request, _=Depends(require_role("editor"))):
                     isbn=isbn13,
                     media_type="book",
                     owned=0,
+                    wishlisted=True,
                     source="store_queue",
                 )
             items_common._log_scan(isbn13, "book", "wishlisted", item_id, "wishlist")

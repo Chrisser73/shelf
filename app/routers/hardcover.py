@@ -161,6 +161,7 @@ async def add_hardcover_to_shelf(request: Request, _=Depends(require_role("edito
                     reading_status="want_to_read",
                     source="hardcover",
                     owned=0,
+                    wishlisted=True,
                     hardcover_book_id=hc_book_id,
                 )
             except ItemValueError as e:
@@ -568,6 +569,7 @@ def _import_single_book_metadata(book: dict, overwrite: bool, title_index: dict)
             reading_status=book.get("reading_status"),
             source="hardcover",
             owned=is_owned,
+            wishlisted=(is_owned == 0),
             hardcover_book_id=book.get("hardcover_book_id"),
             hardcover_edition_id=book.get("hardcover_edition_id"),
             hardcover_user_book_id=book.get("hardcover_user_book_id"),

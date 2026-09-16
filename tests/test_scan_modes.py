@@ -10,7 +10,9 @@ from app.services import provider_result
 from app.services import item_copies
 from app.services.item_copies import insert_copy
 from app.services.item_write import insert_item
-from tests.conftest import _insert_item, _insert_borrower, _insert_location
+from tests.conftest import (
+    _assert_wishlist_invariant, _insert_item, _insert_borrower, _insert_location,
+)
 
 
 class TestAddMode:
@@ -791,6 +793,7 @@ class TestScanCoverQueue:
         job = cover_queue._get_queue().get_nowait()
         row = db.execute("SELECT owned FROM items WHERE id = ?", (job.item_id,)).fetchone()
         assert row["owned"] == 0
+        _assert_wishlist_invariant(db)
 
 
 class TestCoverStatusEndpoint:

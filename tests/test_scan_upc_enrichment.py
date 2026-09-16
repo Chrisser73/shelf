@@ -17,7 +17,7 @@ from app.services import igdb, outbound, provider_result, tmdb, upcitemdb
 from app.services import upc as upc_svc
 from app.database import get_db
 from app.routers import items_common
-from tests.conftest import _insert_item
+from tests.conftest import _assert_wishlist_invariant, _insert_item
 
 
 DVD_UPC = "085391163121"
@@ -288,6 +288,7 @@ class TestGameScanHonoursWishlistMode:
         assert resp.status_code == 200
         row = db.execute("SELECT * FROM items WHERE media_type = 'video_game'").fetchone()
         assert row["owned"] == 0
+        _assert_wishlist_invariant(db)
         log_row = db.execute(
             "SELECT result FROM scan_log WHERE item_id = ?", (row["id"],)
         ).fetchone()

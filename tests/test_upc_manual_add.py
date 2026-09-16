@@ -17,7 +17,7 @@ import pytest
 
 from app.database import MIGRATIONS, MIGRATION_TABLES, SCHEMA, _run_migrations
 from app.services import upc as upc_svc
-from tests.conftest import _insert_item
+from tests.conftest import _assert_wishlist_invariant, _insert_item
 
 # 888888888866 is a well-formed UPC-A that no provider resolves.
 UPC_A = "888888888866"
@@ -262,6 +262,7 @@ class TestManualAddWishlistMode:
             "SELECT owned FROM items WHERE title = ?", ("Wishlist Book",)
         ).fetchone()
         assert row["owned"] == 0
+        _assert_wishlist_invariant(db)
         # G62: the card's declared attribute, not loose page text.
         assert 'data-scan-status="wishlisted"' in resp.text
 
@@ -405,6 +406,7 @@ class TestManualAddSurvivesACoverFailure:
         ).fetchall()
         assert len(rows) == 1
         assert rows[0]["owned"] == 0
+        _assert_wishlist_invariant(db)
 
     def test_a_successful_cover_still_toasts_as_success(self, admin_client, db):
         """The warning arm must not become the only arm."""

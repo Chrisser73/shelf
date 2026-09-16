@@ -6,6 +6,39 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-09-16
+
+Shelf has always treated "I don't own this" and "this is on my wishlist" as the
+same fact — one flag doing two jobs. That works until you want to record a book
+you read at a library and returned, or one you borrowed and gave back: you own
+no copy, but you don't want one either, and Shelf had nowhere to put that. This
+release separates the two facts. Nothing changes on screen today; it is the
+groundwork a later release builds the third state on.
+
+### Changed
+
+- **Your wishlist is now its own list rather than a side effect of not owning
+  something.** Four migrations add two tables, seed a list named *Wishlist*,
+  and put every item you had marked as not owned onto it. **Nothing changes on
+  screen** — every badge, filter, count, share link and Store Mode verdict
+  shows exactly what it showed before, and no action is needed from you.
+  What changed is underneath: wanting a copy and lacking one are now recorded
+  separately, which is what lets a later release add the third state for a book
+  you have read but do not own.
+- **Marking something owned takes it off your wishlist**, everywhere that can
+  mark it — the item page, bulk edit, a Shelf Fill scan that places it, an
+  import. You do not wish for what you have. This was already true in effect;
+  it is now a rule the app enforces in one place rather than a habit each
+  screen kept on its own.
+- **Portable archives and CSV exports carry wishlist membership.** Each item in
+  an archive gains a `wishlisted` key, and the CSV export gains a `wishlisted`
+  column at the end — `1` for an item on your wishlist, `0` otherwise. An
+  archive or CSV written *before* this release imports unchanged: with no key
+  present, Shelf derives membership from the item's owned flag, which is
+  exactly what that file already meant. Deliberately, the new CSV column is
+  read on import but does not yet override the owned flag — that arrives with
+  the release that makes the two genuinely independent.
+
 ## [0.41.0] - 2026-09-11
 
 Shelf has understood physical copies for several releases — Shelf Fill can scan
@@ -3400,6 +3433,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.41.1]: https://github.com/dgahagan/shelf/releases/tag/v0.41.1
 [0.41.0]: https://github.com/dgahagan/shelf/releases/tag/v0.41.0
 [0.40.1]: https://github.com/dgahagan/shelf/releases/tag/v0.40.1
 [0.40.0]: https://github.com/dgahagan/shelf/releases/tag/v0.40.0

@@ -9,6 +9,8 @@ service needing edits.
 
 from __future__ import annotations
 
+from app.services import lists
+
 
 def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
     """Return stable, presentation-neutral metrics for the Home page."""
@@ -17,7 +19,7 @@ def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
         "SELECT COUNT(*) AS c FROM items WHERE owned = 1"
     ).fetchone()["c"]
     wishlist = db.execute(
-        "SELECT COUNT(*) AS c FROM items WHERE owned = 0"
+        f"SELECT COUNT(*) AS c FROM items i WHERE {lists.WISHLISTED_SQL}"
     ).fetchone()["c"]
     lent_out = db.execute(
         "SELECT COUNT(DISTINCT item_id) AS c FROM checkouts WHERE checked_in IS NULL"
@@ -34,11 +36,11 @@ def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
     ).fetchone()["c"]
 
     type_rows = db.execute(
-        "SELECT media_type, COUNT(*) AS item_count, "
-        "SUM(CASE WHEN owned = 1 THEN 1 ELSE 0 END) AS owned_count, "
-        "SUM(CASE WHEN owned = 0 THEN 1 ELSE 0 END) AS wishlist_count "
-        "FROM items GROUP BY media_type "
-        "ORDER BY item_count DESC, media_type COLLATE NOCASE"
+        "SELECT i.media_type, COUNT(*) AS item_count, "
+        "SUM(CASE WHEN i.owned = 1 THEN 1 ELSE 0 END) AS owned_count, "
+        f"SUM(CASE WHEN {lists.WISHLISTED_SQL} THEN 1 ELSE 0 END) AS wishlist_count "
+        "FROM items i GROUP BY i.media_type "
+        "ORDER BY item_count DESC, i.media_type COLLATE NOCASE"
     ).fetchall()
     media_types = [dict(row) for row in type_rows]
 
@@ -48,8 +50,9 @@ def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
         recent = [
             dict(row)
             for row in db.execute(
-                "SELECT id, title, authors, media_type, cover_path, owned, created_at "
-                "FROM items ORDER BY created_at DESC, id DESC LIMIT ?",
+                "SELECT i.id, i.title, i.authors, i.media_type, i.cover_path, i.owned, "
+                f"i.created_at, {lists.WISHLISTED_SQL} AS wishlisted "
+                "FROM items i ORDER BY i.created_at DESC, i.id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         ]

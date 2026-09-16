@@ -3832,6 +3832,18 @@ make check-tests
   commits (`app/database.py`). The shape reads as safe — every item is in a
   `try`, and the failure is reported — which is exactly why nobody checks it.
   An archive is untrusted input, so the failing record is not hypothetical.
+- **And "completely" means the record's *effective* state, not the keys the
+  caller happened to send.** A partial mapping is not a row: on an insert an
+  absent column takes its `SCHEMA` default, and on a partial update the row
+  already holds a value the request never mentions. A guard written as
+  `values.get("owned") == 1` therefore passes for
+  `insert_item(db, title="X", wishlisted=True)` — whose effective `owned` is
+  the default 1 — and for any update that does not resend `owned`. Resolve the
+  default for inserts, and query the existing rows for updates, before the
+  first write; for a bulk update preflight *every* target so a mixed selection
+  refuses whole rather than half-applying. (Issue #125 plan review, codex R1,
+  applied at T4 2026-09-16 `27957df`; the pin is
+  `tests/test_item_write.py::TestWishlistedRefusals`.)
 - **Evidence:** issue #116, commit `ab64c45`, 2026-09-08. Found in plan review
   (codex `R6`) before it shipped. The plan already stated the governing
   invariant — "an archive is untrusted input and must not be able to raise an
@@ -4224,6 +4236,80 @@ python -m pytest tests/test_item_copies.py -q -k "promotes_the_lowest or invent_
 - **Status:** documented. Not a lint candidate — "these two statements are
   order-dependent" is not mechanically findable; the defence is the mutation
   pass, which is G31's job.
+
+
+## G97 — A G31 mutate-and-restore inside one second can leave stale bytecode
+
+- **Rule:** clear `__pycache__` after **both** halves of a mutation pass —
+  after applying the mutation and after restoring — before re-running the
+  tests. `find . -name __pycache__ -type d -prune -exec rm -rf {} +`. Do not
+  trust a checksum or `git diff` as proof the restore took effect: they check
+  the *source*, and the interpreter may not be reading it.
+- **Why:** CPython invalidates a `.pyc` on the source's mtime **at one-second
+  granularity** plus its size. A G31 pass edits a file, runs pytest (writing a
+  `.pyc`), restores the file and runs pytest again — often well inside one
+  second. If the mutation is size-neutral, the restored source has the same
+  size and the same whole-second mtime as the mutated one, so the stale
+  bytecode is reused and the second run silently executes the mutation. The
+  failure is maximally confusing: the source on disk is provably correct,
+  `git diff` is empty, the checksum matches, and the tests fail anyway — which
+  reads as a real bug in code you just restored. It can also fail the other
+  way, leaving a mutation green and a pin looking dead.
+- **Evidence:** issue #125 T4, 2026-09-16 (`27957df`). The mutation moved one
+  call from before a write to after it — exactly size-neutral. Restoring it
+  left `item_write.cpython-314.pyc` written at `00:56:11.532` against a source
+  restored at `00:56:11.956`; five refusal pins stayed red across three
+  separate runs while `sha256sum` matched the known-good copy. ~20 minutes
+  lost before the timestamps were compared. Reproduced deliberately afterwards.
+- **Verify:** the two mtimes land in the same second and the sizes match, yet
+  behaviour differs —
+
+```bash
+stat -c '%s %y' app/services/item_write.py app/services/__pycache__/item_write.cpython-*.pyc
+```
+
+- **Status:** documented. **Lint candidate:** a `make` target or a conftest
+  hook could clear `__pycache__` unconditionally before a mutation run, or
+  `PYTHONDONTWRITEBYTECODE=1` could be set for the test targets — either would
+  remove the trap mechanically rather than by remembering.
+
+
+## G98 — A legacy-migration test built from current bootstrap SQL proves nothing
+
+- **Rule:** build a legacy-database fixture from the bootstrap schema **as it
+  was before** the migration under test — `SCHEMA` plus the numbered entries up
+  to that point, plus the auxiliary CREATEs *minus* the new ones. Never run the
+  current `MIGRATION_TABLES` before `_run_migrations`, and assert through
+  `sqlite_master` that the new table is **absent** before migrating. Then
+  mutation-test each numbered CREATE independently, not just the seed.
+- **Why:** `_run_migrations` runs the numbered loop *before*
+  `executescript(MIGRATION_TABLES)`, and `_is_benign_migration_error`
+  (`app/database.py`) answers *benign* for `no such table` whenever the table
+  is named in current `MIGRATION_TABLES`. So a missing or broken numbered
+  CREATE records its seed version as applied and leaves a permanently empty
+  table on a real user's upgrade — while a fixture that ran current
+  `MIGRATION_TABLES` first has already created the table and stays green. The
+  test reads as coverage of the upgrade path and covers nothing. This is the
+  one path in this repo that is **irreversible against a real collection**.
+  `tests/test_items.py::TestMigrationLoggingDefersOutsideTransaction::_legacy_db`
+  already states the rule for a different reason (later schema baked into a
+  CREATE); this is the table-level face of it.
+- **Evidence:** issue #125 plan review (codex R3), applied at T1, 2026-09-16
+  (`913513b`). The plan's original fixture recipe was `SCHEMA` + entries 1–32 +
+  `MIGRATION_TABLES`, while the same task added the new CREATEs to
+  `MIGRATION_TABLES` — so entries 33 and 34 were `IF NOT EXISTS` no-ops and the
+  test passed with entry 33 deleted. The rebuilt pre-33 fixture reds on all
+  three mutations, each on table or seed state rather than a version row.
+- **Verify:** remove each new numbered CREATE in turn; the legacy test must
+  fail on a missing table or missing seed rows, never merely on
+  `schema_version` —
+
+```bash
+python -m pytest tests/test_lists_migration.py -q -k "predates or create_and_seed"
+```
+
+- **Status:** documented. Not a lint candidate — whether a fixture is "pre-N"
+  is a judgment about intent, not a grep.
 
 
 ## Graveyard

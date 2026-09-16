@@ -19,6 +19,7 @@ from app.database import get_db
 from app.routers import items_common
 from app.services import cover_queue
 from app.services import isbn as isbn_svc
+from app.services import lists
 from app.services.item_write import ItemValueError, insert_item, update_item_fields
 
 logger = logging.getLogger(__name__)
@@ -33,11 +34,12 @@ async def export_csv(_=Depends(require_role("viewer"))):
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value"])
+    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value", "wishlisted"])
 
     with get_db() as db:
         rows = db.execute(
-            "SELECT i.*, l.name as location_name FROM items i "
+            f"SELECT i.*, l.name as location_name, {lists.WISHLISTED_SQL} AS wishlisted "
+            "FROM items i "
             "LEFT JOIN locations l ON i.location_id = l.id "
             "ORDER BY i.title"
         ).fetchall()
@@ -48,6 +50,7 @@ async def export_csv(_=Depends(require_role("viewer"))):
             row["platform"], row["publisher"], row["publish_year"], row["page_count"],
             row["series_name"], row["location_name"], row["source"],
             row["estimated_value"], row["manual_value"],
+            1 if row["wishlisted"] else 0,
         ])
 
     output.seek(0)
@@ -208,7 +211,12 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                         # COALESCE semantics: only touch reading_status /
                         # date_finished when this row actually carries one;
                         # owned is always authoritative from the row.
-                        tracker_fields = {"owned": int(owned)}
+                        # wishlisted = not owned (plan 1's rule); plan 2
+                        # introduces a genuine neither-owned-nor-wishlisted
+                        # state and will replace this equality.
+                        # (norm["wishlisted"], parsed from an imported CSV's
+                        # own column, is not wired in here — that's plan 2.)
+                        tracker_fields = {"owned": int(owned), "wishlisted": not owned}
                         if norm["reading_status"] is not None:
                             tracker_fields["reading_status"] = norm["reading_status"]
                         if norm["date_finished"] is not None:
@@ -234,6 +242,12 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     reading_status=norm["reading_status"],
                     date_finished=norm["date_finished"],
                     owned=int(owned),
+                    # wishlisted = not owned (plan 1's rule); plan 2
+                    # introduces a genuine neither-owned-nor-wishlisted
+                    # state and will replace this equality.
+                    # (norm["wishlisted"], parsed from an imported CSV's own
+                    # column, is not wired in here — that's plan 2.)
+                    wishlisted=not owned,
                     source=source,
                 )
                 if isbn_val:

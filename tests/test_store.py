@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.conftest import _insert_item
+from tests.conftest import _assert_wishlist_invariant, _insert_item
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SW_PATH = REPO_ROOT / "static" / "sw.js"
@@ -169,6 +169,7 @@ class TestStoreQueue:
 
         item = db.execute("SELECT * FROM items WHERE isbn = '9780441013593'").fetchone()
         assert item["owned"] == 0
+        _assert_wishlist_invariant(db)
 
     def test_google_key_reaches_store_metadata_lookup(self, admin_client, monkeypatch):
         monkeypatch.setenv("GOOGLE_BOOKS_API_KEY", "store-google-key")

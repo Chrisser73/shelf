@@ -199,7 +199,7 @@
                     {% if item.series_position is not none %}
                     <span class="absolute top-1 left-1 bg-black/70 text-white text-[10px] px-1 rounded">#{{ item.series_position|int if item.series_position == item.series_position|int else item.series_position }}</span>
                     {% endif %}
-                    {% if not item.owned %}
+                    {% if item.wishlisted %}
                     <span class="absolute bottom-1 left-1 bg-shelf-warning/90 text-black text-[9px] px-1 rounded font-medium">Wishlist</span>
                     {% endif %}
                 </div>
@@ -258,7 +258,7 @@
                         <span class="text-[10px] text-shelf-muted text-center leading-tight">{{ item.title[:40] }}</span>
                     </div>
                     {% endif %}
-                    {% if not item.owned %}
+                    {% if item.wishlisted %}
                     <span class="absolute bottom-1 left-1 bg-shelf-warning/90 text-black text-[9px] px-1 rounded font-medium">Wishlist</span>
                     {% endif %}
                 </div>

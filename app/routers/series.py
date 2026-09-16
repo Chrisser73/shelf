@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from app.auth import require_role
 from app.config import BOOK_MEDIA_TYPES
 from app.database import gc_orphaned_series_meta, get_db, get_setting
+from app.services import lists
 from app.services import hardcover
 
 logger = logging.getLogger(__name__)
@@ -52,11 +53,13 @@ async def series_page(request: Request, _=Depends(require_role("viewer"))):
     templates = request.app.state.templates
     with get_db() as db:
         rows = db.execute(
-            "SELECT id, title, authors, cover_path, series_name, series_position, "
-            "owned, reading_status FROM items WHERE series_name IS NOT NULL "
-            "AND TRIM(series_name) != '' "
-            "ORDER BY series_name COLLATE NOCASE, "
-            "series_position IS NULL, series_position, title COLLATE NOCASE"
+            "SELECT i.id, i.title, i.authors, i.cover_path, i.series_name, "
+            "i.series_position, i.owned, i.reading_status, "
+            f"{lists.WISHLISTED_SQL} AS wishlisted "
+            "FROM items i WHERE i.series_name IS NOT NULL "
+            "AND TRIM(i.series_name) != '' "
+            "ORDER BY i.series_name COLLATE NOCASE, "
+            "i.series_position IS NULL, i.series_position, i.title COLLATE NOCASE"
         ).fetchall()
         has_hardcover = bool(get_setting(db, "hardcover_token"))
         meta_rows = {
@@ -76,7 +79,8 @@ async def series_page(request: Request, _=Depends(require_role("viewer"))):
         ).fetchone()[0]
         unassigned_items = [dict(r) for r in db.execute(
             "SELECT id, title, authors, cover_path, series_name, series_position, "
-            f"owned, reading_status FROM items WHERE {_unassigned_where} "
+            f"owned, reading_status, {lists.WISHLISTED_SQL} AS wishlisted "
+            f"FROM items i WHERE {_unassigned_where} "
             "ORDER BY title COLLATE NOCASE LIMIT ?",
             (*UNASSIGNED_MEDIA_TYPES, UNASSIGNED_STRIP_CAP),
         ).fetchall()]
@@ -140,7 +144,8 @@ async def check_series(name: str = "", _=Depends(require_role("viewer"))):
         if not token:
             return {"ok": False, "message": "Hardcover integration not configured"}
         local = db.execute(
-            "SELECT title, owned, hardcover_book_id FROM items "
+            "SELECT title, owned, hardcover_book_id, "
+            f"{lists.WISHLISTED_SQL} AS wishlisted FROM items i "
             "WHERE series_name = ? COLLATE NOCASE",
             (name,),
         ).fetchall()
@@ -156,7 +161,9 @@ async def check_series(name: str = "", _=Depends(require_role("viewer"))):
     for b in books:
         match = by_hc_id.get(b["hardcover_book_id"]) or by_title.get(b["title"].casefold().strip())
         if match:
-            status = "owned" if match["owned"] else "wishlist"
+            # Plan 2 adds the third arm: a row that is neither owned nor
+            # wishlisted. Until then the two are still complements.
+            status = "wishlist" if match["wishlisted"] else "owned"
         else:
             status = "missing"
         out.append({**b, "status": status, "series_name": name})
