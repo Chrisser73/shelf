@@ -118,11 +118,11 @@ The last five releases. Full detail in the [changelog](../CHANGELOG.md).
 
 | Version | What landed |
 |---|---|
+| [0.42.1](https://github.com/dgahagan/shelf/releases/tag/v0.42.1) | Scanning the barcode of a book with several authors keeps all of them — up to five, in the order the lookup lists them — instead of only the first. Books already in your library keep what they were saved with |
+| [0.42.0](https://github.com/dgahagan/shelf/releases/tag/v0.42.0) | An item can now be neither owned nor wishlisted — a book you read from the library keeps its reading history without sitting on your wishlist. Two checkboxes on the edit page, a fourth Owned filter, bulk add and remove for the wishlist, Goodreads imports that stop wishlisting books you have read, and a valuation that counts only what you own. It builds on 0.41.1, which made the wishlist its own list with nothing changing on screen |
 | [0.41.0](https://github.com/dgahagan/shelf/releases/tag/v0.41.0) | Physical copies finally have a place you can write them: add a second or third copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes — and every location on an item page is now a link into Browse |
 | [0.40.1](https://github.com/dgahagan/shelf/releases/tag/v0.40.1) | Nothing you can see: the checks that have to pass before a release can ship no longer depend on a free third-party lookup allowance, which had twice held a release back — once for seven hours |
 | [0.40.0](https://github.com/dgahagan/shelf/releases/tag/v0.40.0) | Anything no lookup can find can now be typed in by hand: a standalone **Add by hand** panel needing only a title, every media type, no barcode required — reachable from Home, from an empty title search, from a mistyped barcode, and from any item's page as **Add another like this** |
-| [0.39.0](https://github.com/dgahagan/shelf/releases/tag/v0.39.0) | Covers the automatic chain cannot reach get a queue of their own: every cover-less item, discs, games and records included, walked one at a time with the picker inline — and an item with genuinely no cover anywhere can be marked **Not available** so the missing-covers count finally reaches zero |
-| [0.38.0](https://github.com/dgahagan/shelf/releases/tag/v0.38.0) | Every part of Shelf that answers "where is this item?" now counts physical copies: the item page lists them all, a shelf audit expects an item wherever any copy of it is, a scan that cannot say which copy reports instead of moving one, and the portable archive carries copies |
 
 ---
 

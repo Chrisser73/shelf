@@ -4,6 +4,7 @@ import logging
 
 import httpx
 
+from app.services import authors as authors_svc
 from app.services import outbound, provider_result
 from app.services.isbn import isbn13_to_isbn10
 from app.services.item_write import update_item_fields
@@ -169,8 +170,7 @@ async def lookup_by_isbn(
     contributions = book.get("contributions", [])
     if contributions:
         author_names = [c["author"]["name"] for c in contributions if c.get("author", {}).get("name")]
-        if author_names:
-            authors = ", ".join(author_names)
+        authors = authors_svc.join_names(author_names)
 
     # Extract series
     series_name = None
@@ -288,8 +288,7 @@ async def get_user_books(
         contributions = book.get("contributions", [])
         if contributions:
             author_names = [c["author"]["name"] for c in contributions if c.get("author", {}).get("name")]
-            if author_names:
-                authors = ", ".join(author_names)
+            authors = authors_svc.join_names(author_names)
 
         # Extract series
         series_name = None
@@ -397,9 +396,18 @@ async def search_books(query_str: str, client: httpx.AsyncClient, token: str | N
         elif isinstance(img, str):
             cover_url = img
 
-        # Authors
-        author_names = doc.get("author_names", [])
-        authors = ", ".join(author_names) if isinstance(author_names, list) else author_names
+        # Authors — this search index's author_names is a list for most docs
+        # but a bare string for some, so wrap the string case before the funnel.
+        # Any other shape is dropped here: this loop has no parse guard, so a
+        # TypeError from join_names would reach the caller as a 500.
+        raw = doc.get("author_names") or []
+        if isinstance(raw, str):
+            names = [raw]
+        elif isinstance(raw, (list, tuple)):
+            names = raw
+        else:
+            names = []
+        authors = authors_svc.join_names(names)
 
         # Series
         series = doc.get("featured_series")
@@ -619,8 +627,7 @@ def _parse_series_entries(entries: list) -> list[dict]:
         contributions = book.get("contributions", [])
         if contributions:
             names = [c["author"]["name"] for c in contributions if c.get("author", {}).get("name")]
-            if names:
-                authors = ", ".join(names)
+            authors = authors_svc.join_names(names)
 
         cover_url = None
         ci = book.get("cached_image")

@@ -165,9 +165,29 @@ A scan or title-search add runs `_lookup_metadata` → `_save_item`
 Photo Intake's confirm step.
 
 Books by ISBN, in order until one answers: national bibliography → Open
-Library (3-call chain: ISBN → work → author) → Hardcover → Google Books.
-Hardcover additionally enriches series and description when a token is
-present.
+Library (ISBN → work → one request per author, up to five, each paced) →
+Hardcover → Google Books. Hardcover additionally enriches series and
+description when a token is present.
+
+**Every author a provider reports is kept, through one funnel.** Open
+Library, Hardcover and Google Books build `items.authors` with
+`authors.join_names`: the provider's own order, blanks and exact repeats
+dropped, comma-joined, `NULL` when nothing is left. Near-identical spellings
+are deliberately *not* collapsed — `authors.matches()` treats "J. Smith" and
+"John Smith" as one person, which is right for validating a lookup and wrong
+for counting contributors. The funnel refuses a bare string (iterating one
+would store its characters) and a bare mapping (iterating one would store
+its keys), so a client whose payload may be a string wraps it at its own
+call site, and a client with no parse guard of its own drops any other
+shape before calling. The national-bibliography clients
+are the exception and build their own value: `dnb.py` joins a list that has
+already been through MARC relator filtering and `matches()` de-duplication,
+and `sbn.py` stores the record's single principal author. **Order is
+load-bearing** — Stats "Top Authors", the scan enrichment funnel, Photo
+Intake, the synopsis lookup, Audiobookshelf and Hardcover sync, and the
+cover search all read position 0 as the primary author. Open Library's cap is
+on author *keys*, applied before any request, so a long contributor list costs
+at most four extra paced requests (~1.4 s) on an interactive scan.
 
 The national leg is a registry, `services/national.py`: unhyphenated ISBN-13
 registration-group prefixes mapped to provider modules, resolved by
@@ -516,10 +536,13 @@ source propagates" has to cover the *parse* as well as the request: an
 unreadable body — a proxy page returned as 200, a MARC record shaped in a way
 the field mapping did not anticipate — is caught inside the client and
 returned as `no_match`, so the cascade falls through to the next source
-instead of failing the scan. Open Library's follow-up author and description
+instead of failing the scan. Open Library's follow-up work and author
 requests sit outside that guard on purpose: they run after the edition is
-already a hit, so a dead socket there costs those two fields and leaves the
-hit standing, rather than being laundered into "no such book".
+already a hit, so a dead socket there costs fields and leaves the hit
+standing, rather than being laundered into "no such book". A failed work
+fetch costs both the authors and the description. A failed author request
+costs only that author's name — each one is isolated, and the others are
+kept.
 
 `provider_result.combine` folds a cascade's legs into the one record a caller
 reports: a hit wins outright; otherwise the most actionable failure wins —

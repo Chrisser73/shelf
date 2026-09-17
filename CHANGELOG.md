@@ -6,6 +6,44 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-09-17
+
+Scanning the barcode of a book with several authors kept only the first one.
+A book by Martin Fowler and Kent Beck was saved as "Martin Fowler", and Kent
+Beck was dropped without a word. Searching for the same book by title kept
+both, so the result depended on how you added it — and the barcode is how
+most books get in. This release keeps every author a lookup reports. It is the
+first half of multi-author support, reported by
+[@danielgratzl](https://github.com/danielgratzl) in
+[#117](https://github.com/dgahagan/shelf/issues/117).
+
+### Fixed
+
+- **A barcode scan keeps every author Open Library lists, up to five, in the
+  order Open Library gives them.** The first name is still the primary author:
+  sorting by author, the Stats page's **Top Authors** chart and the other
+  places that read "the author" all use it, exactly as before.
+
+### Changed
+
+- **Every metadata lookup now builds the author list the same way.** Open
+  Library, Hardcover and Google Books drop blank names and exact repeats, keep
+  the source's order, and save nothing (rather than an empty value) when no
+  author is known. Deliberately, two spellings of one name — "Stanisław Lem"
+  and "Stanislaw Lem" — are both kept: Shelf cannot tell a second spelling
+  from a second person, and guessing wrong would silently drop a co-author.
+- **Scanning a book with several authors can take up to about a second and a
+  half longer.** Open Library needs one request per author, and Shelf spaces
+  its requests to stay within that service's limits. A one-author book takes
+  no longer than before. The five-author cap keeps this bounded.
+- **A malformed author field from a lookup service is now treated as no
+  match** instead of being saved as a garbled author.
+
+Items already in your library are not changed. A book you scanned before this
+release keeps the single author it was saved with; edit the item to add the
+others, or delete and rescan it. Filtering to a single author and author pages
+are the second half of #117 and are not in this release.
+
 ## [0.42.0] - 2026-09-16
 
 Until now every item in Shelf was either something you own or something on
@@ -3500,6 +3538,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.42.1]: https://github.com/dgahagan/shelf/releases/tag/v0.42.1
 [0.42.0]: https://github.com/dgahagan/shelf/releases/tag/v0.42.0
 [0.41.1]: https://github.com/dgahagan/shelf/releases/tag/v0.41.1
 [0.41.0]: https://github.com/dgahagan/shelf/releases/tag/v0.41.0

@@ -1292,6 +1292,14 @@ class TestGetSeriesBooksParsing:
             books = await hc.get_series_books("Obscure", "tok")
         assert [b["title"] for b in books] == ["Obscure Vol 1", "Obscure Vol 2"]
 
+    def test_parse_series_entries_joins_multiple_authors(self):
+        """T3 — `_parse_series_entries` is pure; call it directly beside the
+        single-author pin above (`books[0]["authors"] == "Frank Herbert"`)."""
+        from app.services import hardcover as hc
+        entries = [self._entry(1, "Dune", 1, authors=("Frank Herbert", "Brian Herbert"))]
+        books = hc._parse_series_entries(entries)
+        assert books[0]["authors"] == "Frank Herbert, Brian Herbert"
+
 
 class TestSeriesMetaOrphanGC:
     """Orphan GC for series_meta (issue #6): a series_meta row should be

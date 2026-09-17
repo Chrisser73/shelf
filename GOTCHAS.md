@@ -974,6 +974,10 @@ python -c "from app.services.openlibrary import USER_AGENT as U; assert 'http' i
     fallback and the row passed. Ask which *branch* of the implementation
     your pin actually lands in, not just which behaviour it describes; the
     fix was a second row whose damage is large enough to miss the fallback.
+    The same shape turned up in `authors.join_names` (2026-09-17, `e1b1f1b`):
+    without the blank filter, an all-blank input still returns `None`,
+    because `", ".join([""]) or None` is `None`. Only a row that mixes blanks
+    with real names pins the filter.
   - **A duplicated handler needs one pin each.** Intake classifies
     `IntegrityError` on two insert paths (weak-path INSERT, `_save_item`).
     Deleting the classification from the strong path left the whole suite
@@ -1759,6 +1763,17 @@ python -m pytest tests/e2e/test_responsive.py -m e2e -q
   widens the set of places a list can be handed to code expecting a dict. The
   Verify greps below are what tell you where the boundary currently sits;
   read them rather than trusting any list written into this Rule.
+- **Updated 2026-09-17** (plan `issue-117a-author-loss-at-ingest`): the trap
+  was closed *at the helper* for the first time. `authors.join_names` raises
+  `TypeError` on a bare string, and the one client whose payload can be either
+  shape (`hardcover.search_books`) wraps the string at its call site. A helper
+  that raises on purpose moves the question to **every** caller: is there a
+  handler above it? The plan said the raise "surfaces inside `lookup`'s
+  existing parse guard" for both Google Books sites. One of them was in
+  `search_by_title_author`, which had no guard, and its only caller catches
+  `httpx.HTTPError` alone, so `fetch-synopsis` would have answered 500.
+  Cross-vendor plan review caught it before any code existed (`da58115`).
+  List the enclosing function of each call site, not only the module.
 - **Why:** the failure is invisible on paper and total at runtime. Issue #36's
   implementation plan specified one search ladder for the film and game paths
   and asserted the save tail was unchanged — correct for TMDb, wrong for IGDB,
