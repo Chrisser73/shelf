@@ -1746,16 +1746,22 @@ class TestEditFormValueFunnel:
         before.pop("updated_at"); after.pop("updated_at")
         assert after == before
 
-    def test_legacy_junk_isbn_must_be_cleared_before_the_form_saves(self, editor_client, db):
-        """Older Audiobookshelf syncs stored ASINs in `isbn`. The form posts
-        every field, so the junk is refused as rendered — and saves once
-        cleared, with isbn10 cleared alongside (the docs sentence)."""
+    def test_legacy_junk_isbn_is_left_alone_until_the_field_is_touched(self, editor_client, db):
+        """Older Audiobookshelf syncs stored ASINs in `isbn`. #87: reposting
+        the form unchanged no longer bounces on the stale ASIN (it is
+        unchanged *and* refused, so it is exempt) — the row only actually
+        clears once you touch the field yourself, with isbn10 cleared
+        alongside (the docs sentence)."""
         item_id = _insert_item(db, title="ASIN Row", isbn="B00EXAMPLE", isbn10="junk10")
         db.commit()
         resp = self._post(editor_client, item_id)
         assert resp.status_code == 303
-        assert resp.headers["location"].endswith("error=invalid_isbn")
-        assert self._row(item_id, "isbn")["isbn"] == "B00EXAMPLE"
+        # Not `startswith("/item/<id>")` — the refusal URL satisfies that too
+        # (`/item/<id>/edit?error=…`), so the pin would survive the bug.
+        assert resp.headers["location"] == f"/item/{item_id}"
+        row = self._row(item_id, "isbn", "isbn10")
+        assert row["isbn"] == "B00EXAMPLE"
+        assert row["isbn10"] == "junk10"
 
         resp = self._post(editor_client, item_id, isbn="")
         assert resp.status_code == 303
@@ -1763,6 +1769,139 @@ class TestEditFormValueFunnel:
         row = self._row(item_id, "isbn", "isbn10")
         assert row["isbn"] is None
         assert row["isbn10"] is None
+
+    # #87: the edit form re-posts the stored `isbn`/`upc` verbatim on every
+    # save, so a row whose identifier predates the validator used to bounce
+    # on *every* edit, even one that never touches the field. INVALID_ISBN
+    # is the tree's sanctioned checksum-invalid ISBN-13 literal (G71,
+    # already used by the negative pins at lines 1526, 1574 and 1655).
+    # INVALID_ISBN_2 and INVALID_UPC/INVALID_UPC_2 are shaped the same way:
+    # 13 digits, checksum-invalid, and (for the UPC pair) not a 978/979
+    # Bookland prefix.
+    INVALID_ISBN = "9780441172710"
+    INVALID_ISBN_2 = "9780547928220"
+    INVALID_UPC = "1234567890120"
+    INVALID_UPC_2 = "1234567890129"
+
+    def test_unchanged_legacy_isbn_does_not_block_an_unrelated_edit(self, editor_client, db):
+        """The exemption fires: unchanged AND refused."""
+        item_id = _insert_item(db, title="Legacy ISBN Row", isbn=self.INVALID_ISBN)
+        db.commit()
+        resp = self._post(editor_client, item_id, title="Legacy ISBN Row Renamed")
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/item/{item_id}"
+        row = self._row(item_id, "title", "isbn", "isbn10")
+        assert row["title"] == "Legacy ISBN Row Renamed"
+        assert row["isbn"] == self.INVALID_ISBN
+        assert row["isbn10"] is None
+
+    def test_legacy_isbn_row_actually_touching_the_field_is_still_judged(self, editor_client, db):
+        """The rule is narrow: it only exempts the *unchanged* value.
+        Changing it — even to another invalid value — goes through the
+        funnel exactly like any other edit."""
+        item_id = _insert_item(db, title="Legacy ISBN Row", isbn=self.INVALID_ISBN)
+        db.commit()
+
+        # A different invalid value: refused, nothing stored.
+        resp = self._post(editor_client, item_id, isbn=self.INVALID_ISBN_2)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/item/{item_id}/edit?error=invalid_isbn"
+        row = self._row(item_id, "isbn", "isbn10")
+        assert row["isbn"] == self.INVALID_ISBN
+        assert row["isbn10"] is None
+
+        # A valid ISBN-10: the canonical pair is stored.
+        resp = self._post(editor_client, item_id, isbn="054792822X")
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith(f"/item/{item_id}")
+        row = self._row(item_id, "isbn", "isbn10")
+        assert (row["isbn"], row["isbn10"]) == ("9780547928227", "054792822X")
+
+        # Cleared: both columns NULL, and an unrelated title change still lands.
+        resp = self._post(editor_client, item_id, isbn="", title="Legacy ISBN Row Cleared")
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith(f"/item/{item_id}")
+        row = self._row(item_id, "title", "isbn", "isbn10")
+        assert row["title"] == "Legacy ISBN Row Cleared"
+        assert row["isbn"] is None
+        assert row["isbn10"] is None
+
+    def test_valid_isbn_with_stale_isbn10_still_gets_repaired(self, editor_client, db):
+        """G71: valid is not consistent — a row can hold a genuinely valid
+        ISBN-13 with a stale, wrong `isbn10` (8 such rows in the real DB).
+        The ISBN here is NOT refused, so the exemption never fires and an
+        unrelated edit still reaches the funnel, which repairs isbn10 from
+        the canonical pair."""
+        item_id = _insert_item(db, title="Repair Row", isbn="9780547928227", isbn10="0000000000")
+        db.commit()
+        resp = self._post(editor_client, item_id, title="Repair Row Renamed")
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith(f"/item/{item_id}")
+        row = self._row(item_id, "title", "isbn", "isbn10")
+        assert row["title"] == "Repair Row Renamed"
+        assert (row["isbn"], row["isbn10"]) == ("9780547928227", "054792822X")
+
+    def test_unchanged_legacy_upc_does_not_block_an_unrelated_edit(self, editor_client, db):
+        """Same #87 exemption, on the UPC side."""
+        item_id = _insert_item(db, title="Legacy UPC Row", isbn=None, upc=self.INVALID_UPC)
+        db.commit()
+        resp = self._post(editor_client, item_id, title="Legacy UPC Row Renamed")
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/item/{item_id}"
+        row = self._row(item_id, "title", "upc")
+        assert row["title"] == "Legacy UPC Row Renamed"
+        assert row["upc"] == self.INVALID_UPC
+
+        # Changed to another invalid UPC: refused, nothing stored (the
+        # narrow rule — touching the field re-enters the validator).
+        resp = self._post(editor_client, item_id, upc=self.INVALID_UPC_2)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/item/{item_id}/edit?error=invalid_upc"
+        row = self._row(item_id, "upc")
+        assert row["upc"] == self.INVALID_UPC
+
+
+class TestEditFormLegacyInvalidIdentifierNote:
+    """#87 T2: the edit form marks a stored isbn/upc that the T1 exemption
+    keeps as-is, so the silent pass-through is visible to the editor."""
+
+    def test_isbn_note_renders_for_a_legacy_invalid_isbn(self, editor_client, db):
+        item_id = _insert_item(db, title="Legacy ISBN Note",
+                               isbn=TestEditFormValueFunnel.INVALID_ISBN)
+        db.commit()
+        html = editor_client.get(f"/item/{item_id}/edit").text
+        assert 'data-testid="isbn-stored-invalid"' in html
+
+    def test_isbn_note_absent_for_a_valid_isbn(self, editor_client, db):
+        item_id = _insert_item(db, title="Valid ISBN Note", isbn="9780547928227")
+        db.commit()
+        html = editor_client.get(f"/item/{item_id}/edit").text
+        assert 'data-testid="isbn-stored-invalid"' not in html  # the element, not the words (G69)
+
+    def test_isbn_note_absent_for_an_empty_isbn(self, editor_client, db):
+        item_id = _insert_item(db, title="Empty ISBN Note", isbn=None)
+        db.commit()
+        html = editor_client.get(f"/item/{item_id}/edit").text
+        assert 'data-testid="isbn-stored-invalid"' not in html
+
+    def test_upc_note_renders_for_a_legacy_invalid_upc(self, editor_client, db):
+        item_id = _insert_item(db, title="Legacy UPC Note", isbn=None,
+                               upc=TestEditFormValueFunnel.INVALID_UPC)
+        db.commit()
+        html = editor_client.get(f"/item/{item_id}/edit").text
+        assert 'data-testid="upc-stored-invalid"' in html
+
+    def test_upc_note_absent_for_a_valid_upc(self, editor_client, db):
+        item_id = _insert_item(db, title="Valid UPC Note", isbn=None, upc="078073003501")
+        db.commit()
+        html = editor_client.get(f"/item/{item_id}/edit").text
+        assert 'data-testid="upc-stored-invalid"' not in html
+
+    def test_upc_note_absent_for_an_empty_upc(self, editor_client, db):
+        item_id = _insert_item(db, title="Empty UPC Note", isbn=None, upc=None)
+        db.commit()
+        html = editor_client.get(f"/item/{item_id}/edit").text
+        assert 'data-testid="upc-stored-invalid"' not in html
 
 
 class TestBulkUpdateValueFunnel:

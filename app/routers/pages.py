@@ -8,6 +8,8 @@ from app.auth import require_role
 from app.config import MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES
 from app.currency import get_currency
 from app.services import lists
+from app.services import isbn as isbn_svc
+from app.services import upc as upc_svc
 from app.database import get_db, get_setting, get_game_platforms, get_reading_history
 from app.routers import items_common
 from app.routers.items_common import SORT_OPTIONS
@@ -388,11 +390,17 @@ async def item_edit(
         game_platforms = get_game_platforms(db)
     if not item:
         return RedirectResponse(url="/browse")
+    # #87 T2: the edit funnel now saves a legacy checksum-invalid isbn/upc
+    # unchanged rather than bouncing every save on that row (T1). Surface
+    # that silently-kept state to the editor instead of leaving it invisible.
+    isbn_invalid = bool(item["isbn"]) and isbn_svc.canonical_isbn_pair(item["isbn"]) is None
+    upc_invalid = bool(item["upc"]) and not upc_svc.canonical_retail_barcode(item["upc"])[0]
     return request.app.state.templates.TemplateResponse(
         request,
         "item_edit.html",
         {"item": item, "back": back, "media_types": MEDIA_TYPES, "game_platforms": game_platforms,
-         "locations": locations, "error": error},
+         "locations": locations, "error": error,
+         "isbn_invalid": isbn_invalid, "upc_invalid": upc_invalid},
     )
 
 

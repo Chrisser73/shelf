@@ -6,6 +6,45 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.42.2] - 2026-09-17
+
+Some items could not be edited at all. If the ISBN stored on an item was one
+Shelf now refuses — most often an ASIN that an older Audiobookshelf sync had
+put in the ISBN field — then every save bounced, whatever you had actually
+changed. Fixing a typo in the title, moving the item to another shelf, marking
+it read: all refused, with a banner about the ISBN you never touched. The only
+way through was to correct or clear an identifier you may have had no way of
+knowing the right value for. This release leaves a stored identifier alone
+unless you change it yourself. Diagnosed by
+[@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+[#79](https://github.com/dgahagan/shelf/pull/79), filed as
+[#87](https://github.com/dgahagan/shelf/issues/87).
+
+### Fixed
+
+- **An ISBN or UPC / EAN that fails validation no longer blocks other edits to
+  the item.** A stored identifier you do not change is left as it is and marked
+  on the form; only a value you actually change is validated. This fixes a case
+  where an item with a legacy ISBN (an ASIN stored by an earlier Audiobookshelf
+  sync) had to be corrected or cleared before the form would save, even when
+  editing an unrelated field like the title or reading status. Diagnosed by
+  [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#79](https://github.com/dgahagan/shelf/pull/79)
+
+- **A stored identifier that fails its check digit is now marked on the edit
+  form.** A muted note under the ISBN or UPC / EAN field tells you the stored
+  value is not valid, that it is kept as-is unless you change it, and that
+  correcting or clearing it is checked as usual. Nothing is rewritten for you:
+  no check digit can be inferred, and guessing would be worse than saying
+  nothing.
+
+Deliberately unchanged: a value you *do* type is validated exactly as strictly
+as before, and a valid ISBN you leave alone still flows through the normal
+path — so the stored ISBN-10 it implies keeps being corrected on save, which is
+why the rule is "unchanged *and* invalid" rather than simply "unchanged".
+Nothing in your library is altered by upgrading; an invalid identifier stays
+where it is until you edit it.
+
 ## [0.42.1] - 2026-09-17
 
 Scanning the barcode of a book with several authors kept only the first one.
@@ -3538,6 +3577,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.42.2]: https://github.com/dgahagan/shelf/releases/tag/v0.42.2
 [0.42.1]: https://github.com/dgahagan/shelf/releases/tag/v0.42.1
 [0.42.0]: https://github.com/dgahagan/shelf/releases/tag/v0.42.0
 [0.41.1]: https://github.com/dgahagan/shelf/releases/tag/v0.41.1

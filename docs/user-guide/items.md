@@ -118,20 +118,23 @@ you can see what it got before you commit. If the camera cannot start, the
 toast says which problem it is: permission denied, or a page not served over
 HTTPS.
 
-The ISBN is checked when you save. An ISBN whose check digit doesn't add up
-is refused with a banner at the top of the form, and **nothing else on the
-form is saved** — correct the ISBN or clear the field and save again.
+**An ISBN you change is checked when you save.** One whose check digit
+doesn't add up is refused with a banner at the top of the form, and **nothing
+else on the form is saved** — correct it or empty the field and save again.
 Entering an ISBN-10 stores both forms (the ISBN-13 and the ISBN-10 it
-implies); a 979 ISBN has no ISBN-10 and stores none. The same banner
-appears for a media type, location, game platform or reading status Shelf
-doesn't recognise, and for a non-number in a number field.
+implies); a 979 ISBN has no ISBN-10 and stores none. Emptying the field
+clears the ISBN. The same banner appears for a media type, location, game
+platform or reading status Shelf doesn't recognise, and for a non-number in
+a number field.
 
-An item whose stored ISBN isn't a real ISBN — older Audiobookshelf syncs
-stored an ASIN there when a title had no ISBN — has to have it corrected or
-cleared before the form will save, since the form submits every field. Clear
-it and the item keeps everything else. For the Audiobookshelf case you
-usually don't have to: from 0.28.0 the next sync clears an ASIN out of the
-ISBN field for you (see [Integrations](integrations.md)).
+**An ISBN you leave alone is left as it is**, even when it would not pass
+that check — older Audiobookshelf syncs stored an ASIN in the ISBN field when
+a title had no ISBN, and such an item used to refuse every save until the
+field was fixed. It no longer does: edit the title, the location or anything
+else and the save goes through, with a note under the field telling you the
+stored value is not a valid ISBN. For the Audiobookshelf case you usually
+don't have to correct anything: from 0.28.0 the next sync clears an ASIN out
+of the ISBN field for you (see [Integrations](integrations.md)).
 
 **Retry cover** appears once the item has an ISBN. **Push to Hardcover**
 appears only for book-family items, and only when the item has an ISBN or

@@ -1095,14 +1095,6 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         # A non-numeric year/count/value used to be a 500.
         return _refused("invalid_number")
 
-    # Retail barcodes are normal edit fields, but their storage identity is
-    # canonical EAN-13. Bookland 978/979 carriers remain ISBN-only.
-    if "upc" in fields:
-        valid_upc, canonical_upc = upc_svc.canonical_retail_barcode(fields["upc"])
-        if not valid_upc:
-            return _refused("invalid_upc")
-        fields["upc"] = canonical_upc
-
     # Handle cover upload
     cover_file = form.get("cover")
     if cover_file and hasattr(cover_file, "read"):
@@ -1116,24 +1108,54 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         return RedirectResponse(url=redirect_url, status_code=303)
 
     with get_db() as db:
-        old_series_name = None
-        if "series_name" in fields:
-            row = db.execute(
-                "SELECT series_name FROM items WHERE id = ?", (item_id,)
-            ).fetchone()
-            old_series_name = row["series_name"] if row else None
+        row = db.execute(
+            "SELECT isbn, upc, media_type, series_name FROM items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        old_series_name = row["series_name"] if row else None
+
+        # #87: the edit form re-posts every named control on every save,
+        # including a stored ISBN/UPC that predates the validator — which
+        # otherwise bounces *every* save on that row, even a title-only fix.
+        # Exempt an identifier from validation only when it is BOTH
+        # unchanged from the stored value AND the validator would refuse
+        # it. Plain "unchanged" is too broad: a valid-but-unchanged ISBN
+        # still has to reach the funnel below, because canonical_isbn_pair
+        # rewrites isbn10 from isbn, and 8 rows in the real DB hold a valid
+        # isbn13 with a stale/wrong stored isbn10 that this repairs. Only
+        # dropping the key when the value is also refused keeps that repair
+        # intact. Dropping the key here also means the upc_conflict lookup
+        # and the funnel's UNIQUE(isbn, media_type) path never see it —
+        # correct, since an unchanged identifier cannot newly collide, but
+        # worth re-reading if a future branch is added below this guard
+        # that answers the same "did this identifier change" question (G68).
+        if row is not None:
+            if (fields.get("isbn") is not None and fields["isbn"] == row["isbn"]
+                    and isbn_svc.canonical_isbn_pair(fields["isbn"]) is None):
+                del fields["isbn"]
+            if (fields.get("upc") is not None and fields["upc"] == row["upc"]
+                    and not upc_svc.canonical_retail_barcode(fields["upc"])[0]):
+                del fields["upc"]
+
+        if not fields:
+            return RedirectResponse(url=redirect_url, status_code=303)
+
+        # Retail barcodes are normal edit fields, but their storage identity is
+        # canonical EAN-13. Bookland 978/979 carriers remain ISBN-only.
+        if "upc" in fields:
+            valid_upc, canonical_upc = upc_svc.canonical_retail_barcode(fields["upc"])
+            if not valid_upc:
+                return _refused("invalid_upc")
+            fields["upc"] = canonical_upc
 
         # Keep the same duplicate identity rule used by normal scan/add:
         # a retail barcode may repeat across media types, never within one.
         if fields.get("upc"):
             effective_media_type = fields.get("media_type")
             if effective_media_type is None:
-                current = db.execute(
-                    "SELECT media_type FROM items WHERE id = ?", (item_id,)
-                ).fetchone()
-                if not current:
+                if row is None:
                     return HTMLResponse("Not found", status_code=404)
-                effective_media_type = current["media_type"]
+                effective_media_type = row["media_type"]
             conflict = db.execute(
                 "SELECT id FROM items WHERE upc = ? AND media_type = ? AND id != ? LIMIT 1",
                 (fields["upc"], effective_media_type, item_id),

@@ -217,6 +217,12 @@
             </div>
             <div data-media-types="book kids_book audiobook ebook comic manga" data-always-visible="{{ 'true' if item.isbn else 'false' }}" x-data="isbnCamera" class="space-y-4">
                 {{ field("isbn", "ISBN", item.isbn, placeholder="ISBN-13") }}
+                {# #87 T2: the stored value fails its check digit and the edit funnel now keeps it as-is rather than bouncing every save. #}
+                {% if isbn_invalid %}
+                <p data-testid="isbn-stored-invalid" class="text-xs text-shelf-muted">
+                    The stored ISBN fails its check digit. It is kept as-is unless you change it here — correcting or clearing it is checked as usual.
+                </p>
+                {% endif %}
                 <button type="button" @click="startCamera()"
                         class="px-4 py-2 bg-shelf-hover text-shelf-text border border-shelf-border rounded-lg text-sm hover:border-shelf-accent/50 transition-colors">
                     Scan ISBN
@@ -244,6 +250,12 @@
 
             <div data-upc-editor data-media-types="dvd cd comic video_game" data-always-visible="{{ 'true' if item.upc else 'false' }}" x-data="upcCamera" class="space-y-4">
                 {{ field("upc", "UPC / EAN", item.upc, placeholder="UPC-A or EAN-13") }}
+                {# #87 T2: the stored value fails its check digit and the edit funnel now keeps it as-is rather than bouncing every save. #}
+                {% if upc_invalid %}
+                <p data-testid="upc-stored-invalid" class="text-xs text-shelf-muted">
+                    The stored UPC / EAN fails its check digit. It is kept as-is unless you change it here — correcting or clearing it is checked as usual.
+                </p>
+                {% endif %}
                 <button type="button" @click="startCamera()"
                         class="px-4 py-2 bg-shelf-hover text-shelf-text border border-shelf-border rounded-lg text-sm hover:border-shelf-accent/50 transition-colors">
                     Scan UPC / EAN

@@ -878,6 +878,24 @@ configured game platform; `reading_status` is one of `want_to_read`,
 `reading`, `read`; `owned` is 0 or 1. A field an update does not carry is not
 validated, so touching `notes` never reads `isbn`.
 
+**The edit route decides what to carry.** That last rule is the one lever a
+caller has, and `update_item` uses it for the two identifier fields. The edit
+form re-posts every control on every save, so a row whose stored `isbn` or
+`upc` predates today's validation would bounce off the funnel on *any* edit —
+a title fix included. The route therefore reads the row once at the top of its
+`with get_db()` block and drops `isbn` or `upc` from the write when the
+submitted value both equals the stored one **and** fails the same predicate
+the funnel or the route would apply (`isbn.canonical_isbn_pair`,
+`upc.canonical_retail_barcode`). A *changed* value is validated exactly as
+before, and a valid unchanged ISBN still flows through, so the funnel keeps
+repairing a stale `isbn10` from the canonical pair — which is why the rule is
+"unchanged **and** refused" rather than the simpler "unchanged". The funnel
+itself is untouched: relaxing it there would also stop `sync_primary_location`
+re-mirroring an unchanged `location_id`. `item_edit` in `app/routers/pages.py`
+computes the same two predicates so the form can mark a stored value it is
+letting through. The UPC check moved inside the DB block for this, making the
+route's order exemption → UPC check → conflict lookup → funnel.
+
 **Wishlist membership is a list, not a column.** All three funnels accept a
 virtual `wishlisted: bool` field, popped before the name check so it never
 reaches the statement and applied through `app/services/lists.py` — the only

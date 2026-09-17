@@ -3578,10 +3578,36 @@ grep -rn '"added":\|"ok": True' tests/e2e/ | head
 grep -rniE 'no metadata|title-only|books-only' README.md DOCKERHUB_README.md docs/
 ```
 
+- **The third half, and it is the plan's fault rather than the builder's:**
+  **a docs task briefed with a line range cannot see the adjacent copy.** A
+  `## Docs impact` bullet that says `docs/user-guide/items.md:121–133` tells
+  the builder where to look, and looking there is the whole of the trap. On
+  2026-09-17 (plan `issue-87-legacy-isbn-edit` T3, `1999fd3`) the design plan
+  named `:128–133`; the paragraph at `:121–127` stated the same claim
+  unconditionally — "The ISBN is checked when you save… **nothing else on the
+  form is saved** — correct the ISBN or clear the field and save again." The
+  builder rewrote the named paragraph, re-read the page as this entry
+  instructs, and reported "no internal contradictions" while the page
+  contradicted itself **one paragraph apart**. A line range is a strong enough
+  anchor to defeat a general instruction to read the whole page: the reader
+  arrives already believing they know where the change lives.
+  **So write `## Docs impact` as the claim to fix, not the lines to edit** —
+  "the page says an invalid stored ISBN blocks the save; it no longer does",
+  not a span. The line number belongs in parentheses as a convenience, never
+  as the specification. This is G79 applied one level up, to the plan instead
+  of to the page.
+- **The seam is usually the fix.** Both paragraphs above were correct once the
+  change's actual distinction was named: *a value you change* is checked, *a
+  value you leave alone* is kept and marked. A docs task that finds itself
+  adding a qualification to one paragraph should check whether the paragraph
+  before it needs the same one — a behaviour change that splits a rule in two
+  rarely leaves the surrounding prose whole.
 - **Status:** documented. Not a lint candidate — no checker can tell a stale
   claim from a correctly scoped one. The countermeasure is the survey-then-
   decide split in `/release` step 4b: one pass reports what every page says,
-  a second decides what each should say.
+  a second decides what each should say. The plan-side countermeasure is the
+  claim-not-a-line-range rule above, which `/design-plan` and `/impl-plan` can
+  apply for free.
 
 ## G80 — The README test-count badge is part of *every* task's gate, not the docs task's
 
@@ -4423,6 +4449,53 @@ python -m pytest tests/test_reading_imports.py -k "legacy_export or without_stat
 ```
 
 - **Status:** documented. A contract test, not a lint.
+
+
+## G102 — When a pin asserts a redirect with `startswith`
+
+- **Rule:** assert a redirect target by **equality**, or on a marker only the
+  success path can produce. `assert resp.headers["location"].startswith(...)`
+  is a hole wherever the refusal URL extends the success URL — which is this
+  app's standard shape, because `_refused()` builds
+  `/item/<id>/edit?error=<code>` and the success redirect is `/item/<id>`.
+  The prefix matches both, so the assertion cannot tell a save from a refusal.
+- **Why:** it is the G31 failure mode with no tell. The pin passes against the
+  broken code *and* the fixed code, and unlike a subset-POST (G36) there is
+  nothing odd-looking to notice on review — `startswith` reads as deliberate
+  tolerance for the optional `?from=` suffix, which is exactly why it gets
+  written. The pin survives its own mutation check, so the G31 pass reports
+  green and the reviewer concludes the pin is sound.
+- **Evidence:** 2026-09-17, plan `issue-87-legacy-isbn-edit` T1 (`73dcf14`).
+  `test_legacy_junk_isbn_must_be_cleared_before_the_form_saves` was repurposed
+  to pin the new exemption, and its first half asserted
+  `location.startswith(f"/item/{item_id}")` plus the stored columns unchanged.
+  Under #87's bug the route redirects to `/item/<id>/edit?error=invalid_isbn`
+  and stores nothing — satisfying **both** assertions. The pin stayed green
+  through the whole G31 mutation pass and was caught only because the
+  orchestrator re-ran the mutation independently and read the *pass* list
+  rather than the fail list. Two sibling pins had the same shape; all three
+  were tightened to `location == f"/item/{item_id}"` and then went red.
+- **The general form:** an assertion is only a pin if the failure it is
+  supposed to catch can violate it. When the failure path is a *longer* string
+  with the same prefix, a prefix match is not an assertion.
+- **What to do about `?from=`:** that is what tempts the prefix match. Post the
+  form without a `from` value and assert equality, or assert
+  `location.split("?")[0] == f"/item/{item_id}"` — both exclude the `/edit`
+  refusal URL, which a bare `startswith` does not.
+- **Verify:** every surviving prefix assertion on a redirect must be backed by
+  a following read of the stored row —
+
+```bash
+grep -rn 'headers\["location"\]\.startswith' tests/
+# 5 hits as of 2026-09-17, all in tests/test_items.py::TestEditFormValueFunnel;
+# each is followed by a self._row(...) assertion that the refusal path fails.
+# A new hit with no such follow-up is the bug this entry describes.
+```
+
+- **Status:** documented. **Lint candidate**, and a cheap one: a `startswith`
+  on `headers["location"]` is mechanically greppable, and the rule "equality or
+  a stored-row assertion in the same test" is checkable without understanding
+  the route.
 
 
 ## Graveyard
