@@ -14,7 +14,10 @@
 
     <div class="space-y-2 mt-4">
         {% for candidate in legacy_candidates %}
-        <form hx-post="/api/scan" hx-target="closest .scan-result" hx-swap="outerHTML">
+        {# #90: a form that *continues* a scan posts back to whichever route
+           rendered this card, so Shelf Fill keeps its own post-processing
+           (placement) instead of losing it to /api/scan. #}
+        <form hx-post="{{ scan_action|default('/api/scan', true) }}" hx-target="closest .scan-result" hx-swap="outerHTML">
             <input type="hidden" name="isbn" value="{{ isbn }}">
             <input type="hidden" name="legacy_confirm_isbn13" value="{{ candidate.isbn13 }}">
             <input type="hidden" name="media_type" value="{{ media_type }}">
@@ -35,6 +38,69 @@
     </div>
 
     <p class="text-xs text-shelf-muted mt-3">If none matches, scan the printed ISBN instead.</p>
+</div>
+
+{% elif status == 'legacy_incomplete' %}
+<div class="scan-result bg-shelf-card rounded-lg border border-shelf-border p-4"
+     data-scan-status="{{ status }}">
+    <div class="flex items-start gap-3">
+        <div class="flex-1 min-w-0">
+            <p class="font-medium" data-scan-title>Older book barcode: five more digits needed</p>
+            <p class="text-sm text-shelf-muted mt-1" data-scan-detail>
+                This UPC is shared by many Scholastic-era titles. The five digits printed to the right of the barcode say which book — type them and Shelf will look it up.
+            </p>
+        </div>
+        <span class="text-xs px-2 py-1 rounded-full shrink-0 bg-shelf-warning/20 text-shelf-warning"
+              data-scan-badge>incomplete</span>
+    </div>
+
+    {% if supplement_rejected %}
+    {# G58/G62: a boolean state the router set, with the copy written here —
+       and a plain paragraph, never `data-scan-error`, which would replace the
+       whole toast and read this card as a failure. #}
+    <p class="text-sm text-shelf-error mt-3">Enter exactly five digits.</p>
+    {% endif %}
+
+    <form hx-post="{{ scan_action|default('/api/scan', true) }}" hx-target="closest .scan-result" hx-swap="outerHTML" class="mt-4 flex gap-2">
+        <input type="hidden" name="isbn" value="{{ isbn }}">
+        <input type="hidden" name="media_type" value="{{ media_type }}">
+        <input type="hidden" name="mode" value="{{ mode }}">
+        {% if location_id %}<input type="hidden" name="location_id" value="{{ location_id }}">{% endif %}
+        {% if platform %}<input type="hidden" name="platform" value="{{ platform }}">{% endif %}
+        {% if borrower_id %}<input type="hidden" name="borrower_id" value="{{ borrower_id }}">{% endif %}
+        {# `required` and not `pattern` alone: pattern does not reject an empty
+           value, so without it "Look it up" on an untouched field posts and the
+           same card comes back with nothing to say (diff-review codex B2). #}
+        <input type="text" name="legacy_supplement" inputmode="numeric" pattern="[0-9]{5}" maxlength="5"
+               required
+               autocomplete="off" autofocus placeholder="5 digits" aria-label="Five-digit supplement"
+               class="flex-1 min-w-0 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text placeholder-shelf-muted focus:border-shelf-accent focus:outline-none">
+        <button type="submit"
+                class="shrink-0 px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
+            Look it up
+        </button>
+    </form>
+
+    {# The manual-add control is only offered where something handles it: the
+       sole `[data-manual-add]` listener is `scan.js:122`, and `/shelf-fill`
+       loads `shelf-fill.js` instead, so the button would be dead there
+       (diff-review codex B1). `scan_action` is set only by a wrapper route, so
+       its absence is exactly "this card is hosted by /scan". Shelf Fill already
+       offers no manual add — `_render_error` passes no `offer_manual` — so this
+       matches the page rather than sending the user off it and losing the shelf
+       they picked. #}
+    {% if scan_action %}
+    <p class="text-xs text-shelf-muted mt-3">Can't read them? Scan the printed ISBN instead.</p>
+    {% else %}
+    <p class="text-xs text-shelf-muted mt-3">
+        Can't read them? Scan the printed ISBN instead, or
+        <button type="button" data-manual-add
+                data-manual-add-title=""
+                class="mt-2 px-3 py-1.5 bg-shelf-card border border-shelf-border text-shelf-text rounded-lg text-xs font-medium hover:border-shelf-accent transition-colors">
+            Add it by hand
+        </button>
+    </p>
+    {% endif %}
 </div>
 
 {% elif status == 'not_found' %}

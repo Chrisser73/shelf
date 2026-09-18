@@ -4498,6 +4498,128 @@ grep -rn 'headers\["location"\]\.startswith' tests/
   the route.
 
 
+## G103 — When a wrapper route post-processes a fragment another route rendered
+
+- **Rule:** if the fragment carries a form that **continues** the interaction,
+  that form's action must come from the context, not from the inner route's
+  literal path. The wrapper renders the fragment with its own action
+  (`scan_action` in `fragments/scan_result.html`); the inner route passes
+  nothing and the template's `|default('/api/scan', true)` keeps every other
+  caller unchanged. A form that does something *else* — manual add, edit — is
+  not a continuation and must not read it.
+- **Why:** the wrapper's whole reason to exist is the work it does *after* the
+  shared handler returns, and a hard-coded action routes the second request
+  around it. Shelf Fill calls `items.scan_isbn` as a plain function and then
+  assigns `position_order` and refreshes its OOB summary — but only on its own
+  `added`/`duplicate` response. An unresolved card whose form posted to
+  `/api/scan` would therefore create the item outside the fill session: the
+  book lands with **no shelf position**, under a heading that says it was
+  filed. Nothing errors, and the first request looks perfect, which is why a
+  pin on the first request alone (the plan's original pin **G**) does not see
+  it. The state is also persisted, so the user meets it later, on Arrange.
+- **Evidence:** issue #90, 2026-09-17 (`8a1eedf`). Found in plan review by
+  Codex (`plan-issue-90-bare-legacy-upc-review-codex.md`, R1) **before** the
+  code existed — the design named only `POST /api/scan` and never asked which
+  other routes render its fragments. The same bypass already existed on the
+  sibling `legacy_ambiguous` path and had shipped unnoticed. Three routes
+  render `scan_result.html` today: `items.scan_isbn`, `shelf_fill` (both
+  `_render_error` and the pass-through), and `periodicals`.
+- **The pin shape that catches it:** start at the **wrapper's** endpoint, scrape
+  the rendered `hx-post` and assert it, then follow it through every
+  unresolved hop and assert the wrapper's own post-processing ran — the primary
+  copy has the *next* `position_order` against a location seeded with an
+  existing placed copy, and the OOB summary is in the response. A pin that
+  stops at "the card rendered" passes against the bug.
+  (`tests/test_shelf_fill_036.py::TestBareLegacyUpcInsideShelfFill`.)
+- **The same question, asked of JavaScript.** A form action is not the only
+  thing a shared fragment can bind to one host. A `data-*` button is inert
+  wherever its listener is not loaded, and it *looks* live: `scan_result.html`
+  gained a `data-manual-add` button whose only listener is inside
+  `scanPage.init()` (`scan.js:122`), and `shelf_fill.html` loads
+  `shelf-fill.js` instead — so on `/shelf-fill` the button rendered, clicked,
+  and did nothing. No status test or continuation test sees it, because a dead
+  control is neither. So for **every control** a shared fragment adds, ask
+  which hosts load the thing that handles it, and then either render it only
+  on those hosts (the cheap answer, and the one that keeps a Shelf Fill user
+  on their shelf), use a plain link or form, or move the handler somewhere
+  every host loads. A source grep proving the listener exists does **not**
+  prove the host loads it.
+- **One instance of this is still live, deliberately.** `scan_result.html`'s
+  *other* `data-manual-add` button (the error arm) is gated on `offer_manual`,
+  which exactly one branch sets — `items.py:467`, the "Invalid ISBN" arm that a
+  typed *title* reaches (#120). Shelf Fill passes that response straight
+  through, so typing a non-barcode string into its scan box renders a dead
+  button on `/shelf-fill` today. Confirmed by probe 2026-09-17
+  (`HAS_DEAD_BUTTON True`). Left alone on the #90 branch because the fix is a
+  judgement about #120's typed-title flow, not about legacy barcodes — but it
+  is the same defect, so do not read this entry as closed.
+- **Verify:** no continuation form in a shared fragment hard-codes an action,
+  and no control it renders depends on a script only one host loads —
+
+```bash
+grep -n 'hx-post="/api/' app/templates/fragments/scan_result.html
+# expect no hits: every form that continues a scan reads scan_action.
+
+grep -n 'data-manual-add' app/templates/fragments/scan_result.html static/js/*.js
+# every render site is gated on a host that loads the file holding the listener.
+```
+
+- **Status:** documented. **Lint candidate:** a literal `hx-post="/api/..."`
+  inside a fragment more than one router renders is mechanically greppable;
+  what a checker cannot decide is whether a given form is a *continuation* or
+  a side-trip, which is the whole judgment. **Revisit trigger:** a fourth
+  route starts rendering `scan_result.html`, or a second shared fragment grows
+  a continuation form.
+
+
+## G104 — `pattern` does not reject an empty input
+
+- **Rule:** an `<input pattern="...">` that the interaction actually needs also
+  needs **`required`**. `pattern` constrains a value that is *present*; against
+  an empty field it does not apply, so the form submits. If the server must
+  additionally tell "first render" from "submitted empty", carry an explicit
+  attempt marker rather than inferring it from the field being falsy.
+- **Why:** the failure is a click that does nothing and says nothing. The
+  request succeeds, the same fragment swaps back in, and the user cannot tell
+  whether the app is broken or they are. It also defeats a server-side
+  "explain the refusal" flag written as `bool(field)`: an empty retry is
+  indistinguishable from the initial render, so the explanation the code
+  promises never appears — which is precisely the arm's reason to exist.
+- **Evidence:** issue #90, 2026-09-17. `fragments/scan_result.html`'s
+  five-digit `legacy_supplement` field shipped with `pattern="[0-9]{5}"` and
+  `maxlength="5"` but no `required`; clicking **Look it up** on an untouched
+  field posted, and `supplement_rejected = bool(legacy_supplement)` scored it
+  as untouched, so the "Enter exactly five digits" line stayed hidden. Found by
+  the Codex diff review (B2) with a real-browser probe, **after** a route-level
+  suite that posts the form directly had gone green — those tests build their
+  own payload and never exercise browser validation at all. Fixed in `cb8a310`.
+- **The testing half, which is the durable part:** a route-level pin cannot see
+  this. Any pin for native form validation has to drive a real browser and
+  assert *no request was made* — count requests around the click rather than
+  waiting for one (G83's "the click makes no request" row).
+- **Verify:** every exact-shape field whose value the handler requires also
+  carries `required` —
+
+```bash
+# Line-based grep is wrong here — the attributes routinely span lines, so
+# `grep pattern= | grep -v required` reports a field that carries both.
+python - <<'EOF'
+import pathlib, re
+for f in sorted(pathlib.Path("app/templates").rglob("*.html")):
+    for m in re.finditer(r'<input\b[^>]*pattern="[^"]*"[^>]*>', f.read_text(), re.S):
+        if "required" not in m.group(0):
+            print(f, "—", " ".join(m.group(0).split())[:90])
+EOF
+# each hit is a field the form may legally submit empty. That is a decision,
+# not a default — confirm it is the one intended.
+```
+
+- **Status:** documented. **Lint candidate**, and a narrow one worth building:
+  `pattern` without `required` on an input whose name is a non-defaulted server
+  parameter is mechanically checkable. What a checker cannot decide is whether
+  the field is genuinely optional.
+
+
 ## Graveyard
 
 Retired entries land here with a one-line reason (refactored away, lint

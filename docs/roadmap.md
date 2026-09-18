@@ -118,11 +118,11 @@ The last five releases. Full detail in the [changelog](../CHANGELOG.md).
 
 | Version | What landed |
 |---|---|
+| [0.42.2](https://github.com/dgahagan/shelf/releases/tag/v0.42.2) | An item whose stored ISBN or UPC is not valid — usually an ASIN an older Audiobookshelf sync left behind — can be edited again. A stored identifier you do not touch is left alone and marked on the form, so changing the title or the location no longer means fixing an identifier first |
 | [0.42.1](https://github.com/dgahagan/shelf/releases/tag/v0.42.1) | Scanning the barcode of a book with several authors keeps all of them — up to five, in the order the lookup lists them — instead of only the first. Books already in your library keep what they were saved with |
 | [0.42.0](https://github.com/dgahagan/shelf/releases/tag/v0.42.0) | An item can now be neither owned nor wishlisted — a book you read from the library keeps its reading history without sitting on your wishlist. Two checkboxes on the edit page, a fourth Owned filter, bulk add and remove for the wishlist, Goodreads imports that stop wishlisting books you have read, and a valuation that counts only what you own. It builds on 0.41.1, which made the wishlist its own list with nothing changing on screen |
 | [0.41.0](https://github.com/dgahagan/shelf/releases/tag/v0.41.0) | Physical copies finally have a place you can write them: add a second or third copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes — and every location on an item page is now a link into Browse |
 | [0.40.1](https://github.com/dgahagan/shelf/releases/tag/v0.40.1) | Nothing you can see: the checks that have to pass before a release can ship no longer depend on a free third-party lookup allowance, which had twice held a release back — once for seven hours |
-| [0.40.0](https://github.com/dgahagan/shelf/releases/tag/v0.40.0) | Anything no lookup can find can now be typed in by hand: a standalone **Add by hand** panel needing only a title, every media type, no barcode required — reachable from Home, from an empty title search, from a mistyped barcode, and from any item's page as **Add another like this** |
 
 ---
 

@@ -1,7 +1,16 @@
+import re
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from app.routers import shelf_fill
+from app.services import provider_result
+from app.services import upcitemdb
 from app.services import lists
 from app.services import locations as location_svc
 from tests.conftest import _assert_ownership_partition
+from tests.test_legacy_book import KRISTY_SUPPLEMENT, KRISTY_UPC
+from tests.test_legacy_book_scan import KRISTY_ISBN13, KRISTY_UPC5
 
 
 def _item(db, *, title="Filed book", owned=1, isbn=None, wishlisted=False):
@@ -296,3 +305,183 @@ def test_summary_endpoint_refuses_a_viewer(viewer_client, db):
     db.commit()
     resp = viewer_client.get(f"/api/shelf-fill/summary?location_id={shelf}")
     assert resp.status_code in (302, 303, 401, 403)
+
+
+class TestBareLegacyUpcInsideShelfFill:
+    """#90 — the incomplete card must be resolvable without leaving Shelf Fill.
+
+    Shelf Fill calls `items.scan_isbn` as a plain function and assigns
+    `position_order` only after *its own* added/duplicate response. A card
+    whose form posted to `/api/scan` would create the item outside this route,
+    so `_place_item` would never run and the book would land with no shelf
+    position under a heading that says it was filed.
+    """
+
+    @staticmethod
+    def _hidden(html):
+        return dict(
+            re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', html)
+        )
+
+    @staticmethod
+    def _action(html):
+        return re.search(r'hx-post="([^"]+)"', html).group(1)
+
+    @pytest.fixture
+    def shelf_with_a_copy(self, db):
+        room = location_svc.create_location(db, "Room")
+        shelf = location_svc.create_location(db, "Shelf 9", parent_id=room)
+        shelf_fill._place_item(db, _item(db, title="Already here"), shelf)
+        db.commit()
+        return shelf
+
+    @pytest.fixture(autouse=True)
+    def _no_upc_lookup(self, monkeypatch):
+        async def _forbidden(upc, client):
+            raise AssertionError("no UPC lookup")
+
+        monkeypatch.setattr(upcitemdb, "lookup", _forbidden)
+
+    def _scan_bare(self, editor_client, shelf):
+        return editor_client.post(
+            "/api/shelf-fill/scan",
+            data={"isbn": KRISTY_UPC, "location_id": shelf, "media_type": "book"},
+        )
+
+    def test_the_card_posts_back_to_shelf_fill_and_the_book_gets_a_position(
+        self, editor_client, db, shelf_with_a_copy
+    ):
+        async def lookup(isbn, hc_token, client, *, google_api_key=None):
+            if isbn == KRISTY_ISBN13:
+                metadata = {"title": "Kristy", "authors": "Ann M. Martin"}
+                return metadata, "openlibrary", {}, provider_result.found(
+                    "openlibrary", metadata
+                )
+            return None, "manual", {}, provider_result.no_match("openlibrary")
+
+        card = self._scan_bare(editor_client, shelf_with_a_copy)
+
+        assert card.status_code == 200
+        assert 'data-scan-status="legacy_incomplete"' in card.text
+        # The finding: the continuation must stay on this route.
+        assert self._action(card.text) == "/api/shelf-fill/scan"
+        assert db.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 1
+
+        payload = self._hidden(card.text)
+        payload["legacy_supplement"] = KRISTY_SUPPLEMENT
+        with patch(
+            "app.routers.items_common._lookup_metadata",
+            new=AsyncMock(side_effect=lookup),
+        ), patch("app.routers.items.cover_queue.enqueue"):
+            filed = editor_client.post(self._action(card.text), data=payload)
+
+        assert filed.status_code == 200
+        assert 'data-testid="shelf-fill-position"' in filed.text
+        assert 'data-testid="shelf-fill-summary-counts"' in filed.text
+        item = db.execute(
+            "SELECT id FROM items WHERE isbn = ?", (KRISTY_ISBN13,)
+        ).fetchone()
+        assert item is not None
+        copy = db.execute(
+            "SELECT position_order FROM item_copies "
+            "WHERE item_id = ? AND is_primary = 1",
+            (item["id"],),
+        ).fetchone()
+        assert copy["position_order"] == 2
+
+    def test_the_ambiguous_hop_also_stays_on_shelf_fill_and_places(
+        self, editor_client, db, shelf_with_a_copy
+    ):
+        async def lookup(isbn, hc_token, client, *, google_api_key=None):
+            metadata = {"title": f"Candidate {isbn}", "authors": "Scholastic"}
+            return metadata, "openlibrary", {}, provider_result.found(
+                "openlibrary", metadata
+            )
+
+        card = self._scan_bare(editor_client, shelf_with_a_copy)
+        payload = self._hidden(card.text)
+        payload["legacy_supplement"] = KRISTY_SUPPLEMENT
+
+        with patch(
+            "app.routers.items_common._lookup_metadata",
+            new=AsyncMock(side_effect=lookup),
+        ), patch("app.routers.items.cover_queue.enqueue"):
+            ambiguous = editor_client.post(self._action(card.text), data=payload)
+
+            assert 'data-scan-status="legacy_ambiguous"' in ambiguous.text
+            assert self._action(ambiguous.text) == "/api/shelf-fill/scan"
+
+            chosen = self._hidden(ambiguous.text)
+            chosen["legacy_confirm_isbn13"] = KRISTY_ISBN13
+            filed = editor_client.post(self._action(ambiguous.text), data=chosen)
+
+        assert filed.status_code == 200
+        assert 'data-testid="shelf-fill-position"' in filed.text
+        item = db.execute(
+            "SELECT id FROM items WHERE isbn = ?", (KRISTY_ISBN13,)
+        ).fetchone()
+        assert item is not None
+        copy = db.execute(
+            "SELECT position_order FROM item_copies "
+            "WHERE item_id = ? AND is_primary = 1",
+            (item["id"],),
+        ).fetchone()
+        assert copy["position_order"] == 2
+        mapping = db.execute(
+            "SELECT isbn13 FROM legacy_book_mappings WHERE barcode = ?",
+            (KRISTY_UPC5,),
+        ).fetchone()
+        assert mapping["isbn13"] == KRISTY_ISBN13
+
+    def test_shelf_fill_does_not_offer_a_manual_add_it_cannot_handle(
+        self, editor_client, shelf_with_a_copy
+    ):
+        """diff-review codex B1.
+
+        The only `[data-manual-add]` listener is `scan.js:122`, and
+        `shelf_fill.html` loads `shelf-fill.js` instead — so a manual-add
+        button rendered here is a control that does nothing when clicked.
+        Shelf Fill already offers no manual add (`_render_error` passes no
+        `offer_manual`); the new card must match the page it is hosted on.
+        """
+        card = self._scan_bare(editor_client, shelf_with_a_copy)
+
+        assert 'data-scan-status="legacy_incomplete"' in card.text
+        assert self._action(card.text) == "/api/shelf-fill/scan"
+        assert "data-manual-add" not in card.text
+        # The escape that does work here is still offered.
+        assert "Scan the printed ISBN instead" in card.text
+
+    def test_an_ordinary_isbn_still_places_unchanged(
+        self, editor_client, db, shelf_with_a_copy
+    ):
+        async def lookup(isbn, hc_token, client, *, google_api_key=None):
+            metadata = {"title": "Ordinary Book", "authors": "Someone"}
+            return metadata, "openlibrary", {}, provider_result.found(
+                "openlibrary", metadata
+            )
+
+        with patch(
+            "app.routers.items_common._lookup_metadata",
+            new=AsyncMock(side_effect=lookup),
+        ), patch("app.routers.items.cover_queue.enqueue"):
+            filed = editor_client.post(
+                "/api/shelf-fill/scan",
+                data={
+                    "isbn": "9780439136365",
+                    "location_id": shelf_with_a_copy,
+                    "media_type": "book",
+                },
+            )
+
+        assert filed.status_code == 200
+        assert 'data-testid="shelf-fill-position"' in filed.text
+        item = db.execute(
+            "SELECT id FROM items WHERE title = 'Ordinary Book'"
+        ).fetchone()
+        copy = db.execute(
+            "SELECT position_order FROM item_copies "
+            "WHERE item_id = ? AND is_primary = 1",
+            (item["id"],),
+        ).fetchone()
+        assert copy["position_order"] == 2

@@ -172,9 +172,29 @@ supplement could mean and looks each one up:
   rather than reporting "not found", because an unanswered lookup is not the
   same as a book that does not exist.
 
-Only barcodes whose publisher prefix has been confirmed are treated this way;
-anything else falls through to the ordinary UPC path. If a scan will not
-resolve, scanning the printed ISBN on the copyright page always works.
+Shelf needs both parts of one of these barcodes. Scanning it **with** the
+five-digit supplement follows the lookup path above. Scanning the bare UPC-A
+**without** the supplement stops the scan instead of filing anything: the card
+tells you it is an older book barcode and asks for the five digits printed
+beside it. You **type** those digits — you do not have to rescan, which is what
+makes this work on a scanner that drops the supplement in the first place. An
+entry that is not exactly five digits is refused on the spot.
+
+Your answer is remembered under the **full** 17-digit code, so scanning the bare
+12 digits again asks for the digits again. That is deliberate: the bare code
+alone does not say which book it is — on the order of 100,000 titles share it —
+so remembering an answer under it would put that answer on the next Scholastic
+book you scanned.
+
+All of this works the same way in [Shelf Fill](shelf-fill.md): the card appears
+without leaving the page, and the book you resolve takes its position on the
+shelf you are filling. The one difference is the escape hatch. On this page the
+card offers **Add it by hand**; Shelf Fill has no by-hand panel, so there it
+offers what its other cards offer — scan the printed ISBN instead.
+
+A barcode whose publisher prefix is **not** confirmed still falls through to the
+ordinary UPC path, unchanged. If a scan will not resolve, scanning the printed
+ISBN on the copyright page always works.
 
 For a UPC there is no certain prefix, so Shelf reads the product record it
 already fetched — the platform, format, medium or audio wording in the retail

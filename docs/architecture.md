@@ -224,6 +224,22 @@ a retail UPC and neither produces a plain `items` row:
 
 Both pace through `services/outbound.py` like every other shared public host.
 
+**One family of UPC is intercepted above all of that**, by
+`services/legacy_book.py`: the pre-Bookland price-point UPC-A a few publishers
+shared across a whole price band, where the five-digit supplement beside it —
+not the UPC — names the title. Read whole, the supplement yields a small set of
+checksum-valid ISBN candidates that go through the ordinary metadata cascade;
+`legacy_book_mappings` remembers a confirmed answer, keyed on the **17-digit**
+barcode, because the 12 digits alone identify no book. Read without the
+supplement, the scan **fails closed**: the router returns a `legacy_incomplete`
+card asking the user to type the five digits, and creates no row, spends no
+lookup and writes no `scan_log` entry. Failing closed is the whole point — the
+retail record behind a shared price-point code describes a disc, so the open
+path files a picture book as a DVD (issue #90). Both the `/api/scan` and
+`/api/shelf-fill/scan` routes intercept, and the card posts back to whichever
+one rendered it, so a resolution inside Shelf Fill keeps its shelf position. A
+publisher prefix the module does not recognise is not intercepted at all.
+
 UPCs go to **UPC Item DB** (`services/upcitemdb.py`) for a retail product,
 then TMDb (film) or IGDB (game). The endpoint is `config.upc_lookup_url()`,
 read at call time and overridable with `SHELF_UPC_LOOKUP_URL`; pacing is keyed
@@ -419,9 +435,14 @@ The scan-result card is the single source of a scan's outcome, and the
 `scanCardToast` — which classifies the card through `scanCardOutcome` and
 assembles the string — and raises exactly one toast, so no `/api/scan`
 branch sets an `HX-Trigger`. Two things decide that ownership. The client
-raises a toast for all 15 statuses and is the only side that classifies
-severity (from `outcome.ok`), where the server side only ever covered six
-and typed every one of them `success`. And the camera path posts by raw
+raises a toast for every status the card can carry — 15 when issue #45 was
+fixed, more since — and is the only side that classifies severity, where the
+server side only ever covered six and typed every one of them `success`. The
+classification is three explicit lists in `app.js`: `SCAN_OK_STATUSES`,
+`SCAN_WARN_STATUSES` and `SCAN_INFO_STATUSES`, read by `scanCardOutcome`;
+anything in none of them is an error. **A new status is added to one of those
+lists or it is red**, which is not what a card the user must answer should
+look like. And the camera path posts by raw
 `fetch`, which dispatches no htmx events and reads no response headers, so
 a server-owned toast could only ever reach the typed path — half the scan
 surface. Seven branches set one anyway, and the typed path duly showed two

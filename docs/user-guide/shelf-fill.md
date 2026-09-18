@@ -23,6 +23,7 @@ Nothing is locked in: any shelf can be reordered later on its **Arrange** page, 
 - A copy-specific barcode moves that exact copy; it does not silently move the primary copy. This is how two copies of the same book end up on different shelves. You set that barcode on the item page — open a copy's **Edit** panel and fill in **Copy barcode** (see [Items](items.md)). A copy with no barcode of its own is still reached by the item's ISBN or UPC.
 - A wishlisted item becomes owned when it is physically shelved.
 - Unknown item barcodes reuse Shelf's normal Add scanner and metadata providers, then land on the shelf.
+- A scan that cannot be resolved without you stops here rather than guessing, and stays on this page. A [legacy price-point book barcode](scanning.md#legacy-price-point-book-barcodes) read without its five-digit supplement asks for those digits; once you answer, the book is filed onto the shelf and takes its position like any other scan. Shelf Fill has no add-by-hand panel, so where the Scan tab offers one these cards offer the printed ISBN instead.
 - Hierarchical locations are stored directly on the first-class physical-copy record; the catalogue item's location remains the compatibility projection for its primary copy.
 - The selected location, media type and game platform stay on the device between scans.
 

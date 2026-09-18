@@ -246,6 +246,8 @@ async def shelf_fill_scan(
     location_id: int = Form(...),
     media_type: str = Form("auto"),
     platform: str = Form(""),
+    legacy_confirm_isbn13: str = Form(""),
+    legacy_supplement: str = Form(""),
     _=Depends(require_role("editor")),
 ):
     """Resolve one barcode and place its physical copy at ``location_id``."""
@@ -268,6 +270,11 @@ async def shelf_fill_scan(
         items_common._log_scan(raw, placed["media_type"], "moved", placed["item_id"], "move")
         return _render_result(request, placed)
 
+    # #90: a re-post whose `isbn` is still the bare 12-digit legacy UPC lands
+    # here and places a row already filed under that bare code, without ever
+    # reading the supplement.  That is deliberate — a row misfiled before the
+    # fix stays reachable by the barcode printed on it — so do not "fix" it by
+    # completing `raw` above this line.
     existing = items._find_item_by_barcode(raw)
     if existing:
         try:
@@ -290,11 +297,25 @@ async def shelf_fill_scan(
         platform=platform,
         mode="add",
         borrower_id=None,
+        legacy_confirm_isbn13=legacy_confirm_isbn13,
+        legacy_supplement=legacy_supplement,
         _=_,
     )
     context = getattr(response, "context", None) or {}
     item_id = context.get("item_id")
     status = context.get("status")
+
+    # An unresolved legacy card asks the user for something, and its form has
+    # to come back *here* — posting it to /api/scan would create the item
+    # outside this route, so `_place_item` below would never run and the book
+    # would land with no shelf position under a "Filed this session" heading.
+    if status in {"legacy_incomplete", "legacy_ambiguous"}:
+        return request.app.state.templates.TemplateResponse(
+            request,
+            "fragments/scan_result.html",
+            {**context, "scan_action": "/api/shelf-fill/scan"},
+        )
+
     if item_id and status in {"added", "duplicate"}:
         try:
             with get_db() as db:

@@ -1,6 +1,7 @@
 """E2E tests: scan page loads and mode switching."""
 import base64
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -1327,7 +1328,7 @@ def test_a_wishlisted_isbn_scanned_in_add_mode_promotes_it(
 # paragraph inside the not_found arm's manual-add form — a hidden element
 # that still yields a (blank) textContent (`G51`).
 #
-# This section pins the fix across the router's full 18-status vocabulary,
+# This section pins the fix across the router's full 19-status vocabulary,
 # not just the one status that shipped broken, so a future status — or a
 # regressed data-scan-* attribute on an existing one — fails here instead of
 # reaching a user as a blank toast.
@@ -1361,6 +1362,7 @@ def _render_status_card(status, **overrides):
         "preview_cover": None,
         "legacy_candidates": [],
         "mode": "add",
+        "supplement_rejected": False,
     }
     ctx.update(overrides)
     return template_env().get_template("fragments/scan_result.html").render(**ctx)
@@ -1394,6 +1396,7 @@ _STATUS_CASES = {
         message="Older book barcode matches more than one book",
         mode="add",
     ),
+    "legacy_incomplete": dict(mode="add", supplement_rejected=False),
     "not_owned": dict(message="Not in your collection"),
     "not_found": dict(message="No metadata found for this barcode", media_type="book"),
     "error": dict(message="Invalid ISBN"),
@@ -1445,12 +1448,13 @@ _TOAST_MUST_CONTAIN = {
     "not_found": "025192107801",
     "error": "Invalid ISBN",
     "legacy_ambiguous": "Which book is this?",
+    "legacy_incomplete": "five more digits",
 }
 
 assert set(_STATUS_CASES) == _OK_STATUSES | _INFO_STATUSES | {
     "duplicate", "already_checked_out", "not_checked_out",
-    "not_owned", "not_found", "error", "legacy_ambiguous",
-}, "status table drifted from the 18-status vocabulary"
+    "not_owned", "not_found", "error", "legacy_ambiguous", "legacy_incomplete",
+}, "status table drifted from the 19-status vocabulary"
 assert not (_OK_STATUSES & _INFO_STATUSES), "a status is one class or the other"
 assert set(_TOAST_MUST_CONTAIN) == set(_STATUS_CASES), (
     "every status case needs the text its toast must carry"
@@ -1461,7 +1465,7 @@ assert set(_TOAST_MUST_CONTAIN) == set(_STATUS_CASES), (
 def test_every_scan_status_toasts_non_empty_text(live_server, authed_page, status):
     """The pin: every status in the router's vocabulary toasts *something*.
 
-    Parametrised over the full 18-status table so a future status — or a
+    Parametrised over the full 19-status table so a future status — or a
     regressed data-scan-* attribute on an existing one — fails here instead
     of shipping a blank toast."""
     authed_page.goto(f"{live_server['url']}/scan")
@@ -1540,6 +1544,31 @@ def test_the_elsewhere_status_is_never_rendered_as_a_failure(
                / "fragments" / "recent_scans.html").read_text()
     blue_arm = [l for l in history.splitlines() if "bg-blue-500/20" in l]
     assert len(blue_arm) == 1 and "'elsewhere'" in blue_arm[0]
+
+    assert_page_clean(authed_page)
+
+
+def test_the_legacy_incomplete_status_is_never_rendered_as_a_failure(
+    live_server, authed_page
+):
+    """Issue #90 T3: a sibling of `test_the_elsewhere_status_is_never_rendered_
+    as_a_failure` above, for the other status this task adds to app.js's
+    warn table. A bare legacy UPC without its five-digit supplement is a
+    warning asking for more input, not an error — `outcome.warn` must be
+    true and `outcome.ok`/`outcome.info` false, and the card itself must
+    wear the warning colour, never the error one."""
+    authed_page.goto(f"{live_server['url']}/scan")
+    authed_page.wait_for_load_state("networkidle")
+
+    card = _render_status_card("legacy_incomplete", **_STATUS_CASES["legacy_incomplete"])
+    outcome = authed_page.evaluate(_OUTCOME, card)
+
+    assert outcome["warn"] is True
+    assert outcome["ok"] is False and outcome["info"] is False
+
+    assert "bg-shelf-warning/20" in card
+    assert "bg-shelf-error" not in card
+    assert "data-scan-error" not in card
 
     assert_page_clean(authed_page)
 
@@ -2046,3 +2075,120 @@ def test_a_typed_title_walks_manual_add_through_to_the_item_page(
         assert_page_clean(pg)
     finally:
         ctx.close()
+
+
+# --- Issue #90 T3: client consumers of the new `legacy_incomplete` status --
+
+
+def test_a_typed_bare_legacy_upc_asks_for_the_five_digits(live_server, authed_page):
+    """Add mode, typed path: a bare legacy Scholastic UPC with no supplement
+    renders the `legacy_incomplete` card asking for the five digits, entirely
+    from the router's own logic — the check runs before any lookup, so
+    nothing leaves the machine and no stub is needed."""
+    _open_scan_in_mode(authed_page, live_server, "Add")
+
+    authed_page.fill("#isbn-input", "078073003501")
+    with authed_page.expect_response(lambda r: "/api/scan" in r.url and r.ok):
+        authed_page.press("#isbn-input", "Enter")
+
+    expect(
+        authed_page.locator(
+            '[data-scan-status="legacy_incomplete"] input[name="legacy_supplement"]'
+        )
+    ).to_be_visible()
+    assert_page_clean(authed_page)
+
+
+def test_camera_scan_of_a_bare_legacy_upc_stops_the_scanner_for_the_five_digits(
+    live_server, browser, setup_admin
+):
+    """Add mode, camera path: the same bare legacy UPC through a real
+    `onScan()` call must stop the scanner and drop the camera overlay so the
+    five-digit card underneath is the thing the user acts on next — the
+    `legacy_incomplete` half of the check T2 added for `legacy_ambiguous`.
+
+    `cameraActive`/`scanner` are read back with `page.evaluate` polled from
+    Python rather than `page.wait_for_function` (G21: that needs `eval()`,
+    which this app's CSP refuses).
+    """
+    ctx = browser.new_context()
+    try:
+        pg = _login_page(live_server, ctx, setup_admin)
+        _start_scan_camera(pg, live_server)
+        wait_for_video_ready(pg, "#camera-reader video")
+
+        pg.evaluate(
+            "async (code) => {"
+            " const el = document.querySelector('[x-data=\"scanPage\"]');"
+            " await Alpine.$data(el).onScan(code);"
+            " }",
+            "078073003501",
+        )
+
+        def _state():
+            return pg.evaluate(
+                "() => { const el = document.querySelector('[x-data=\"scanPage\"]');"
+                " const d = Alpine.$data(el);"
+                " return {cameraActive: d.cameraActive, scanner: !!d.scanner}; }"
+            )
+
+        deadline = time.monotonic() + 10
+        state = _state()
+        while (state["cameraActive"] or state["scanner"]) and time.monotonic() < deadline:
+            pg.wait_for_timeout(100)
+            state = _state()
+
+        assert state["cameraActive"] is False
+        assert state["scanner"] is False
+
+        expect(
+            pg.locator(
+                '#scan-results [data-scan-status="legacy_incomplete"] '
+                'input[name="legacy_supplement"]'
+            )
+        ).to_be_visible()
+
+        toast = pg.locator("#toast-container div")
+        expect(toast.first).to_be_visible()
+        expect(toast.first).to_contain_text("five digits")
+
+        _expect_no_camera_error(pg)
+        assert_page_clean(pg)
+    finally:
+        ctx.close()
+
+
+def test_look_it_up_refuses_an_empty_supplement_without_posting(
+    live_server, authed_page
+):
+    """diff-review codex B2: the five-digit field carries `required`.
+
+    `pattern="[0-9]{5}"` does not reject an *empty* value, so before this the
+    submit button posted an untouched field and the identical card came back
+    with nothing to say — a click that looks like a no-op. The browser must
+    refuse it instead, which means no second request leaves the page.
+    """
+    _open_scan_in_mode(authed_page, live_server, "Add")
+
+    authed_page.fill("#isbn-input", "078073003501")
+    with authed_page.expect_response(lambda r: "/api/scan" in r.url and r.ok):
+        authed_page.press("#isbn-input", "Enter")
+
+    card = authed_page.locator('[data-scan-status="legacy_incomplete"]')
+    expect(card.locator('input[name="legacy_supplement"]')).to_be_visible()
+
+    # G83: this click is supposed to fire nothing, so there is no waiter to
+    # arm — count requests instead and let the expect() calls auto-retry.
+    posts = []
+    authed_page.on("request", lambda r: posts.append(r.url) if "/api/scan" in r.url else None)
+
+    card.get_by_role("button", name="Look it up").click()
+    authed_page.wait_for_timeout(500)
+
+    assert posts == [], f"empty supplement still posted: {posts}"
+    expect(card.locator('input[name="legacy_supplement"]')).to_be_visible()
+    assert authed_page.evaluate(
+        "() => document.querySelector('input[name=\"legacy_supplement\"]')"
+        ".checkValidity()"
+    ) is False
+    assert_page_clean(authed_page)

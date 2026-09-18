@@ -235,11 +235,21 @@ async def scan_isbn(
     location_id: int | None = Form(None), platform: str = Form(""),
     mode: str = Form("add"), borrower_id: int | None = Form(None),
     legacy_confirm_isbn13: str = Form(""),
+    legacy_supplement: str = Form(""),
     _=Depends(require_role("editor")),
 ):
     """Scan a barcode: mode-aware dispatch for add, lend, return, move, inventory, lookup, quick_rate."""
     templates = request.app.state.templates
     raw = isbn.strip()
+
+    # #90: a bare legacy UPC carries no title, so the card below asks for the
+    # five digits printed beside it.  Typing them turns the scan into the
+    # 17-digit form #88 already resolves, so this rewrite happens *above* mode
+    # dispatch — `_get_confirmed_legacy_mapping` does too, and a completed
+    # value has to reach it.  Nothing else in this route reads the supplement.
+    completed = legacy_book.complete(raw, legacy_supplement)
+    if completed:
+        raw = completed
 
     # A legacy price-point barcode is an identity problem, not an ordinary UPC
     # lookup. Resolve it before any mode can act on an existing item, so an
@@ -392,8 +402,35 @@ async def scan_isbn(
         assert legacy_isbn13 is not None
         isbn13 = legacy_isbn13
     else:
+        # #90: a *known* legacy publisher prefix scanned without its supplement
+        # is a book whose title nobody knows yet — never an ordinary product.
+        # Stop here and ask for the five digits rather than spend a UPC lookup
+        # that would file a confident wrong answer (a DVD).  This sits below
+        # mode dispatch on purpose: rows already misfiled under the bare UPC
+        # must stay findable by lend/return/move/inventory/lookup/quick_rate.
+        bare_upc = legacy_book.incomplete(raw)
+        if bare_upc:
+            return templates.TemplateResponse(
+                request,
+                "fragments/scan_result.html",
+                {
+                    "status": "legacy_incomplete",
+                    "isbn": bare_upc,
+                    # Anything the user actually submitted and that `complete`
+                    # refused gets an explanation; only an untouched field
+                    # (the first render after the scan) is silent.
+                    "supplement_rejected": bool(legacy_supplement),
+                    "media_type": media_type,
+                    "location_id": location_id,
+                    "platform": platform,
+                    "mode": mode,
+                    "borrower_id": borrower_id,
+                },
+            )
+
         # Detect barcode type — route ordinary UPC barcodes to DVD/product
-        # lookup. Legacy UPC+5 values never reach this branch.
+        # lookup. Legacy UPC+5 values never reach this branch, and a bare
+        # legacy UPC is stopped just above it.
         barcode_type = upc_svc.detect_barcode_type(raw)
         if barcode_type == "upc":
             return await items_common._scan_upc(

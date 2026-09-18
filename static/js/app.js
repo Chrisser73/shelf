@@ -29,7 +29,8 @@ var SCAN_OK_STATUSES = [
     'checked_out', 'moved', 'found', 'relocated', 'promoted'
 ];
 var SCAN_WARN_STATUSES = [
-    'duplicate', 'already_checked_out', 'not_checked_out', 'legacy_ambiguous'
+    'duplicate', 'already_checked_out', 'not_checked_out', 'legacy_ambiguous',
+    'legacy_incomplete'
 ];
 // Neither success nor failure: the scan worked and the answer is a report.
 // 'elsewhere' is Inventory mode declining to guess which of several copies

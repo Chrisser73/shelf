@@ -6,6 +6,56 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.42.3] - 2026-09-17
+
+Some older children's paperbacks were being catalogued as DVDs. Scholastic-era
+books from before the modern book barcode carry a shared price-point UPC with a
+separate five-digit block printed beside it, and it is that block — not the UPC
+— that says which title you are holding. Plenty of scanners read only the UPC
+and drop the five digits, and Shelf then sent the bare code down the ordinary
+retail path, where the product record for that shared code looks like a disc.
+A picture book went into your library as a DVD. Shelf now recognises the bare
+code, stops the scan, and asks you to type the five digits. Found in the
+[#88](https://github.com/dgahagan/shelf/pull/88) test drive by
+[@martialartistslife](https://github.com/martialartistslife) and filed as
+[#90](https://github.com/dgahagan/shelf/issues/90).
+
+### Fixed
+
+- **A legacy book UPC scanned without its five-digit supplement is no longer
+  filed as a DVD.** Instead of guessing, the scan stops on an amber *"Older book
+  barcode: five more digits needed"* card that explains what it is looking at
+  and asks for the digits printed to the right of the barcode. Nothing is saved
+  and no lookup is spent while it waits. You **type** the five digits rather
+  than rescanning — the whole point is that your scanner cannot read them.
+  Found in the [#88](https://github.com/dgahagan/shelf/pull/88) test drive by
+  [@martialartistslife](https://github.com/martialartistslife), filed as
+  [#90](https://github.com/dgahagan/shelf/issues/90)
+
+- **Shelf Fill catches the same barcode, and keeps your place.** Scanning one
+  of these codes while filling a shelf shows the same card without leaving the
+  page, and the book you resolve is filed into the shelf and position you were
+  working on — not dropped into the catalogue unplaced.
+
+- **An empty five-digit box is refused instead of quietly re-posting.**
+  Pressing *Look it up* with nothing typed used to send the form and return the
+  identical card with nothing to say about why.
+
+Deliberately unchanged, and worth knowing:
+
+- **Your answer is remembered under the full 17-digit barcode, never the bare
+  12 digits.** Scan the bare code again and Shelf asks again. It has to: the
+  price-point UPC is shared across roughly 100,000 titles, so an answer stored
+  against it would be handed to the next Scholastic book you scanned.
+- **A barcode whose publisher prefix is not one Shelf has confirmed still falls
+  through to the ordinary UPC path**, exactly as before. This change narrows a
+  known family of book barcodes; it does not reinterpret retail UPCs in general.
+- **The card's *Add it by hand* button appears on the Scan page and not in Shelf
+  Fill**, where that panel does not exist. Shelf Fill offers the same fallback
+  every card there offers — scan the printed ISBN on the copyright page.
+- **An incomplete scan is not written to your scan history.** It is a question
+  Shelf asked, not something that happened to your library.
+
 ## [0.42.2] - 2026-09-17
 
 Some items could not be edited at all. If the ISBN stored on an item was one
@@ -3577,6 +3627,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.42.3]: https://github.com/dgahagan/shelf/releases/tag/v0.42.3
 [0.42.2]: https://github.com/dgahagan/shelf/releases/tag/v0.42.2
 [0.42.1]: https://github.com/dgahagan/shelf/releases/tag/v0.42.1
 [0.42.0]: https://github.com/dgahagan/shelf/releases/tag/v0.42.0

@@ -61,6 +61,57 @@ def test_unsupported_or_invalid_inputs_fail_closed(raw):
     assert legacy_book.isbn13_candidates(raw) == ()
 
 
+KRISTY_UPC = "078073003501"
+KRISTY_SUPPLEMENT = "43506"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "078073003501",
+        "0078073003501",
+        "0 78073 00350 1",
+    ],
+)
+def test_incomplete_accepts_known_bare_upc_in_tolerated_forms(raw):
+    assert legacy_book.incomplete(raw) == KRISTY_UPC
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        KRISTY_UPC5,  # 17-digit full form is not "incomplete"
+        "078073003502",  # invalid UPC-A check digit
+        "025192107801",  # valid UPC-A, unknown publisher prefix
+        "",
+        "1078073003501",  # 13 digits, not zero-led
+    ],
+)
+def test_incomplete_rejects_unknown_or_malformed_input(raw):
+    assert legacy_book.incomplete(raw) is None
+
+
+def test_complete_combines_known_upc_with_typed_supplement():
+    assert legacy_book.complete(KRISTY_UPC, KRISTY_SUPPLEMENT) == KRISTY_UPC5
+
+
+@pytest.mark.parametrize(
+    "supplement",
+    ["4350", "435067", "abcde", ""],
+)
+def test_complete_rejects_malformed_supplements(supplement):
+    assert legacy_book.complete(KRISTY_UPC, supplement) is None
+
+
+def test_complete_rejects_a_non_legacy_upc_even_with_a_valid_supplement():
+    assert legacy_book.complete("025192107801", KRISTY_SUPPLEMENT) is None
+
+
+@pytest.mark.parametrize("raw", [KRISTY_UPC5, KRISTY_EAN13_PLUS5])
+def test_incomplete_is_disjoint_from_full_legacy_forms(raw):
+    assert legacy_book.incomplete(raw) is None
+
+
 def test_mapping_table_rejects_noncanonical_values(db):
     with pytest.raises(sqlite3.IntegrityError):
         db.execute(

@@ -316,10 +316,12 @@ function scanPage() {
                 tmp.innerHTML = html;
                 var outcome = scanCardOutcome(tmp.querySelector('.scan-result'));
 
-                // An ambiguity requires the user's interaction with the card
-                // below the camera. Stop scanning so another frame cannot
-                // enqueue a second unresolved choice.
-                if (outcome && outcome.status === 'legacy_ambiguous') {
+                // Both legacy cards require the user's interaction with the
+                // card below the camera — an ambiguous choice, or the five
+                // typed digits. Stop scanning so another frame cannot enqueue
+                // a second unresolved choice and swap the card out from
+                // under the user.
+                if (outcome && (outcome.status === 'legacy_ambiguous' || outcome.status === 'legacy_incomplete')) {
                     if (this.scanner) {
                         try { await this.scanner.stop(); } catch (e) {}
                         this.scanner = false;
@@ -328,7 +330,7 @@ function scanPage() {
                     this.scanPaused = false;
                     this.scanLoading = false;
                     this.scanResult = false;
-                    showToast('Choose the matching book below', 'warning');
+                    showToast(outcome.status === 'legacy_ambiguous' ? 'Choose the matching book below' : 'Type the five digits below', 'warning');
                     return;
                 }
 
