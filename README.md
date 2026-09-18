@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-3400%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-3436%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![E2E tests](https://img.shields.io/badge/e2e%20tests-255%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
@@ -347,6 +347,7 @@ make install-playwright   # downloads headless Chromium
 | `make check-licenses` | License compliance report |
 | `make check-secrets` | Scan tracked files for accidentally hardcoded secrets |
 | `make check-csrf` | Lint that raw `fetch()` calls send the CSRF token |
+| `make check-deleted` | Lint that every read of `items` goes through the `items_live` view |
 | `make check-alpine` | Verify templates stay compatible with the Alpine CSP build, and that the script load order in `<head>` is intact |
 | `make check-sw-version` | Verify the service worker's cache version matches what it caches |
 | `make check-tests` | Lint the test suite's own conventions |

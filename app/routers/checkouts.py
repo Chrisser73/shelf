@@ -38,7 +38,7 @@ def get_overdue_loans(db) -> list[dict]:
         "SELECT c.*, i.title, i.cover_path, b.name as borrower_name, "
         "CAST(julianday('now') - julianday(c.checked_out) AS INTEGER) as days_out "
         "FROM checkouts c "
-        "JOIN items i ON c.item_id = i.id "
+        "JOIN items_live i ON c.item_id = i.id "
         "JOIN borrowers b ON c.borrower_id = b.id "
         f"WHERE {OVERDUE_CONDITION} "
         "ORDER BY c.checked_out ASC",

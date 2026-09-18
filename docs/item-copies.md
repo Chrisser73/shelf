@@ -72,8 +72,10 @@ none — a seam write made while the item has no primary would invent a copy
 rather than move one.
 
 Removal is permanent. A copy's condition, acquisition details and provenance go
-with the row, and nothing in this schema is soft-deleted, which is why the UI
-control is guarded by a confirmation naming what is lost.
+with the row — the delete is a `DELETE`, not a flag — which is why the UI
+control is guarded by a confirmation naming what is lost. Both `items` and
+`item_copies` now carry a `deleted_at` column, but nothing writes it and no
+read filters on it; it is the seam a later soft-delete feature switches on.
 
 ## Which surfaces write copies
 

@@ -65,7 +65,7 @@ def filter_counts(db, values: dict, total: int) -> dict:
     type_counts = {
         row["media_type"]: row["c"]
         for row in db.execute(
-            f"SELECT media_type, COUNT(*) as c FROM items i {type_where} GROUP BY media_type",
+            f"SELECT media_type, COUNT(*) as c FROM items_live i {type_where} GROUP BY media_type",
             type_params,
         ).fetchall()
     }
@@ -74,7 +74,7 @@ def filter_counts(db, values: dict, total: int) -> dict:
     own_where, own_params = _count_where("owned")
     own_row = db.execute(
         f"SELECT COALESCE(SUM(i.owned = 1), 0) AS o, COALESCE(SUM({lists.WISHLISTED_SQL}), 0) AS w, "
-        f"COALESCE(SUM({lists.NEITHER_SQL}), 0) AS n FROM items i {own_where}",
+        f"COALESCE(SUM({lists.NEITHER_SQL}), 0) AS n FROM items_live i {own_where}",
         own_params,
     ).fetchone()
     owned_count, wishlist_count, neither_count = own_row["o"], own_row["w"], own_row["n"]
@@ -84,13 +84,13 @@ def filter_counts(db, values: dict, total: int) -> dict:
     location_counts = {
         row["location_id"]: row["c"]
         for row in db.execute(
-            f"SELECT location_id, COUNT(*) as c FROM items i {loc_where}"
+            f"SELECT location_id, COUNT(*) as c FROM items_live i {loc_where}"
             f"{_loc_join} location_id IS NOT NULL GROUP BY location_id",
             loc_params,
         ).fetchall()
     }
     no_location_count = db.execute(
-        f"SELECT COUNT(*) as c FROM items i {loc_where}{_loc_join} location_id IS NULL",
+        f"SELECT COUNT(*) as c FROM items_live i {loc_where}{_loc_join} location_id IS NULL",
         loc_params,
     ).fetchone()["c"]
 
@@ -99,7 +99,7 @@ def filter_counts(db, values: dict, total: int) -> dict:
     reading_status_counts = {
         row["reading_status"]: row["c"]
         for row in db.execute(
-            f"SELECT reading_status, COUNT(*) as c FROM items i {rs_where}"
+            f"SELECT reading_status, COUNT(*) as c FROM items_live i {rs_where}"
             f"{_rs_join} reading_status IS NOT NULL AND reading_status != '' "
             "GROUP BY reading_status",
             rs_params,
@@ -291,7 +291,7 @@ async def resolve_missing_cover(
     """
     with get_db() as db:
         row = db.execute(
-            "SELECT title, authors, isbn, cover_path FROM items WHERE id = ?",
+            "SELECT title, authors, isbn, cover_path FROM items_live WHERE id = ?",
             (item_id,),
         ).fetchone()
     if not row or row["cover_path"]:
@@ -323,7 +323,7 @@ async def resolve_missing_cover(
                             found_isbn, item_id)
             else:
                 with get_db() as db:
-                    taken = db.execute("SELECT id FROM items WHERE isbn = ? AND id != ?",
+                    taken = db.execute("SELECT id FROM items_live WHERE isbn = ? AND id != ?",
                                        (pair[0], item_id)).fetchone()
                     if not taken:
                         update_item_fields(db, item_id, {"isbn": pair[0]})
@@ -415,7 +415,7 @@ def _find_upc_row(db, upc_key: str, media_type: str):
     `TestIntegrityErrorGuard` patches for exactly this reason.
     """
     return db.execute(
-        "SELECT id, title FROM items WHERE upc = ? AND media_type = ?",
+        "SELECT id, title FROM items_live WHERE upc = ? AND media_type = ?",
         (upc_key, media_type),
     ).fetchone()
 
@@ -467,7 +467,7 @@ async def _scan_upc(request: Request, templates, upc_code: str, media_type: str,
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
         existing = db.execute(
-            "SELECT id, title, media_type FROM items WHERE upc = ?", (upc_key,)
+            "SELECT id, title, media_type FROM items_live WHERE upc = ?", (upc_key,)
         ).fetchone()
         if existing and mode != "wishlist":
             promoted = item_write.promote_wishlisted(db, existing["id"])

@@ -30,7 +30,7 @@ def link_items(
         raise ValueError("Unknown related-media link type")
 
     rows = db.execute(
-        "SELECT id FROM items WHERE id IN (?, ?)", (item_a_id, item_b_id)
+        "SELECT id FROM items_live WHERE id IN (?, ?)", (item_a_id, item_b_id)
     ).fetchall()
     if {row["id"] for row in rows} != {item_a_id, item_b_id}:
         return False
@@ -58,7 +58,7 @@ def unlink_items(db, item_a_id: int, item_b_id: int) -> bool:
 
 def related_ids(db, item_id: int, *, include_self: bool = False) -> list[int]:
     """Return the full transitive item-link component containing ``item_id``."""
-    if not db.execute("SELECT 1 FROM items WHERE id = ?", (item_id,)).fetchone():
+    if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
         return []
 
     rows = db.execute(
@@ -89,7 +89,7 @@ def related_items(db, item_id: int, *, include_self: bool = False):
         return []
     placeholders = ",".join("?" for _ in ids)
     return db.execute(
-        f"SELECT * FROM items WHERE id IN ({placeholders}) "
+        f"SELECT * FROM items_live WHERE id IN ({placeholders}) "
         "ORDER BY title COLLATE NOCASE, media_type, id",
         tuple(ids),
     ).fetchall()
@@ -102,7 +102,7 @@ def direct_links(db, item_id: int) -> list[dict]:
                   CASE WHEN il.item_a_id = ? THEN il.item_b_id ELSE il.item_a_id END AS item_id,
                   i.title, i.media_type, i.cover_path
            FROM item_links il
-           JOIN items i ON i.id = CASE
+           JOIN items_live i ON i.id = CASE
                WHEN il.item_a_id = ? THEN il.item_b_id ELSE il.item_a_id END
            WHERE il.item_a_id = ? OR il.item_b_id = ?
            ORDER BY i.title COLLATE NOCASE, i.media_type, i.id""",
@@ -113,7 +113,7 @@ def direct_links(db, item_id: int) -> list[dict]:
 
 def search_candidates(db, item_id: int, query: str, *, limit: int = 20):
     """Find catalogue items not already in this item's related-media group."""
-    if not db.execute("SELECT 1 FROM items WHERE id = ?", (item_id,)).fetchone():
+    if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
         return []
     excluded = sorted(related_ids(db, item_id, include_self=True))
     q = (query or "").strip()
@@ -122,7 +122,7 @@ def search_candidates(db, item_id: int, query: str, *, limit: int = 20):
     like = f"%{q}%"
     placeholders = ",".join("?" for _ in excluded)
     rows = db.execute(
-        f"""SELECT * FROM items
+        f"""SELECT * FROM items_live
             WHERE (title LIKE ? COLLATE NOCASE
                OR authors LIKE ? COLLATE NOCASE
                OR series_name LIKE ? COLLATE NOCASE)

@@ -73,7 +73,7 @@ async def _apply_release_artwork(item_id: int, release_id: str) -> None:
     """Fill a missing cover from Cover Art Archive without overwriting one."""
     with get_db() as db:
         row = db.execute(
-            "SELECT cover_path FROM items WHERE id = ?", (item_id,)
+            "SELECT cover_path FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
     if not row or row["cover_path"]:
         return
@@ -113,7 +113,7 @@ async def music_page(
             f"""SELECT i.id, i.title, i.authors, i.media_type, i.cover_path,
                        i.publish_year, mr.format_summary, mr.catalog_number,
                        mr.release_date
-                FROM items i
+                FROM items_live i
                 LEFT JOIN music_releases mr ON mr.item_id = i.id
                 WHERE i.media_type IN ({placeholders})
                 ORDER BY i.authors COLLATE NOCASE, i.title COLLATE NOCASE, i.id
@@ -232,7 +232,7 @@ async def add_music_release(
             ).fetchone()
             if not existing and provider_barcode:
                 existing = db.execute(
-                    "SELECT id AS item_id FROM items WHERE upc = ? AND media_type = ?",
+                    "SELECT id AS item_id FROM items_live WHERE upc = ? AND media_type = ?",
                     (provider_barcode, media_type),
                 ).fetchone()
         if existing:
@@ -253,7 +253,7 @@ async def music_item_page(
 ):
     with get_db() as db:
         item = db.execute(
-            "SELECT * FROM items WHERE id = ?", (item_id,)
+            "SELECT * FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         if not item or item["media_type"] not in MUSIC_MEDIA_TYPES:
             return RedirectResponse(f"/item/{item_id}", status_code=303)
@@ -273,7 +273,7 @@ async def refresh_music_release(
 ):
     with get_db() as db:
         item = db.execute(
-            "SELECT * FROM items WHERE id = ?", (item_id,)
+            "SELECT * FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         release = music_catalog.get_release(db, item_id) if item else None
     if not item or item["media_type"] not in MUSIC_MEDIA_TYPES or not release:

@@ -14,12 +14,12 @@ from app.services import lists
 
 def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
     """Return stable, presentation-neutral metrics for the Home page."""
-    total = db.execute("SELECT COUNT(*) AS c FROM items").fetchone()["c"]
+    total = db.execute("SELECT COUNT(*) AS c FROM items_live").fetchone()["c"]
     owned = db.execute(
-        "SELECT COUNT(*) AS c FROM items WHERE owned = 1"
+        "SELECT COUNT(*) AS c FROM items_live WHERE owned = 1"
     ).fetchone()["c"]
     wishlist = db.execute(
-        f"SELECT COUNT(*) AS c FROM items i WHERE {lists.WISHLISTED_SQL}"
+        f"SELECT COUNT(*) AS c FROM items_live i WHERE {lists.WISHLISTED_SQL}"
     ).fetchone()["c"]
     lent_out = db.execute(
         "SELECT COUNT(DISTINCT item_id) AS c FROM checkouts WHERE checked_in IS NULL"
@@ -30,7 +30,7 @@ def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
     # counts of the same apparent thing on two screens, with this tile not even
     # clickable to reconcile them (Dan's call, 2026-09-09).
     missing_cover = db.execute(
-        "SELECT COUNT(*) AS c FROM items "
+        "SELECT COUNT(*) AS c FROM items_live "
         "WHERE (cover_path IS NULL OR TRIM(cover_path) = '') "
         "AND cover_review_dismissed = 0"
     ).fetchone()["c"]
@@ -39,7 +39,7 @@ def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
         "SELECT i.media_type, COUNT(*) AS item_count, "
         "SUM(CASE WHEN i.owned = 1 THEN 1 ELSE 0 END) AS owned_count, "
         f"SUM(CASE WHEN {lists.WISHLISTED_SQL} THEN 1 ELSE 0 END) AS wishlist_count "
-        "FROM items i GROUP BY i.media_type "
+        "FROM items_live i GROUP BY i.media_type "
         "ORDER BY item_count DESC, i.media_type COLLATE NOCASE"
     ).fetchall()
     media_types = [dict(row) for row in type_rows]
@@ -52,7 +52,7 @@ def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
             for row in db.execute(
                 "SELECT i.id, i.title, i.authors, i.media_type, i.cover_path, i.owned, "
                 f"i.created_at, {lists.WISHLISTED_SQL} AS wishlisted "
-                "FROM items i ORDER BY i.created_at DESC, i.id DESC LIMIT ?",
+                "FROM items_live i ORDER BY i.created_at DESC, i.id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         ]

@@ -81,14 +81,14 @@ _QUEUE_ORDER = "ORDER BY i.updated_at DESC, i.id DESC"
 def queue_total(db) -> int:
     """How many items are waiting. Computed once per page load, never per swap."""
     row = db.execute(
-        f"SELECT COUNT(*) AS c FROM items i WHERE {_QUEUE_PREDICATE}"
+        f"SELECT COUNT(*) AS c FROM items_live i WHERE {_QUEUE_PREDICATE}"
     ).fetchone()
     return row["c"] if row else 0
 
 
 def _first(db):
     return db.execute(
-        f"SELECT {_QUEUE_COLUMNS} FROM items i WHERE {_QUEUE_PREDICATE} "
+        f"SELECT {_QUEUE_COLUMNS} FROM items_live i WHERE {_QUEUE_PREDICATE} "
         f"{_QUEUE_ORDER} LIMIT 1"
     ).fetchone()
 
@@ -106,7 +106,7 @@ def next_after(db, item_id: int | None):
     if item_id is None:
         return _first(db)
     key = db.execute(
-        "SELECT updated_at, id FROM items WHERE id = ?", (item_id,)
+        "SELECT updated_at, id FROM items_live WHERE id = ?", (item_id,)
     ).fetchone()
     if key is None:
         return _first(db)
@@ -116,13 +116,13 @@ def next_after(db, item_id: int | None):
 def seek_key(db, item_id: int):
     """Capture an item's ordering key before a write that would change it."""
     return db.execute(
-        "SELECT updated_at, id FROM items WHERE id = ?", (item_id,)
+        "SELECT updated_at, id FROM items_live WHERE id = ?", (item_id,)
     ).fetchone()
 
 
 def _seek(db, updated_at, item_id: int):
     return db.execute(
-        f"SELECT {_QUEUE_COLUMNS} FROM items i WHERE {_QUEUE_PREDICATE} "
+        f"SELECT {_QUEUE_COLUMNS} FROM items_live i WHERE {_QUEUE_PREDICATE} "
         f"  AND (i.updated_at < ? OR (i.updated_at = ? AND i.id < ?)) "
         f"{_QUEUE_ORDER} LIMIT 1",
         (updated_at, updated_at, item_id),
@@ -241,7 +241,7 @@ async def cover_review_search(
     with get_db() as db:
         item = db.execute(
             "SELECT id, title, authors, cover_path, media_type, publish_year, platform "
-            "FROM items WHERE id = ?", (item_id,)
+            "FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         # Key-by-key through get_setting, never the bulk accessor: provider
         # credentials are in SECRET_ENV_VARS and the bulk one returns only keys

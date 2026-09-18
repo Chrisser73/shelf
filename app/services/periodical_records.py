@@ -84,7 +84,7 @@ def link_issue(
     cover_date_label: str | None = None,
 ) -> None:
     """Attach concrete issue identity to an existing Shelf item."""
-    if not db.execute("SELECT 1 FROM items WHERE id = ?", (item_id,)).fetchone():
+    if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
         raise ValueError("Item not found")
     if not db.execute(
         "SELECT 1 FROM periodical_publications WHERE id = ?", (publication_id,)
@@ -170,7 +170,7 @@ def issues_for_publication(db, publication_id: int) -> list[dict]:
     """Return concrete issues newest first, with catalogue item metadata."""
     rows = db.execute(
         "SELECT pi.*, i.title, i.cover_path, i.owned, i.publish_year "
-        "FROM periodical_issues pi JOIN items i ON i.id = pi.item_id "
+        "FROM periodical_issues pi JOIN items_live i ON i.id = pi.item_id "
         "WHERE pi.publication_id = ? "
         "ORDER BY CASE WHEN pi.issue_date IS NULL OR TRIM(pi.issue_date) = '' "
         "THEN 1 ELSE 0 END, pi.issue_date DESC, "

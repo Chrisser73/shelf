@@ -42,7 +42,7 @@ async def cover_status(request: Request, item_id: int, attempt: int = 0, _=Depen
     attempt = max(0, min(attempt, MAX_COVER_POLLS))
     with get_db() as db:
         row = db.execute(
-            "SELECT cover_path FROM items WHERE id = ?", (item_id,)
+            "SELECT cover_path FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
     if not row:
         return templates.TemplateResponse(
@@ -58,7 +58,7 @@ async def cover_status(request: Request, item_id: int, attempt: int = 0, _=Depen
 async def retry_cover(item_id: int, _=Depends(require_role("editor"))):
     """Re-attempt cover download for an item."""
     with get_db() as db:
-        item = db.execute("SELECT isbn FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute("SELECT isbn FROM items_live WHERE id = ?", (item_id,)).fetchone()
     if not item or not item["isbn"]:
         return {"ok": False, "message": "No ISBN"}
 
@@ -141,7 +141,7 @@ async def cover_search(request: Request, item_id: int, query: str | None = None,
     with get_db() as db:
         item = db.execute(
             "SELECT title, authors, cover_path, media_type, publish_year, platform "
-            "FROM items WHERE id = ?", (item_id,)
+            "FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         # Key-by-key through get_setting, never the bulk settings accessor:
         # Provider credentials are in SECRET_ENV_VARS, and the bulk one
@@ -194,7 +194,7 @@ async def cover_select(
     with get_db() as db:
         item = db.execute(
             "SELECT title, authors, cover_path, media_type, publish_year, platform "
-            "FROM items WHERE id = ?", (item_id,)
+            "FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         # Same key-by-key build as cover_search — this failure path re-renders
         # the grid, and a DVD whose pick failed must not fall back to book
@@ -235,7 +235,7 @@ async def cover_from_url(
 ):
     """Use a user-pasted public HTTPS image as an item's cover."""
     with get_db() as db:
-        item = db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
     if not item:
         return HTMLResponse("Not found", status_code=404)
 
@@ -270,7 +270,7 @@ async def cover_upload(request: Request, item_id: int, _=Depends(require_role("e
     still navigates on success regardless of swap.
     """
     with get_db() as db:
-        item = db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
     if not item:
         return HTMLResponse("Not found", status_code=404)
 
@@ -322,7 +322,7 @@ async def cover_remove(item_id: int, _=Depends(require_role("editor"))):
     the automatic chain.
     """
     with get_db() as db:
-        item = db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
         if not item:
             return HTMLResponse("Not found", status_code=404)
         db.execute(
@@ -362,7 +362,7 @@ async def bulk_retry_covers(request: Request, _=Depends(require_role("admin"))):
     """Retry downloading covers for all book items missing them."""
     with get_db() as db:
         items = db.execute(
-            f"SELECT id FROM items WHERE cover_path IS NULL "
+            f"SELECT id FROM items_live WHERE cover_path IS NULL "
             f"AND media_type IN ({_COVER_RETRY_PLACEHOLDERS})",
             cover_queue.COVER_REQUEUE_MEDIA_TYPES,
         ).fetchall()
@@ -391,7 +391,7 @@ async def bulk_retry_covers_stream(request: Request, _=Depends(require_role("adm
     """SSE endpoint for bulk cover retry with progress updates."""
     with get_db() as db:
         items = db.execute(
-            f"SELECT id, isbn, title FROM items WHERE cover_path IS NULL "
+            f"SELECT id, isbn, title FROM items_live WHERE cover_path IS NULL "
             f"AND media_type IN ({_COVER_RETRY_PLACEHOLDERS})",
             cover_queue.COVER_REQUEUE_MEDIA_TYPES,
         ).fetchall()

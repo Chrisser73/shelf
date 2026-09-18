@@ -92,7 +92,7 @@ def test_items_columns_match_what_the_write_path_sees(db):
 
 
 @pytest.mark.parametrize("column", ["language", "owned", "platform", "manual_value",
-                                    "cover_review_dismissed"])
+                                    "cover_review_dismissed", "deleted_at"])
 def test_known_late_columns_survive_a_fresh_bootstrap(column, db):
     """Spot-check columns added by migration rather than in the original
     CREATE — the ones G1 is actually about."""
@@ -121,6 +121,48 @@ def test_cover_review_dismissed_defaults_to_zero_on_a_fresh_bootstrap(db):
         "SELECT cover_review_dismissed FROM items WHERE title = 'No flag supplied'"
     ).fetchone()
     assert stored["cover_review_dismissed"] == 0
+
+
+@pytest.mark.parametrize("table", ["items", "item_copies"])
+def test_deleted_at_is_a_nullable_column_on_a_fresh_bootstrap(table, db):
+    """Migrations 37 and 38's column must exist, nullable, on *both* tables of
+    a fresh database — and nothing may supply a value for it.
+
+    `PRAGMA table_info` returns the default *expression text*, so an explicit
+    `DEFAULT NULL` reads back as the four-character string 'NULL' and only an
+    omitted default reads back as None. Asserting `dflt_value is None` here
+    would pass on a column that has no default at all, which is a different
+    migration from the one that shipped.
+    """
+    assert "deleted_at" in _columns(db, table)
+    row = db.execute(
+        "SELECT dflt_value, \"notnull\" FROM pragma_table_info(?) "
+        "WHERE name = 'deleted_at'",
+        (table,),
+    ).fetchone()
+    assert row["dflt_value"] == "NULL"
+    assert row["notnull"] == 0
+
+
+def test_an_item_and_a_copy_store_sql_null_when_nobody_sets_deleted_at(db):
+    """The seam is inert: the ordinary insert path leaves deleted_at as SQL
+    NULL, which is what `items_live`'s predicate keys on."""
+    cur = db.execute("INSERT INTO items (title) VALUES ('Nobody deleted me')")
+    item_id = cur.lastrowid
+    db.execute(
+        "INSERT INTO item_copies (item_id, copy_number, is_primary) VALUES (?, 1, 1)",
+        (item_id,),
+    )
+    db.commit()
+
+    item = db.execute(
+        "SELECT deleted_at FROM items WHERE id = ?", (item_id,)
+    ).fetchone()
+    copy = db.execute(
+        "SELECT deleted_at FROM item_copies WHERE item_id = ?", (item_id,)
+    ).fetchone()
+    assert item["deleted_at"] is None
+    assert copy["deleted_at"] is None
 
 
 def test_migrations_create_table_list_is_parseable():

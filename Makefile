@@ -16,7 +16,7 @@ PYTEST_FLAGS ?= -q --tb=short --no-header
 PYTEST_PAR   ?= -n auto --dist loadfile
 
 .PHONY: setup css test test-verbose test-fast test-e2e test-contract test-all \
-        check-deps check-licenses check-secrets check-csrf check-alpine check-sw-version check-tests \
+        check-deps check-licenses check-secrets check-csrf check-alpine check-sw-version check-tests check-deleted \
         badges check-badges check-roadmap \
         checks checks-fast \
         report-review report-security report-test reports \
@@ -117,6 +117,14 @@ check-secrets:
 check-csrf:
 	python scripts/check_csrf_fetch.py
 
+# Every read of items in app/ must go through the items_live TEMP view
+# (app/database.py::get_db()), never the physical table directly — a direct
+# read sees soft-deleted rows. Catches both FROM items and JOIN items; the
+# latter has no FROM items anywhere in some files (app/routers/checkouts.py),
+# so a lint that only looked for FROM would miss it silently.
+check-deleted:
+	python scripts/check_items_live.py
+
 check-alpine:
 	python scripts/check_alpine_csp.py
 
@@ -141,7 +149,7 @@ check-roadmap:
 	python scripts/check_roadmap_map.py
 
 # Instant, offline lints — the inner-loop target.
-checks-fast: check-secrets check-csrf check-alpine check-sw-version check-tests check-badges check-roadmap
+checks-fast: check-secrets check-csrf check-deleted check-alpine check-sw-version check-tests check-badges check-roadmap
 
 # Everything, including the network-bound pip-audit and the dated report files.
 # Keep this the full set: the release procedure in ../CLAUDE.md step 1 calls it.

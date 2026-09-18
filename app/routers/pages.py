@@ -67,20 +67,20 @@ async def browse(
             f" WHERE c.item_id = i.id AND c.checked_in IS NULL LIMIT 1) AS lent_to, "
             f"(SELECT 1 FROM checkouts c WHERE c.item_id = i.id AND {OVERDUE_CONDITION} LIMIT 1) AS lent_overdue, "
             f"{lists.WISHLISTED_SQL} AS wishlisted "
-            f"FROM items i "
+            f"FROM items_live i "
             f"LEFT JOIN locations l ON i.location_id = l.id "
             f"{where} ORDER BY {order_clause} LIMIT ?",
             [get_overdue_days(db)] + params + [DEFAULT_PAGE_SIZE],
         ).fetchall()
 
         total_filtered = db.execute(
-            f"SELECT COUNT(*) as c FROM items i {where}", params
+            f"SELECT COUNT(*) as c FROM items_live i {where}", params
         ).fetchone()["c"]
 
         series_names = [
             row["series_name"]
             for row in db.execute(
-                "SELECT DISTINCT series_name FROM items "
+                "SELECT DISTINCT series_name FROM items_live "
                 "WHERE series_name IS NOT NULL AND TRIM(series_name) != '' "
                 "ORDER BY series_name COLLATE NOCASE"
             ).fetchall()
@@ -105,7 +105,7 @@ async def browse(
         item_languages = [
             row["language"]
             for row in db.execute(
-                "SELECT DISTINCT language FROM items "
+                "SELECT DISTINCT language FROM items_live "
                 "WHERE language IS NOT NULL AND language != '' ORDER BY language"
             ).fetchall()
         ]
@@ -235,7 +235,7 @@ async def item_detail(
         item = db.execute(
             f"SELECT i.*, l.name as location_name, "
             f"{lists.WISHLISTED_SQL} AS wishlisted "
-            "FROM items i "
+            "FROM items_live i "
             "LEFT JOIN locations l ON i.location_id = l.id "
             "WHERE i.id = ?",
             (item_id,),
@@ -269,7 +269,7 @@ async def item_detail(
         # 'format', so this changes nothing that is currently rendered.
         linked_items = db.execute(
             "SELECT i.id, i.title, i.media_type, i.abs_id FROM item_links il "
-            "JOIN items i ON (i.id = CASE WHEN il.item_a_id = ? THEN il.item_b_id ELSE il.item_a_id END) "
+            "JOIN items_live i ON (i.id = CASE WHEN il.item_a_id = ? THEN il.item_b_id ELSE il.item_a_id END) "
             "WHERE (il.item_a_id = ? OR il.item_b_id = ?) AND il.link_type = 'format'",
             (item_id, item_id, item_id),
         ).fetchall()
@@ -322,7 +322,7 @@ async def item_detail(
         series_progress = None
         if item["series_name"] and item["series_name"].strip():
             siblings = db.execute(
-                "SELECT owned, series_position FROM items "
+                "SELECT owned, series_position FROM items_live "
                 "WHERE series_name = ? COLLATE NOCASE",
                 (item["series_name"],),
             ).fetchall()
@@ -381,7 +381,7 @@ async def item_edit(
     back = nav.back_target(from_)
     with get_db() as db:
         item = db.execute(
-            f"SELECT i.*, {lists.WISHLISTED_SQL} AS wishlisted FROM items i WHERE i.id = ?",
+            f"SELECT i.*, {lists.WISHLISTED_SQL} AS wishlisted FROM items_live i WHERE i.id = ?",
             (item_id,),
         ).fetchone()
         locations = db.execute(
@@ -408,28 +408,28 @@ async def item_edit(
 async def stats(request: Request, _=Depends(require_role("viewer"))):
     with get_db() as db:
         by_type = db.execute(
-            "SELECT media_type, COUNT(*) as c FROM items GROUP BY media_type ORDER BY c DESC"
+            "SELECT media_type, COUNT(*) as c FROM items_live GROUP BY media_type ORDER BY c DESC"
         ).fetchall()
         by_location = db.execute(
             "SELECT COALESCE(l.name, 'Unassigned') as name, COUNT(*) as c "
-            "FROM items i LEFT JOIN locations l ON i.location_id = l.id "
+            "FROM items_live i LEFT JOIN locations l ON i.location_id = l.id "
             "GROUP BY l.name ORDER BY c DESC"
         ).fetchall()
-        total = db.execute("SELECT COUNT(*) as c FROM items").fetchone()["c"]
+        total = db.execute("SELECT COUNT(*) as c FROM items_live").fetchone()["c"]
         stats_wishlist = db.execute(
-            f"SELECT COUNT(*) as c FROM items i WHERE {lists.WISHLISTED_SQL}"
+            f"SELECT COUNT(*) as c FROM items_live i WHERE {lists.WISHLISTED_SQL}"
         ).fetchone()["c"]
         stats_owned = db.execute(
-            "SELECT COUNT(*) as c FROM items WHERE owned = 1"
+            "SELECT COUNT(*) as c FROM items_live WHERE owned = 1"
         ).fetchone()["c"]
         with_covers = db.execute(
-            "SELECT COUNT(*) as c FROM items WHERE cover_path IS NOT NULL"
+            "SELECT COUNT(*) as c FROM items_live WHERE cover_path IS NOT NULL"
         ).fetchone()["c"]
         without_isbn = db.execute(
-            "SELECT COUNT(*) as c FROM items WHERE isbn IS NULL"
+            "SELECT COUNT(*) as c FROM items_live WHERE isbn IS NULL"
         ).fetchone()["c"]
         recent = db.execute(
-            "SELECT i.*, l.name as location_name FROM items i "
+            "SELECT i.*, l.name as location_name FROM items_live i "
             "LEFT JOIN locations l ON i.location_id = l.id "
             "WHERE i.created_at >= datetime('now', '-30 days') "
             "ORDER BY i.created_at DESC LIMIT 20"
@@ -437,16 +437,16 @@ async def stats(request: Request, _=Depends(require_role("viewer"))):
 
         # --- Dashboard chart data (see .devdocs/archive/completed/STATS_DASHBOARD.md) ---
         read_by_year = db.execute(
-            "SELECT substr(date_finished, 1, 4) as y, COUNT(*) as c FROM items "
+            "SELECT substr(date_finished, 1, 4) as y, COUNT(*) as c FROM items_live "
             "WHERE reading_status = 'read' AND date_finished IS NOT NULL "
             "GROUP BY y ORDER BY y"
         ).fetchall()
         growth_rows = db.execute(
-            "SELECT substr(created_at, 1, 7) as m, COUNT(*) as c FROM items "
+            "SELECT substr(created_at, 1, 7) as m, COUNT(*) as c FROM items_live "
             "GROUP BY m ORDER BY m"
         ).fetchall()
         author_rows = db.execute(
-            "SELECT authors, COUNT(*) as c FROM items "
+            "SELECT authors, COUNT(*) as c FROM items_live "
             "WHERE authors IS NOT NULL AND TRIM(authors) != '' GROUP BY authors"
         ).fetchall()
         valuation_rows = db.execute(
@@ -455,7 +455,7 @@ async def stats(request: Request, _=Depends(require_role("viewer"))):
         ).fetchall()
         # The valuation concerns what you own (#125) — owned = 1.
         current_value = db.execute(
-            "SELECT COALESCE(SUM(COALESCE(manual_value, estimated_value)), 0) as v FROM items "
+            "SELECT COALESCE(SUM(COALESCE(manual_value, estimated_value)), 0) as v FROM items_live "
             "WHERE COALESCE(manual_value, estimated_value) IS NOT NULL AND owned = 1"
         ).fetchone()["v"]
 
@@ -594,13 +594,13 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
         locations = db.execute(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
-        item_count = db.execute("SELECT COUNT(*) as c FROM items").fetchone()["c"]
+        item_count = db.execute("SELECT COUNT(*) as c FROM items_live").fetchone()["c"]
         # Excludes items dismissed from the cover-review queue
         # (items.cover_review_dismissed, migration 32) — this figure and the
         # /cover-review entry point's count are the same number, and an item
         # marked "not available" there should stop being counted here too.
         missing_covers = db.execute(
-            "SELECT COUNT(*) AS c FROM items WHERE cover_path IS NULL AND cover_review_dismissed = 0"
+            "SELECT COUNT(*) AS c FROM items_live WHERE cover_path IS NULL AND cover_review_dismissed = 0"
         ).fetchone()["c"]
         cover_queue_stats = cover_queue.stats()
         # Carries each borrower's *returned* loan count for the delete

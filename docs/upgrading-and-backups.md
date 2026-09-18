@@ -26,6 +26,22 @@ Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
 
+### After upgrading to 0.42.4
+
+**Two migrations run.** They add a `deleted_at` column to `items` and to
+`item_copies` and leave it empty on every row. No row is rewritten, so they are
+quick even on a large library, and they need no action from you.
+
+**Nothing changes on screen.** Every item, copy, count, filter badge, export
+and share link shows exactly what it showed before, and deleting something
+still deletes it permanently. What changed is underneath: every read of an item
+now goes through a filtered view rather than the table. That is groundwork — a
+later release uses it for a Trash you can restore from.
+
+**Backups are unaffected.** The view exists only for the life of a database
+connection, so it is never written into a backup file. A backup taken from
+Settings still contains no views and restores exactly as before.
+
 ### After upgrading to 0.42.0
 
 **No migrations run.** Your items keep the state they had: everything you

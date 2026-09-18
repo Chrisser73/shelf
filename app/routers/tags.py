@@ -57,7 +57,7 @@ async def add_tag(request: Request, item_id: int, name: str = Form(...),
         return HTMLResponse("Tag name required", status_code=400)
 
     with get_db() as db:
-        item = db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
         if not item:
             return HTMLResponse("Item not found", status_code=404)
         db.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag_name,))
@@ -73,7 +73,7 @@ async def add_tag(request: Request, item_id: int, name: str = Form(...),
 async def remove_tag(request: Request, item_id: int, tag_id: int,
                      _=Depends(require_role("editor"))):
     with get_db() as db:
-        item = db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
         if not item:
             return HTMLResponse("Item not found", status_code=404)
 

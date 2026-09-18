@@ -85,6 +85,8 @@ Notes:
   Make targets, not raw `pytest`.
 - Any raw `fetch()` call in frontend JS must send the `X-CSRF-Token` header
   (`make check-csrf` enforces this).
+- Reads of the `items` table go through the `items_live` view, not `FROM items`
+  or `JOIN items` (`make check-deleted` enforces this). Writes stay on `items`.
 - Templates must stay compatible with the Alpine.js CSP build
   (`make check-alpine`) — in particular, guard a chain with a ternary
   (`x ? x.prop.length : ''`), never `&&`, which the CSP build evaluates

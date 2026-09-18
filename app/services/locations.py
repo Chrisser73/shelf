@@ -165,7 +165,7 @@ def delete_location(db, location_id: int) -> None:
     # by item_copies.location_id's ON DELETE SET NULL foreign key below.
     item_ids = [
         row["id"] for row in db.execute(
-            "SELECT id FROM items WHERE location_id = ?", (location_id,)
+            "SELECT id FROM items_live WHERE location_id = ?", (location_id,)
         ).fetchall()
     ]
     if item_ids:

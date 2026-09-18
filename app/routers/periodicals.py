@@ -54,7 +54,7 @@ def find_periodical_item(raw: str) -> dict | None:
         rows = db.execute(
             """SELECT i.*, l.name AS location_name
                FROM periodical_issues pi
-               JOIN items i ON i.id = pi.item_id
+               JOIN items_live i ON i.id = pi.item_id
                LEFT JOIN locations l ON l.id = i.location_id
                WHERE pi.barcode_ean = ? AND pi.barcode_supplement = ?
                ORDER BY i.id LIMIT 2""",

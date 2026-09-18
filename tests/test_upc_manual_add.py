@@ -396,7 +396,7 @@ class TestManualAddPromotesWishlisted:
         probe_results = []
         _install_lock_probe(
             monkeypatch, items_router,
-            lambda sql: "FROM items WHERE isbn = ? AND media_type = ?" in sql,
+            lambda sql: "FROM items_live WHERE isbn = ? AND media_type = ?" in sql,
             probe_results,
         )
 

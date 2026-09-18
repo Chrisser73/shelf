@@ -313,7 +313,7 @@ def _build_items(db) -> tuple[list[dict], dict[int, int], list[tuple[str, Path]]
     rows = db.execute(
         "SELECT i.*, locations.name AS location_name, "
         f"{lists.WISHLISTED_SQL} AS wishlisted "
-        "FROM items i LEFT JOIN locations ON locations.id = i.location_id "
+        "FROM items_live i LEFT JOIN locations ON locations.id = i.location_id "
         "ORDER BY i.id"
     ).fetchall()
     tags_map = _tags_by_item(db)
@@ -835,7 +835,7 @@ def _apply_item_update(db, item_id: int, item: dict, loc_name: str | None,
 
     if (loc_name or "").strip():
         current = db.execute(
-            "SELECT location_id FROM items WHERE id = ?", (item_id,)
+            "SELECT location_id FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         if current is not None and current["location_id"] is None:
             updates["location_id"] = get_location_id(loc_name)
@@ -909,12 +909,12 @@ def _dedupe_lookup(db, *, title: str, isbn_val: str | None, media: str,
     every row and archive duplicates classify independently."""
     if isbn_val:
         row = db.execute(
-            "SELECT id FROM items WHERE isbn = ? AND media_type = ? AND id <= ?",
+            "SELECT id FROM items_live WHERE isbn = ? AND media_type = ? AND id <= ?",
             (isbn_val, media, max_id),
         ).fetchone()
         return row, "isbn"
     row = db.execute(
-        "SELECT id FROM items WHERE (isbn IS NULL OR isbn = '') "
+        "SELECT id FROM items_live WHERE (isbn IS NULL OR isbn = '') "
         "AND media_type = ? AND title = ? COLLATE NOCASE "
         "AND COALESCE(authors, '') = ? COLLATE NOCASE AND id <= ?",
         (media, title, authors or "", max_id),
@@ -954,7 +954,7 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
 
     # Same bound as the merge's: everything currently in the table. Nothing is
     # inserted here, so this is just "match only pre-existing rows".
-    max_id = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM items").fetchone()["m"]
+    max_id = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM items_live").fetchone()["m"]
 
     existing = {kind: _existing_names(db, kind) for kind in _NAME_LOOKUP_TABLES}
     pending: dict[str, dict[str, str]] = {kind: {} for kind in _NAME_LOOKUP_TABLES}
@@ -1230,7 +1230,7 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
     # "was already here" from "this import created it" — see the dedupe
     # lookups below.
     pre_import_max_id = db.execute(
-        "SELECT COALESCE(MAX(id), 0) AS m FROM items"
+        "SELECT COALESCE(MAX(id), 0) AS m FROM items_live"
     ).fetchone()["m"]
 
     for item in library.get("items") or []:

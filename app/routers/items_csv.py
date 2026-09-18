@@ -39,7 +39,7 @@ async def export_csv(_=Depends(require_role("viewer"))):
     with get_db() as db:
         rows = db.execute(
             f"SELECT i.*, l.name as location_name, {lists.WISHLISTED_SQL} AS wishlisted "
-            "FROM items i "
+            "FROM items_live i "
             "LEFT JOIN locations l ON i.location_id = l.id "
             "ORDER BY i.title"
         ).fetchall()

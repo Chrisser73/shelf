@@ -40,7 +40,7 @@ async def share_page(request: Request, token: str):
         # Minimal field set on purpose — see the plan doc's exposure rules
         items = db.execute(
             "SELECT title, authors, cover_path, media_type, publish_year, "
-            f"series_name, series_position FROM items i WHERE {scope_where} "
+            f"series_name, series_position FROM items_live i WHERE {scope_where} "
             "ORDER BY title COLLATE NOCASE LIMIT ?",
             (SHARE_ITEM_CAP,),
         ).fetchall()

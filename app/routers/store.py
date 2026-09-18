@@ -57,7 +57,7 @@ async def store_data(_=Depends(require_role("viewer"))):
     this", which the flush below turns into wishlist membership."""
     with get_db() as db:
         rows = db.execute(
-            "SELECT i.title, i.authors, i.owned, i.isbn, i.isbn10 FROM items i "
+            "SELECT i.title, i.authors, i.owned, i.isbn, i.isbn10 FROM items_live i "
             "WHERE (i.isbn IS NOT NULL OR i.isbn10 IS NOT NULL) "
             f"AND (i.owned = 1 OR {lists.WISHLISTED_SQL})"
         ).fetchall()
@@ -159,7 +159,7 @@ async def store_queue(request: Request, _=Depends(require_role("editor"))):
                 db.execute("BEGIN IMMEDIATE")
                 existing = db.execute(
                     f"SELECT i.id, i.title, i.owned, {lists.WISHLISTED_SQL} AS wishlisted "
-                    "FROM items i WHERE i.isbn = ? AND i.media_type = 'book'",
+                    "FROM items_live i WHERE i.isbn = ? AND i.media_type = 'book'",
                     (isbn13,),
                 ).fetchone()
                 if existing and not existing["owned"] and not existing["wishlisted"]:

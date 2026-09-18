@@ -143,7 +143,7 @@ def _isbn_taken(isbn13: str, media_type: str) -> bool:
     """
     with get_db() as db:
         return db.execute(
-            "SELECT id FROM items WHERE isbn = ? AND media_type = ?",
+            "SELECT id FROM items_live WHERE isbn = ? AND media_type = ?",
             (isbn13, media_type),
         ).fetchone() is not None
 
@@ -160,7 +160,7 @@ def _title_taken(db, title: str, authors: str, media_type: str) -> bool:
     (G18). Declared once so the two cannot drift.
     """
     return db.execute(
-        "SELECT id FROM items WHERE title = ? COLLATE NOCASE "
+        "SELECT id FROM items_live WHERE title = ? COLLATE NOCASE "
         "AND IFNULL(authors, '') = ? COLLATE NOCASE AND media_type = ?",
         (title, authors, media_type),
     ).fetchone() is not None
@@ -372,7 +372,7 @@ async def _confirm_one(
         # where it would repeat step 1 verbatim.
         if title != book.title.strip():
             resolved_dupe = db.execute(
-                "SELECT id FROM items WHERE title = ? COLLATE NOCASE AND media_type = ?",
+                "SELECT id FROM items_live WHERE title = ? COLLATE NOCASE AND media_type = ?",
                 (title, media_type),
             ).fetchone()
             if resolved_dupe:
@@ -381,7 +381,7 @@ async def _confirm_one(
         # 4. ISBN dupe check, scoped to media type.
         if isbn13:
             taken = db.execute(
-                "SELECT id FROM items WHERE isbn = ? AND media_type = ?",
+                "SELECT id FROM items_live WHERE isbn = ? AND media_type = ?",
                 (isbn13, media_type),
             ).fetchone()
             if taken:
@@ -417,7 +417,7 @@ async def _confirm_one(
         except sqlite3.IntegrityError:
             if isbn13:
                 hit = db.execute(
-                    "SELECT id FROM items WHERE isbn = ? AND media_type = ?",
+                    "SELECT id FROM items_live WHERE isbn = ? AND media_type = ?",
                     (isbn13, media_type),
                 ).fetchone()
                 if hit:

@@ -185,7 +185,7 @@ async def sync(abs_url: str, abs_token: str, on_progress=None) -> dict:
                         """SELECT id, title, authors, narrator, isbn, series_name,
                                   publisher, publish_year, description, duration_mins,
                                   media_type, abs_id, abs_library_id, cover_path
-                           FROM items WHERE abs_id = ?""",
+                           FROM items_live WHERE abs_id = ?""",
                         (abs_id,),
                     ).fetchone()
 
@@ -198,14 +198,14 @@ async def sync(abs_url: str, abs_token: str, on_progress=None) -> dict:
                     if isbn:
                         if existing:
                             isbn_match = db.execute(
-                                """SELECT id, abs_id FROM items
+                                """SELECT id, abs_id FROM items_live
                                    WHERE isbn = ? AND media_type = ? AND id != ?
                                    ORDER BY id LIMIT 1""",
                                 (isbn, media_type, existing["id"]),
                             ).fetchone()
                         else:
                             isbn_match = db.execute(
-                                """SELECT id, abs_id FROM items
+                                """SELECT id, abs_id FROM items_live
                                    WHERE isbn = ? AND media_type = ?
                                    ORDER BY id LIMIT 1""",
                                 (isbn, media_type),
@@ -234,7 +234,7 @@ async def sync(abs_url: str, abs_token: str, on_progress=None) -> dict:
                             """SELECT id, title, authors, narrator, isbn, series_name,
                                       publisher, publish_year, description, duration_mins,
                                       media_type, abs_id, abs_library_id, cover_path
-                               FROM items WHERE id = ?""",
+                               FROM items_live WHERE id = ?""",
                             (isbn_match["id"],),
                         ).fetchone()
 
@@ -373,7 +373,7 @@ def _auto_link_items():
     """Create item_links between items that appear to be the same work in different formats."""
     with get_db() as db:
         abs_items = db.execute(
-            "SELECT id, title, authors, isbn, media_type FROM items WHERE abs_id IS NOT NULL"
+            "SELECT id, title, authors, isbn, media_type FROM items_live WHERE abs_id IS NOT NULL"
         ).fetchall()
 
         for abs_item in abs_items:
@@ -382,7 +382,7 @@ def _auto_link_items():
             # Match by ISBN
             if abs_item["isbn"]:
                 matches = db.execute(
-                    "SELECT id FROM items WHERE isbn = ? AND id != ? AND media_type != ?",
+                    "SELECT id FROM items_live WHERE isbn = ? AND id != ? AND media_type != ?",
                     (abs_item["isbn"], abs_item["id"], abs_item["media_type"]),
                 ).fetchall()
             else:
@@ -391,7 +391,7 @@ def _auto_link_items():
             # Match by normalized title + compatible authors if no ISBN match
             if not matches:
                 all_items = db.execute(
-                    "SELECT id, title, authors, media_type FROM items WHERE id != ? AND abs_id IS NULL",
+                    "SELECT id, title, authors, media_type FROM items_live WHERE id != ? AND abs_id IS NULL",
                     (abs_item["id"],),
                 ).fetchall()
                 matches = [

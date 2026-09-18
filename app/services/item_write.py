@@ -330,7 +330,7 @@ def _refuse_owned_wishlist(db, wishlisted: bool | None, values: Mapping[str, Any
         return
     marks = ", ".join("?" for _ in ids)
     if db.execute(
-        f"SELECT 1 FROM items WHERE id IN ({marks}) AND owned = 1", ids
+        f"SELECT 1 FROM items_live WHERE id IN ({marks}) AND owned = 1", ids
     ).fetchone():
         raise InvalidWishlisted("An owned item cannot be on the wishlist")
 
@@ -436,12 +436,12 @@ def update_item_fields(db, item_id: int, fields: Mapping[str, Any]) -> None:
 
     values = _execute_update(db, fields, "id = ?", [item_id], "update_item_fields")
     if "location_id" in values and db.execute(
-        "SELECT 1 FROM items WHERE id = ?", (item_id,)
+        "SELECT 1 FROM items_live WHERE id = ?", (item_id,)
     ).fetchone():
         item_copies.sync_primary_location(db, item_id, values["location_id"])
     existing = [
         row["id"] for row in db.execute(
-            "SELECT id FROM items WHERE id = ?", (item_id,)
+            "SELECT id FROM items_live WHERE id = ?", (item_id,)
         ).fetchall()
     ]
     _apply_membership(db, existing, wishlisted, fields)
@@ -462,7 +462,7 @@ def update_items_fields(db, item_ids: Iterable[int],
     values = _execute_update(db, fields, f"id IN ({marks})", ids, "update_items_fields")
     existing_ids = [
         row["id"] for row in db.execute(
-            f"SELECT id FROM items WHERE id IN ({marks})", ids
+            f"SELECT id FROM items_live WHERE id IN ({marks})", ids
         ).fetchall()
     ]
     if "location_id" in values:

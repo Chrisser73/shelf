@@ -4620,6 +4620,103 @@ EOF
   the field is genuinely optional.
 
 
+## G105 — When writing a query that reads `items`
+
+- **Rule:** read through `items_live`, never `FROM items` or `JOIN items`. The
+  view is created per connection in `get_db()` and filters `deleted_at IS
+  NULL`. Writes stay on `items` — a `DELETE FROM items` matches the same text
+  pattern and is not a violation — and so do the five allowlisted lookups in
+  `scripts/check_items_live.py`, each with its reason at the entry.
+- **The half a rewrite gets wrong: four files reach the table through a `JOIN`
+  and contain no `FROM items` at all** — `app/routers/checkouts.py`,
+  `app/routers/periodicals.py`, `app/services/location_order.py`,
+  `app/services/romm_records.py`. A grep, a lint or a refactor keyed on `FROM
+  items` alone passes all four while they read deleted rows forever. G29's
+  lesson applied: filter at the shared choke point, not at each producer —
+  one view, not 172 hand-written predicates.
+- **And for anyone extending the lint:** it strips a string literal's **prefix
+  together with its opening quote**, because `f"FROM items i "` otherwise
+  normalises to `fFROM items` and slips past `\bFROM` — `f` and `F` are both
+  word characters with no boundary between them. Three statements had that
+  shape at census (`app/routers/items.py:901`, `app/routers/pages.py:70`,
+  `app/routers/series.py:83`), and `tests/test_items_live_lint.py` pins it.
+- **Why:** the failure is silent in the direction that looks benign — a deleted
+  book keeps appearing in a count, and nothing errors. This file and the
+  `docs/` pages may quote the construct freely: the lint scans `app/**/*.py`
+  only, so nobody needs to "fix" the prose here.
+- **Evidence:** `feat/soft-delete-seam`, 2026-09-18 — `06defa3` added the lint
+  at a census of 172, `b8b09cc`/`87baf4a`/`7973fff` drove it to zero, `8634c46`
+  gated it. Proven by mutation at census zero: `FROM items_live` → `FROM items`
+  at `app/routers/tags.py:60` and `JOIN items_live` → `JOIN items` at
+  `app/routers/checkouts.py:41` each red both the lint and
+  `tests/test_items_live_lint.py::test_every_read_goes_through_items_live`,
+  naming the line. The `checkouts.py` half is the one that matters: that file
+  greps zero for `FROM items`.
+- **Verify:** `make check-deleted`
+- **Status:** `linted: make check-deleted` (also inside `make test`, via
+  `tests/test_items_live_lint.py`).
+
+
+## G106 — When a test matches production SQL by its literal text
+
+- **Rule:** a test that identifies a statement by a literal SQL substring —
+  a `_install_lock_probe` predicate, a `side_effect` that branches on `"… in
+  sql"`, a mock keyed on the query text — is coupled to that statement's
+  *spelling*, not its behaviour. Any rewrite of the query silently detaches it.
+  Before changing a statement, grep the suite for its text; after changing it,
+  re-run the detached test against the **broken** implementation to confirm the
+  pin still fails for its own reason (G31), because a predicate that no longer
+  matches makes the pin vacuous rather than red.
+- **Why:** the failure blames the wrong thing. The test reds on its own
+  scaffolding — *"the guard query never ran — the probe did not fire"* — which
+  reads as a defect in the code under test, so the tempting fix is to go
+  looking at the lock, or to weaken the predicate until it matches something.
+  The property being pinned (here: that the duplicate guard reads while the
+  write lock is held) is untouched and still correct the whole time. The
+  opposite direction is worse and is the reason this is not merely annoying: if
+  the predicate had been *loosened* to a substring that still matched, the probe
+  would have fired on the wrong statement and the pin would have gone green
+  while defending nothing.
+- **The fix is the narrow one.** Update the literal to the new spelling rather
+  than dropping the table name to make it rename-proof: a table-agnostic
+  predicate matches any statement sharing that clause tail, which is the
+  vacuous-pin direction above.
+- **Evidence:** `feat/soft-delete-seam`, 2026-09-18 (`389e504`). Repointing
+  `items` reads onto `items_live` (`b8b09cc`) reddened three G18 lock pins —
+  `tests/test_scan_modes.py`, `tests/test_upc_manual_add.py`,
+  `tests/test_scan_upc_enrichment.py`, all named
+  `test_the_guard_reads_under_the_write_lock` — whose predicates matched
+  `"FROM items WHERE isbn = ? AND media_type = ?"` and
+  `"SELECT id, title, media_type FROM items WHERE upc = ?"`. Diagnosed as
+  scaffolding rather than a transcription error by byte-checking all 172 hunks
+  of the repoint first. The three were the only literal-SQL predicates in
+  `tests/`. After updating them, the pin was re-verified live by moving
+  `BEGIN IMMEDIATE` below the guard SELECT at `app/routers/items.py:492`: it
+  reds on `got 'acquired'`, the real G18 property.
+- **Verify:** every literal SQL predicate in the suite still names a statement
+  that exists in `app/` —
+
+```bash
+python - <<'EOF'
+import pathlib, re
+app = " ".join(
+    re.sub(r'\s+', ' ', p.read_text().replace('"', ''))
+    for p in pathlib.Path("app").rglob("*.py")
+)
+pat = re.compile(r'"((?:SELECT|INSERT|UPDATE|DELETE|FROM|JOIN)\b[^"]{8,})"\s*in sql')
+for t in sorted(pathlib.Path("tests").rglob("*.py")):
+    for m in pat.finditer(t.read_text()):
+        if m.group(1) not in app:
+            print(f"{t}: predicate no longer matches any statement in app/: {m.group(1)!r}")
+EOF
+# any hit is a pin that has silently detached from the code it watches.
+```
+
+- **Status:** documented. **Lint candidate** — the Verify script above is the
+  lint, near enough; what it cannot decide is whether a detached predicate
+  should be re-pointed or the pin deleted.
+
+
 ## Graveyard
 
 Retired entries land here with a one-line reason (refactored away, lint

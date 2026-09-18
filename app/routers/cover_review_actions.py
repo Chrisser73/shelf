@@ -57,7 +57,7 @@ async def cover_review_select(
     """
     with get_db() as db:
         exists = db.execute(
-            "SELECT id FROM items WHERE id = ?", (item_id,)
+            "SELECT id FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         if not exists:
             return HTMLResponse("Not found", status_code=404)
@@ -90,7 +90,7 @@ async def cover_review_select(
     # skipping past it would hide the failure from the person who chose it.
     with get_db() as db:
         item = db.execute(
-            f"SELECT {_QUEUE_COLUMNS} FROM items i WHERE i.id = ?", (item_id,)
+            f"SELECT {_QUEUE_COLUMNS} FROM items_live i WHERE i.id = ?", (item_id,)
         ).fetchone()
         resp = render_card(request, db, item, pos, total, failed_url=url,
                            query=(query or "").strip())
@@ -112,7 +112,7 @@ async def cover_review_upload(
     the helper takes bytes, never a URL.
     """
     with get_db() as db:
-        item = db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
         if not item:
             return HTMLResponse("Not found", status_code=404)
         key = seek_key(db, item_id)
@@ -133,7 +133,7 @@ async def cover_review_upload(
     if not cover_path:
         with get_db() as db:
             same = db.execute(
-                f"SELECT {_QUEUE_COLUMNS} FROM items i WHERE i.id = ?", (item_id,)
+                f"SELECT {_QUEUE_COLUMNS} FROM items_live i WHERE i.id = ?", (item_id,)
             ).fetchone()
             resp = render_card(request, db, same, pos, total)
         resp.headers["HX-Trigger"] = items_common._toast_header(
@@ -171,7 +171,7 @@ async def cover_review_dismiss(
     cover is later removed returns to the queue.
     """
     with get_db() as db:
-        item = db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
         if not item:
             return HTMLResponse("Not found", status_code=404)
         # Same pre-read as the write verbs: the UPDATE bumps updated_at.

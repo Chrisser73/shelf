@@ -122,7 +122,7 @@ async def add_game_from_search(
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
         existing = db.execute(
-            "SELECT id, title FROM items WHERE title = ? AND media_type = 'video_game' AND platform = ?",
+            "SELECT id, title FROM items_live WHERE title = ? AND media_type = 'video_game' AND platform = ?",
             (metadata["title"], platform_val),
         ).fetchone()
         if existing is None:
@@ -272,7 +272,7 @@ async def add_book_from_search(
         except ItemValueError as e:
             location_error = str(e)
         existing = db.execute(
-            "SELECT id, title FROM items WHERE isbn = ? AND media_type = ?",
+            "SELECT id, title FROM items_live WHERE isbn = ? AND media_type = ?",
             (isbn13, media_type),
         ).fetchone()
     if location_error:
@@ -415,7 +415,7 @@ async def add_dvd_from_search(
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
         existing = db.execute(
-            "SELECT id, title FROM items WHERE title = ? AND media_type = 'dvd'",
+            "SELECT id, title FROM items_live WHERE title = ? AND media_type = 'dvd'",
             (title,),
         ).fetchone()
         if existing is None:

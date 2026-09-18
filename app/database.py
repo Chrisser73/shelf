@@ -209,6 +209,25 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
      """INSERT OR IGNORE INTO list_items (list_id, item_id)
         SELECT (SELECT id FROM lists WHERE slug = 'wishlist'), id
         FROM items WHERE owned = 0"""),
+    # 37 and 38 are the soft-delete seam. Nothing sets either column yet:
+    # deletes still hard-delete, and the Trash plan is what starts writing a
+    # timestamp here. The column exists now so the read side (the items_live
+    # view and its lint) can land on its own, against an unchanged suite.
+    #
+    # Both go in MIGRATIONS *only* — deliberately not in SCHEMA's CREATE TABLE
+    # items. A fresh install runs SCHEMA and then, because schema_version is
+    # empty, _backfill_versions executes every migration's SQL; a SCHEMA copy
+    # of the column would make 37 raise "duplicate column name", which
+    # _is_benign_migration_error forgives only for versions <= 21, so startup
+    # would abort. test_cover_review_dismissed_defaults_to_zero_on_a_fresh_bootstrap
+    # pins exactly this for migration 32, and none of the columns added to
+    # items since v1 appears in SCHEMA's CREATE. item_copies is the same story
+    # by the precedent of 31's position_order, which is likewise absent from
+    # the MIGRATION_TABLES copy of the table.
+    (37, "Add soft-delete timestamp to items",
+     "ALTER TABLE items ADD COLUMN deleted_at TEXT DEFAULT NULL"),
+    (38, "Add soft-delete timestamp to item copies",
+     "ALTER TABLE item_copies ADD COLUMN deleted_at TEXT DEFAULT NULL"),
 )
 
 MIGRATION_TABLES = """
@@ -757,6 +776,27 @@ def get_db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # The soft-delete read seam. Every read of items in app/ goes through this
+    # view rather than the physical table (scripts/check_items_live.py is the
+    # gate); writes keep hitting items.
+    #
+    # TEMP, not persistent: backups are taken with VACUUM INTO, which copies
+    # the whole persistent schema, and the restore validator in
+    # app/routers/settings.py refuses any uploaded database that contains a
+    # view — so a persistent items_live would make every backup taken after it
+    # shipped unrestorable through Shelf's own UI. SELECT *, not a column list,
+    # so a later ALTER TABLE items needs no change here.
+    #
+    # The trade: a connection that bypasses get_db() has no view and fails with
+    # "no such table: items_live". That is loud, which is the point. It is also
+    # why this is not conditional on the table existing — init_db() opens its
+    # first connection before SCHEMA runs, and the CREATE is fine there because
+    # a view's body is resolved at use, not at creation (measured on SQLite
+    # 3.46.1, the python:3.12-slim version the container ships).
+    conn.execute(
+        "CREATE TEMP VIEW IF NOT EXISTS items_live AS "
+        "SELECT * FROM items WHERE deleted_at IS NULL"
+    )
     try:
         yield conn
         conn.commit()

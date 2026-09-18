@@ -25,7 +25,7 @@ def _copy_by_barcode(db, raw: str):
     row = db.execute(
         "SELECT c.id AS copy_id, c.item_id, c.copy_number, c.is_primary, "
         "i.title, i.media_type FROM item_copies c "
-        "JOIN items i ON i.id = c.item_id WHERE c.copy_barcode = ? LIMIT 1",
+        "JOIN items_live i ON i.id = c.item_id WHERE c.copy_barcode = ? LIMIT 1",
         (raw,),
     ).fetchone()
     return dict(row) if row else None
@@ -65,7 +65,7 @@ def _place_item(db, item_id: int, location_id: int) -> dict:
     location = _location(db, location_id)
     item = db.execute(
         "SELECT id, title, authors, media_type, cover_path, owned "
-        "FROM items WHERE id = ?", (item_id,),
+        "FROM items_live WHERE id = ?", (item_id,),
     ).fetchone()
     if not item:
         raise ValueError("Item no longer exists")
@@ -107,7 +107,7 @@ def _place_exact_copy(db, copy: dict, location_id: int) -> dict:
     position_order = _append_copy_position(db, copy["copy_id"], location_id)
     item = db.execute(
         "SELECT id, title, authors, media_type, cover_path, owned "
-        "FROM items WHERE id = ?", (copy["item_id"],),
+        "FROM items_live WHERE id = ?", (copy["item_id"],),
     ).fetchone()
     was_wishlist = bool(item and not item["owned"])
     if was_wishlist:

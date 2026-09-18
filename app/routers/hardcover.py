@@ -64,7 +64,7 @@ async def search_hardcover(request: Request, q: str = "", _=Depends(require_role
                     existing = {
                         row["hardcover_book_id"]
                         for row in db.execute(
-                            f"SELECT hardcover_book_id FROM items WHERE hardcover_book_id IN ({placeholders})",
+                            f"SELECT hardcover_book_id FROM items_live WHERE hardcover_book_id IN ({placeholders})",
                             hc_ids,
                         ).fetchall()
                     }
@@ -138,12 +138,12 @@ async def add_hardcover_to_shelf(request: Request, _=Depends(require_role("edito
         db.execute("BEGIN IMMEDIATE")
         if hc_book_id:
             existing = db.execute(
-                f"SELECT id, owned, {lists.WISHLISTED_SQL} AS wishlisted FROM items i "
+                f"SELECT id, owned, {lists.WISHLISTED_SQL} AS wishlisted FROM items_live i "
                 "WHERE hardcover_book_id = ?", (hc_book_id,)
             ).fetchone()
         if not existing and isbn:
             existing = db.execute(
-                f"SELECT id, owned, {lists.WISHLISTED_SQL} AS wishlisted FROM items i "
+                f"SELECT id, owned, {lists.WISHLISTED_SQL} AS wishlisted FROM items_live i "
                 "WHERE isbn = ?", (isbn,)
             ).fetchone()
         if existing is None:
@@ -216,7 +216,7 @@ async def push_to_hardcover(item_id: int, _=Depends(require_role("editor"))):
     """Push a single item to Hardcover. Returns JSON result."""
     with get_db() as db:
         token = get_setting(db, "hardcover_token")
-        item = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = db.execute("SELECT * FROM items_live WHERE id = ?", (item_id,)).fetchone()
 
     if not token:
         return {"ok": False, "message": "Hardcover API token required"}
@@ -257,7 +257,7 @@ async def export_hardcover_stream(request: Request, _=Depends(require_role("edit
             conditions.append("owned = 1")
         where = " AND ".join(conditions)
         items = db.execute(
-            f"SELECT id, title, isbn, reading_status, hardcover_book_id, hardcover_user_book_id FROM items WHERE {where} ORDER BY title"
+            f"SELECT id, title, isbn, reading_status, hardcover_book_id, hardcover_user_book_id FROM items_live WHERE {where} ORDER BY title"
         ).fetchall()
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -444,7 +444,7 @@ def _build_title_index() -> dict:
     """Build a lookup dict of normalized_title -> [(id, authors, cover_path, title)] for fuzzy matching."""
     index: dict[str, list] = {}
     with get_db() as db:
-        rows = db.execute("SELECT id, title, authors, cover_path FROM items WHERE title IS NOT NULL").fetchall()
+        rows = db.execute("SELECT id, title, authors, cover_path FROM items_live WHERE title IS NOT NULL").fetchall()
     for row in rows:
         norm = _normalize_title(row["title"])
         if norm not in index:
@@ -474,14 +474,14 @@ def _find_existing_item(db, book: dict, title_index: dict):
 
     if hc_book_id:
         existing = db.execute(
-            "SELECT id, title, cover_path, authors FROM items WHERE hardcover_book_id = ?", (hc_book_id,)
+            "SELECT id, title, cover_path, authors FROM items_live WHERE hardcover_book_id = ?", (hc_book_id,)
         ).fetchone()
         if existing:
             return existing
 
     if isbn:
         existing = db.execute(
-            "SELECT id, title, cover_path, authors FROM items WHERE isbn = ?", (isbn,)
+            "SELECT id, title, cover_path, authors FROM items_live WHERE isbn = ?", (isbn,)
         ).fetchone()
         if existing:
             return existing
@@ -532,7 +532,7 @@ def _import_single_book_metadata(book: dict, overwrite: bool, title_index: dict)
         if existing:
             if not overwrite:
                 updates = _build_hc_id_updates(book)
-                item = db.execute("SELECT * FROM items WHERE id = ?", (existing["id"],)).fetchone()
+                item = db.execute("SELECT * FROM items_live WHERE id = ?", (existing["id"],)).fetchone()
                 for field in _MERGE_FIELDS:
                     if not item[field] and book.get(field):
                         updates[field] = book[field]

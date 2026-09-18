@@ -146,7 +146,7 @@ def filter_cover_eligible(item_ids: list[int]) -> list[int]:
         id_placeholders = ", ".join("?" for _ in chunk)
         with get_db() as db:
             rows = db.execute(
-                f"SELECT id FROM items WHERE id IN ({id_placeholders}) "
+                f"SELECT id FROM items_live WHERE id IN ({id_placeholders}) "
                 f"AND media_type IN ({media_placeholders})",
                 (*chunk, *COVER_REQUEUE_MEDIA_TYPES),
             ).fetchall()
@@ -266,7 +266,7 @@ def requeue_recent_missing(window_hours: int = REQUEUE_WINDOW_HOURS) -> int:
     placeholders = ", ".join("?" for _ in COVER_REQUEUE_MEDIA_TYPES)
     with get_db() as db:
         rows = db.execute(
-            f"SELECT id FROM items WHERE cover_path IS NULL "
+            f"SELECT id FROM items_live WHERE cover_path IS NULL "
             f"AND cover_review_dismissed = 0 "
             f"AND media_type IN ({placeholders}) "
             f"AND created_at >= datetime('now', ?)",

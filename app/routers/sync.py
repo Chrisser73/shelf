@@ -166,14 +166,14 @@ async def cleanup_excluded_libraries():
     with get_db() as db:
         lib_placeholders = ",".join("?" * len(excluded))
         rows = db.execute(
-            f"SELECT id FROM items WHERE abs_library_id IN ({lib_placeholders})",
+            f"SELECT id FROM items_live WHERE abs_library_id IN ({lib_placeholders})",
             tuple(excluded),
         ).fetchall()
         ids = {r["id"] for r in rows}
         if abs_ids:
             id_placeholders = ",".join("?" * len(abs_ids))
             rows = db.execute(
-                f"SELECT id FROM items WHERE abs_id IN ({id_placeholders})",
+                f"SELECT id FROM items_live WHERE abs_id IN ({id_placeholders})",
                 tuple(abs_ids),
             ).fetchall()
             ids.update(r["id"] for r in rows)

@@ -559,7 +559,7 @@ class TestUpcScanPromotesTheWishlist:
         probe_results = []
 
         def predicate(sql):
-            return "SELECT id, title, media_type FROM items WHERE upc = ?" in sql
+            return "SELECT id, title, media_type FROM items_live WHERE upc = ?" in sql
 
         _install_lock_probe(monkeypatch, items_common, predicate, probe_results)
 

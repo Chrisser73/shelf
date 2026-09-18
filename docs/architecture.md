@@ -33,7 +33,7 @@ module — hand-written SQL, no ORM. `app/database.py` holds the full
 tuple for upgrades, tracked in `schema_version`. Migrations are idempotent
 so an interrupted upgrade replays safely.
 
-Main tables: `items` (everything — books, discs, games; ~36 columns incl.
+Main tables: `items` (everything — books, discs, games; ~38 columns incl.
 `media_type`, `owned`, `reading_status`, `series_name`/`position`,
 `location_id`, value columns, language, external ids), `item_copies`,
 `locations`, `borrowers` + `checkouts`, `tags` + `item_tags`, `series_meta` (Hardcover
@@ -47,6 +47,42 @@ and a 978/979 ISBN), `item_links`, and the per-family side tables described
 below — `music_releases` + `music_media` + `music_tracks` +
 `music_identifiers`, `periodical_publications` + `periodical_issues`,
 `romm_records` and `komga_records`.
+
+**`items` and `item_copies` each carry `deleted_at TEXT DEFAULT NULL`, and
+nothing sets it.** Deletion is still a `DELETE`: the column is the seam a later
+soft-delete feature switches on, landed on its own so that the read side could
+be repointed against an unchanged test suite. Both columns are appended
+`MIGRATIONS` entries and deliberately absent from `SCHEMA`'s `CREATE TABLE`
+— `init_db()` runs `SCHEMA` and then replays every migration on a fresh
+database, so a second copy of the column would raise `duplicate column name`
+on every fresh install (`tests/test_schema_parity.py` pins both halves).
+
+**Every connection carries a TEMP view `items_live`.** `get_db()` issues
+`CREATE TEMP VIEW IF NOT EXISTS items_live AS SELECT * FROM items WHERE
+deleted_at IS NULL` after its two PRAGMAs, and every read of `items` in `app/`
+goes through that view rather than the physical table. Three properties of it
+are load-bearing rather than stylistic:
+
+- **`TEMP`, because a persistent view would make every backup unrestorable.**
+  Backups are taken with `VACUUM INTO`, which copies the whole persistent
+  schema, and the restore validator in `app/routers/settings.py` refuses any
+  uploaded database containing a view — a view can embed arbitrary SQL. A
+  persistent `items_live` would therefore be copied into every backup and
+  rejected by Shelf's own restore. A TEMP view appears in `sqlite_temp_master`
+  only, and a `VACUUM INTO` copy contains zero views.
+- **`SELECT *`, not a column list**, so a later `ALTER TABLE items` needs no
+  change here. Had the columns been frozen at creation, every subsequent
+  migration would have silently broken every read.
+- **Writes through the view fail loudly** — SQLite answers `cannot modify
+  items_live because it is a view` — which gives the lint below a runtime
+  backstop. Writes keep hitting the physical `items` table and were not
+  repointed, and `item_write.py`'s `PRAGMA table_info(items)` still
+  introspects the real table, so field-name validation is unaffected.
+
+The trade the TEMP choice makes is that a connection bypassing `get_db()` has
+no view and fails with `no such table: items_live`. That is loud rather than
+silent, and the only other `sqlite3.connect` calls in the app operate on
+uploaded temp files during a restore and never read items.
 
 **`locations` is a tree, stored denormalised.** `label` is the node's own name
 and `parent_id` its parent (`ON DELETE RESTRICT`, so a node with children
@@ -1005,6 +1041,41 @@ The rule is pinned structurally. `tests/test_item_write.py` requires that
 and `platform = NULL` cascades, the name-keyed series rename, three
 migrations) — a new user-value write anywhere else fails the suite, and so
 does a stale allowlist entry.
+
+### Reading items
+
+The mirror of the write funnel: **every read of `items` in `app/` goes through
+the `items_live` view**, never `FROM items` or `JOIN items`. `make
+check-deleted` (`scripts/check_items_live.py`, in `checks-fast`) enforces it,
+and `tests/test_items_live_lint.py` runs the same check inside `make test`, so
+a new direct read fails the suite as well as the lint. Two details decide
+whether the guard actually guards:
+
+- **It matches `JOIN items` as well as `FROM items`.** Four files reach the
+  table only through a join and contain no `FROM items` at all
+  (`routers/checkouts.py`, `routers/periodicals.py`, `services/location_order.py`,
+  `services/romm_records.py`), so a guard keyed on `FROM` alone would pass them
+  while they read deleted rows forever. A `DELETE FROM items` matches the same
+  pattern and is excluded, because it is a write.
+- **It strips a string literal's prefix together with its opening quote.**
+  Otherwise `f"FROM items i "` normalises to `fFROM items` and slips past the
+  word boundary; three statements had exactly that shape at census.
+
+Five reads stay on the physical table, each allowlisted by repository-relative
+path with its reason at the entry:
+
+- the `items_live` CREATE in `get_db()` itself — the seam reads the physical
+  table by definition;
+- the four historical backfills inside the append-only `MIGRATIONS` tuple, which
+  ran against the table at a past schema version;
+- `_find_item_by_barcode`'s two lookups (`routers/items.py`) and the CSV dedup
+  pair (`routers/items_csv.py`) — the existing-item scan and import paths must
+  still *see* a soft-deleted row, so that a later restore can match on it
+  rather than creating a duplicate;
+- the `series_meta` garbage collector in `database.py` — a soft-deleted item
+  keeps its series alive, so restoring it finds the series intact.
+
+A stale allowlist entry fails the suite, exactly as the write funnel's does.
 
 ## Testing
 

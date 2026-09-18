@@ -56,7 +56,7 @@ async def series_page(request: Request, _=Depends(require_role("viewer"))):
             "SELECT i.id, i.title, i.authors, i.cover_path, i.series_name, "
             "i.series_position, i.owned, i.reading_status, "
             f"{lists.WISHLISTED_SQL} AS wishlisted "
-            "FROM items i WHERE i.series_name IS NOT NULL "
+            "FROM items_live i WHERE i.series_name IS NOT NULL "
             "AND TRIM(i.series_name) != '' "
             "ORDER BY i.series_name COLLATE NOCASE, "
             "i.series_position IS NULL, i.series_position, i.title COLLATE NOCASE"
@@ -74,13 +74,13 @@ async def series_page(request: Request, _=Depends(require_role("viewer"))):
             f"AND media_type IN ({','.join('?' * len(UNASSIGNED_MEDIA_TYPES))})"
         )
         unassigned_total = db.execute(
-            f"SELECT COUNT(*) FROM items WHERE {_unassigned_where}",
+            f"SELECT COUNT(*) FROM items_live WHERE {_unassigned_where}",
             UNASSIGNED_MEDIA_TYPES,
         ).fetchone()[0]
         unassigned_items = [dict(r) for r in db.execute(
             "SELECT id, title, authors, cover_path, series_name, series_position, "
             f"owned, reading_status, {lists.WISHLISTED_SQL} AS wishlisted "
-            f"FROM items i WHERE {_unassigned_where} "
+            f"FROM items_live i WHERE {_unassigned_where} "
             "ORDER BY title COLLATE NOCASE LIMIT ?",
             (*UNASSIGNED_MEDIA_TYPES, UNASSIGNED_STRIP_CAP),
         ).fetchall()]
@@ -146,7 +146,7 @@ async def check_series(name: str = "", _=Depends(require_role("viewer"))):
             return {"ok": False, "message": "Hardcover integration not configured"}
         local = db.execute(
             "SELECT title, owned, hardcover_book_id, "
-            f"{lists.WISHLISTED_SQL} AS wishlisted FROM items i "
+            f"{lists.WISHLISTED_SQL} AS wishlisted FROM items_live i "
             "WHERE series_name = ? COLLATE NOCASE",
             (name,),
         ).fetchall()
@@ -321,7 +321,7 @@ async def set_series_complete(name: str, complete: str = Form(...),
 
     with get_db() as db:
         count = db.execute(
-            "SELECT COUNT(*) AS c FROM items WHERE series_name = ? COLLATE NOCASE",
+            "SELECT COUNT(*) AS c FROM items_live WHERE series_name = ? COLLATE NOCASE",
             (name,),
         ).fetchone()["c"]
         if not count:
@@ -363,7 +363,7 @@ async def rename_series(name: str, new_name: str = Form(""),
 
     with get_db() as db:
         count = db.execute(
-            "SELECT COUNT(*) AS c FROM items WHERE series_name = ? COLLATE NOCASE",
+            "SELECT COUNT(*) AS c FROM items_live WHERE series_name = ? COLLATE NOCASE",
             (name,),
         ).fetchone()["c"]
         if not count:
@@ -372,7 +372,7 @@ async def rename_series(name: str, new_name: str = Form(""),
         # Both reads happen before the UPDATE, while the two names still
         # describe distinct sets of items.
         merged = bool(db.execute(
-            "SELECT 1 FROM items WHERE series_name = ? COLLATE NOCASE LIMIT 1",
+            "SELECT 1 FROM items_live WHERE series_name = ? COLLATE NOCASE LIMIT 1",
             (new_name,),
         ).fetchone())
         src_meta = db.execute(

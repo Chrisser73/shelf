@@ -202,7 +202,7 @@ def backfill_legacy_locations(db) -> int:
     before = db.total_changes
     db.execute(
         "INSERT INTO item_copies (item_id, copy_number, location_id, is_primary) "
-        "SELECT i.id, 1, i.location_id, 1 FROM items i "
+        "SELECT i.id, 1, i.location_id, 1 FROM items_live i "
         "WHERE i.owned = 1 AND i.location_id IS NOT NULL "
         "AND NOT EXISTS (SELECT 1 FROM item_copies c WHERE c.item_id = i.id)"
     )
@@ -236,7 +236,7 @@ def sync_primary_location(db, item_id: int, location_id: int | None) -> int | No
     if location_id is None:
         return None
 
-    item = db.execute("SELECT 1 FROM items WHERE id = ?", (item_id,)).fetchone()
+    item = db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone()
     if not item:
         raise ValueError("Item not found")
 
@@ -327,7 +327,7 @@ def add_copy(db, item_id: int, fields: Mapping[str, Any] | None = None) -> int:
             "numbers the copy and decides primary from what the item already has."
         )
 
-    if not db.execute("SELECT 1 FROM items WHERE id = ?", (item_id,)).fetchone():
+    if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
         raise ValueError("Item not found")
 
     existing = db.execute(
@@ -377,7 +377,8 @@ def delete_copy(db, copy_id: int) -> dict[str, Any] | None:
       (G86), and so is an unlocated one.
 
     Removal is permanent — condition, acquisition detail and provenance go
-    with the row, and there is no soft delete anywhere in this schema.
+    with the row. `item_copies` now carries a `deleted_at` column, but nothing
+    writes it: this delete is still a `DELETE`, and no read filters on it.
 
     Caller must hold the write lock. The read that chooses the survivor and
     the writes that promote it are one serialized unit, and the copy row is

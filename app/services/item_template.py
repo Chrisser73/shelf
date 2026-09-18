@@ -36,7 +36,7 @@ def copyable_fields(db, item_id):
     constant of literals — no caller-supplied value reaches the SQL.
     """
     row = db.execute(
-        "SELECT " + ", ".join(COPYABLE_FIELDS) + " FROM items WHERE id = ?",
+        "SELECT " + ", ".join(COPYABLE_FIELDS) + " FROM items_live WHERE id = ?",
         (item_id,),
     ).fetchone()
     if not row:

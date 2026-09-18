@@ -155,7 +155,7 @@ async def _ingest_cover(
     komga_id: str,
 ) -> bool:
     with get_db() as db:
-        row = db.execute("SELECT cover_path FROM items WHERE id = ?", (item_id,)).fetchone()
+        row = db.execute("SELECT cover_path FROM items_live WHERE id = ?", (item_id,)).fetchone()
     if row is None or row["cover_path"]:
         return False
     try:

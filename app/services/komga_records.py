@@ -65,7 +65,7 @@ def _shelf_media_type(kind: str) -> str:
 def _existing_record(db, komga_id: str):
     return db.execute(
         "SELECT kr.*, i.source, i.media_type FROM komga_records kr "
-        "JOIN items i ON i.id = kr.item_id WHERE kr.komga_id = ?",
+        "JOIN items_live i ON i.id = kr.item_id WHERE kr.komga_id = ?",
         (komga_id,),
     ).fetchone()
 
@@ -74,7 +74,7 @@ def _isbn_match(db, isbn: str | None, media_type: str):
     if not isbn:
         return None
     return db.execute(
-        "SELECT * FROM items WHERE isbn = ? AND media_type = ? ORDER BY id LIMIT 1",
+        "SELECT * FROM items_live WHERE isbn = ? AND media_type = ? ORDER BY id LIMIT 1",
         (isbn, media_type),
     ).fetchone()
 
@@ -104,7 +104,7 @@ def _refresh_fields(fields: dict[str, Any]) -> dict[str, Any]:
 
 def _fill_missing_fields(db, item_id: int, candidate: dict[str, Any]) -> None:
     """Enrich an existing non-Komga item without overwriting user metadata."""
-    row = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    row = db.execute("SELECT * FROM items_live WHERE id = ?", (item_id,)).fetchone()
     if row is None:
         raise KomgaPersistenceError("Shelf item not found")
 

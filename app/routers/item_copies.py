@@ -60,7 +60,7 @@ def _item_with_location(db, item_id: int):
     Same shape as the item detail page's own fetch in `routers/pages.py`.
     """
     return db.execute(
-        "SELECT i.*, l.name as location_name FROM items i "
+        "SELECT i.*, l.name as location_name FROM items_live i "
         "LEFT JOIN locations l ON i.location_id = l.id "
         "WHERE i.id = ?",
         (item_id,),
@@ -104,7 +104,7 @@ def _barcode_conflict(db, barcode: str, copy_id: int | None):
     """
     row = db.execute(
         "SELECT c.id AS copy_id, c.item_id, i.title FROM item_copies c "
-        "JOIN items i ON i.id = c.item_id WHERE c.copy_barcode = ? LIMIT 1",
+        "JOIN items_live i ON i.id = c.item_id WHERE c.copy_barcode = ? LIMIT 1",
         (barcode,),
     ).fetchone()
     if row is None or row["copy_id"] == copy_id:
@@ -163,7 +163,7 @@ async def collapsed_block(
     a viewer's page renders no control that calls this.
     """
     with get_db() as db:
-        if not db.execute("SELECT 1 FROM items WHERE id = ?", (item_id,)).fetchone():
+        if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
             return _refusal("Item not found", 404)
         return _render_block(request, db, item_id)
 
@@ -209,7 +209,7 @@ async def add_copy(
     warning: tuple | None = None
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
-        if not db.execute("SELECT 1 FROM items WHERE id = ?", (item_id,)).fetchone():
+        if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
             db.rollback()
             return _refusal("Item not found", 404)
 
@@ -319,8 +319,10 @@ async def remove_copy(
     _=Depends(require_role("editor")),
 ):
     """Remove one copy, permanently. Its condition, acquisition detail and
-    provenance go with it — there is no soft delete, which is why the control
-    is guarded by an `hx-confirm` naming what is lost.
+    provenance go with it — the row is deleted rather than marked, which is why
+    the control is guarded by an `hx-confirm` naming what is lost. The
+    `deleted_at` column on the table is the seam a later plan switches on;
+    nothing here sets it.
 
     Removing the primary promotes the lowest-numbered survivor and re-points
     the seam; removing the last copy nulls the seam and leaves the item

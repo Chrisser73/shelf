@@ -60,14 +60,14 @@ def _find_duplicate_item(db, isbn13: str | None, upc_code: str | None, media_typ
     """
     if isbn13:
         row = db.execute(
-            "SELECT id, title FROM items WHERE isbn = ? AND media_type = ?",
+            "SELECT id, title FROM items_live WHERE isbn = ? AND media_type = ?",
             (isbn13, media_type),
         ).fetchone()
         if row:
             return dict(row)
     if upc_code:
         row = db.execute(
-            "SELECT id, title FROM items WHERE upc = ? AND media_type = ?",
+            "SELECT id, title FROM items_live WHERE upc = ? AND media_type = ?",
             (upc_code, media_type),
         ).fetchone()
         if row:
@@ -79,7 +79,7 @@ def _find_duplicate_item(db, isbn13: str | None, upc_code: str | None, media_typ
         # still share the database. No real ISBN can land here: ISBN-13 is
         # always 978/979, which detect_barcode_type() classifies as an ISBN.
         row = db.execute(
-            "SELECT id, title FROM items WHERE isbn = ? AND media_type = ?",
+            "SELECT id, title FROM items_live WHERE isbn = ? AND media_type = ?",
             (upc_code, media_type),
         ).fetchone()
         if row:
@@ -491,7 +491,7 @@ async def scan_isbn(
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
         existing = db.execute(
-            "SELECT id, title FROM items WHERE isbn = ? AND media_type = ?",
+            "SELECT id, title FROM items_live WHERE isbn = ? AND media_type = ?",
             (isbn13, media_type),
         ).fetchone()
         if existing and mode != "wishlist":
@@ -837,7 +837,7 @@ async def suggest_items(q: str = "", _=Depends(require_role("editor"))):
         return JSONResponse([])
     with get_db() as db:
         rows = db.execute(
-            "SELECT id, title, authors FROM items WHERE title LIKE ? "
+            "SELECT id, title, authors FROM items_live WHERE title LIKE ? "
             "ORDER BY title COLLATE NOCASE LIMIT 10",
             (f"{q}%",),
         ).fetchall()
@@ -888,7 +888,7 @@ async def search_items(
 
     with get_db() as db:
         total = db.execute(
-            f"SELECT COUNT(*) as c FROM items i {where}", params
+            f"SELECT COUNT(*) as c FROM items_live i {where}", params
         ).fetchone()["c"]
 
         from app.routers.checkouts import OVERDUE_CONDITION, get_overdue_days
@@ -898,7 +898,7 @@ async def search_items(
             f" WHERE c.item_id = i.id AND c.checked_in IS NULL LIMIT 1) AS lent_to, "
             f"(SELECT 1 FROM checkouts c WHERE c.item_id = i.id AND {OVERDUE_CONDITION} LIMIT 1) AS lent_overdue, "
             f"{lists.WISHLISTED_SQL} AS wishlisted "
-            f"FROM items i "
+            f"FROM items_live i "
             f"LEFT JOIN locations l ON i.location_id = l.id "
             f"{where} ORDER BY {order_clause} LIMIT ? OFFSET ?",
             [get_overdue_days(db)] + params + [per_page, offset],
@@ -975,7 +975,7 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
         if "series_name" in filtered:
             old_series_names = [
                 r["series_name"] for r in db.execute(
-                    f"SELECT DISTINCT series_name FROM items WHERE id IN ({placeholders})",
+                    f"SELECT DISTINCT series_name FROM items_live WHERE id IN ({placeholders})",
                     item_ids,
                 ).fetchall()
             ]
@@ -1024,7 +1024,7 @@ async def merge_items(request: Request, _=Depends(require_role("admin"))):
         return {"ok": False, "message": "Cannot merge an item into itself"}
 
     with get_db() as db:
-        primary = db.execute("SELECT * FROM items WHERE id = ?", (keep_id,)).fetchone()
+        primary = db.execute("SELECT * FROM items_live WHERE id = ?", (keep_id,)).fetchone()
         if not primary:
             return {"ok": False, "message": "Primary item not found"}
 
@@ -1035,7 +1035,7 @@ async def merge_items(request: Request, _=Depends(require_role("admin"))):
             titles = [
                 row["title"]
                 for row in db.execute(
-                    "SELECT title FROM items WHERE id IN "
+                    "SELECT title FROM items_live WHERE id IN "
                     f"({','.join('?' for _ in on_loan)}) ORDER BY id",
                     sorted(on_loan),
                 ).fetchall()
@@ -1051,7 +1051,7 @@ async def merge_items(request: Request, _=Depends(require_role("admin"))):
         _MERGE_FILLABLE = frozenset(["subtitle", "authors", "publisher", "publish_year", "page_count",
                                       "description", "series_name", "narrator", "isbn"])
         for mid in targets:
-            other = db.execute("SELECT * FROM items WHERE id = ?", (mid,)).fetchone()
+            other = db.execute("SELECT * FROM items_live WHERE id = ?", (mid,)).fetchone()
             if not other:
                 continue
             fill = {f: other[f] for f in _MERGE_FILLABLE if not primary[f] and other[f]}
@@ -1081,7 +1081,7 @@ async def merge_items(request: Request, _=Depends(require_role("admin"))):
             merged += 1
             if fill:
                 update_item_fields(db, keep_id, fill)
-                primary = db.execute("SELECT * FROM items WHERE id = ?", (keep_id,)).fetchone()
+                primary = db.execute("SELECT * FROM items_live WHERE id = ?", (keep_id,)).fetchone()
 
     # The count is what was actually merged, not what was asked for: an id that
     # named no row used to be reported as a success.
@@ -1146,7 +1146,7 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
 
     with get_db() as db:
         row = db.execute(
-            "SELECT isbn, upc, media_type, series_name FROM items WHERE id = ?",
+            "SELECT isbn, upc, media_type, series_name FROM items_live WHERE id = ?",
             (item_id,),
         ).fetchone()
         old_series_name = row["series_name"] if row else None
@@ -1194,7 +1194,7 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
                     return HTMLResponse("Not found", status_code=404)
                 effective_media_type = row["media_type"]
             conflict = db.execute(
-                "SELECT id FROM items WHERE upc = ? AND media_type = ? AND id != ? LIMIT 1",
+                "SELECT id FROM items_live WHERE upc = ? AND media_type = ? AND id != ? LIMIT 1",
                 (fields["upc"], effective_media_type, item_id),
             ).fetchone()
             if conflict:
@@ -1231,7 +1231,7 @@ async def set_reading_status(request: Request, item_id: int, status: str = Form(
     now_date = None
 
     with get_db() as db:
-        old = db.execute("SELECT reading_status, date_started FROM items WHERE id = ?", (item_id,)).fetchone()
+        old = db.execute("SELECT reading_status, date_started FROM items_live WHERE id = ?", (item_id,)).fetchone()
         if not old:
             return HTMLResponse("Not found", status_code=404)
 
@@ -1263,7 +1263,7 @@ async def set_reading_status(request: Request, item_id: int, status: str = Form(
             return HTMLResponse(str(e), status_code=400)
 
         item = db.execute(
-            "SELECT i.*, l.name as location_name FROM items i "
+            "SELECT i.*, l.name as location_name FROM items_live i "
             "LEFT JOIN locations l ON i.location_id = l.id WHERE i.id = ?",
             (item_id,),
         ).fetchone()
@@ -1293,7 +1293,7 @@ async def _push_status_to_hardcover(item_id: int, status: str):
         with get_db() as db:
             token = get_setting(db, "hardcover_token") or None
             item = db.execute(
-                "SELECT hardcover_user_book_id, hardcover_book_id FROM items WHERE id = ?", (item_id,)
+                "SELECT hardcover_user_book_id, hardcover_book_id FROM items_live WHERE id = ?", (item_id,)
             ).fetchone()
         if not token or not item or not item["hardcover_user_book_id"]:
             return
@@ -1322,7 +1322,7 @@ async def fetch_synopsis(item_id: int, _=Depends(require_role("editor"))):
     """Look up a description for an item that's missing one."""
     with get_db() as db:
         item = db.execute(
-            "SELECT isbn, title, authors FROM items WHERE id = ?", (item_id,)
+            "SELECT isbn, title, authors FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         hc_token = get_setting(db, "hardcover_token")
         google_api_key = get_setting(db, "google_books_api_key")
@@ -1350,7 +1350,7 @@ async def backfill_synopses_stream(request: Request, _=Depends(require_role("adm
     placeholders = ",".join("?" * len(synopsis_svc.BOOK_MEDIA_TYPES))
     with get_db() as db:
         items = db.execute(
-            f"SELECT id, isbn, title, authors FROM items "
+            f"SELECT id, isbn, title, authors FROM items_live "
             f"WHERE (description IS NULL OR description = '') "
             f"AND media_type IN ({placeholders}) ORDER BY id",
             synopsis_svc.BOOK_MEDIA_TYPES,
@@ -1417,7 +1417,7 @@ async def backfill_synopses_stream(request: Request, _=Depends(require_role("adm
 @router.delete("/items/{item_id}")
 async def delete_item(item_id: int, _=Depends(require_role("editor"))):
     with get_db() as db:
-        row = db.execute("SELECT title FROM items WHERE id = ?", (item_id,)).fetchone()
+        row = db.execute("SELECT title FROM items_live WHERE id = ?", (item_id,)).fetchone()
         title = row["title"] if row else "Item"
         # Clear scan_log FK (no ON DELETE CASCADE on that table)
         db.execute("UPDATE scan_log SET item_id = NULL WHERE item_id = ?", (item_id,))
@@ -1468,7 +1468,7 @@ async def recent_scans(
     with get_db() as db:
         scans = db.execute(
             "SELECT sl.*, i.title, i.authors, i.cover_path "
-            "FROM scan_log sl LEFT JOIN items i ON sl.item_id = i.id "
+            "FROM scan_log sl LEFT JOIN items_live i ON sl.item_id = i.id "
             "WHERE sl.mode = ? ORDER BY sl.created_at DESC LIMIT 20",
             (mode,),
         ).fetchall()
@@ -1507,7 +1507,7 @@ async def inventory_missing(
         # For an item with no copies the seam is the only answer there is.
         items = db.execute(
             "SELECT i.id, i.title, i.authors, i.cover_path, COUNT(c.id) AS copy_count "
-            "FROM items i LEFT JOIN item_copies c "
+            "FROM items_live i LEFT JOIN item_copies c "
             "  ON c.item_id = i.id AND c.location_id = ? "
             "WHERE c.id IS NOT NULL "
             "   OR (i.location_id = ? "

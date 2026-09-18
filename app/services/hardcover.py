@@ -576,7 +576,7 @@ async def sync_reading_statuses(token: str) -> dict:
     with get_db() as db:
         # Get all Shelf items linked to Hardcover
         linked = db.execute(
-            "SELECT id, hardcover_book_id, reading_status FROM items WHERE hardcover_book_id IS NOT NULL"
+            "SELECT id, hardcover_book_id, reading_status FROM items_live WHERE hardcover_book_id IS NOT NULL"
         ).fetchall()
 
         for item in linked:

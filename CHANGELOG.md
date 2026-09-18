@@ -6,6 +6,62 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.42.4] - 2026-09-18
+
+Deleting something in Shelf is permanent and immediate. There is no undo, and
+nothing to look in when you remove the wrong item — the row is gone, and with a
+copy, so are its condition, acquisition date, price and provenance. The answer
+is a Trash you can restore from, and the hard part of that is not the Trash
+page. It is that Shelf reads an item in 172 places, across scanning, Browse,
+Series, Stats, sync, export and the share links, and every one of them would
+have to remember to skip the deleted ones. A single place that forgot would
+show you an item that is not there any more.
+
+This release does that half on its own, while nothing is actually being
+deleted. Every one of those reads now goes through a single filtered view, and
+a build check refuses any new read that bypasses it. Nothing you can see
+changes. The point is that if a read had been missed, the miss shows up in the
+test suite now rather than in your library later. The Trash itself follows in a
+later release.
+
+### Changed
+
+- **Two migrations run on first launch after upgrading.** They add a
+  `deleted_at` column to your items and to your copies, and leave it empty
+  everywhere. They need no action from you and are quick on a large library —
+  no row is rewritten. Nothing writes to the column and nothing filters on it,
+  so every item, copy, count, filter badge, export and share link shows exactly
+  what it showed before.
+
+### Internal
+
+Not user-visible, but it is what the release is made of:
+
+- **Every read of an item goes through one view, `items_live`**, created fresh
+  on each database connection and filtering out anything marked deleted — 172
+  read references across 41 files. Nine reads deliberately stay on the real
+  table, each annotated with the reason it must still find a deleted row:
+  scanning the barcode of something you already own, and the CSV importer's
+  duplicate check, are both places the Trash will want to offer you a restore
+  instead of a duplicate.
+- **A build check, `make check-deleted`, fails on any new direct read**, so the
+  rule holds for code nobody has written yet. It counts how many reads each
+  exemption is allowed to cover, which stops a new read from quietly hiding
+  inside an existing one.
+- **The view is temporary, by connection**, so it never lands in a backup file.
+  A backup downloaded from Settings still contains no views and still restores
+  into Shelf unchanged — checked against the real file, not just in tests.
+
+Deliberately unchanged, and worth knowing:
+
+- **Nothing is hidden from you.** The column exists; no code sets it. Deleting
+  an item in 0.42.4 still deletes it, permanently, exactly as before. If you
+  are waiting for undo, it is not here yet.
+- **Opening `data/shelf.db` yourself still works the way it always did.** The
+  view lives only inside Shelf's own connections, so a query you run against
+  the file with `sqlite3` sees the plain `items` table. Queries copied out of
+  Shelf's own source may name `items_live`, which will not exist there.
+
 ## [0.42.3] - 2026-09-17
 
 Some older children's paperbacks were being catalogued as DVDs. Scholastic-era
@@ -3627,6 +3683,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.42.4]: https://github.com/dgahagan/shelf/releases/tag/v0.42.4
 [0.42.3]: https://github.com/dgahagan/shelf/releases/tag/v0.42.3
 [0.42.2]: https://github.com/dgahagan/shelf/releases/tag/v0.42.2
 [0.42.1]: https://github.com/dgahagan/shelf/releases/tag/v0.42.1

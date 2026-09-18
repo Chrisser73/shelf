@@ -45,7 +45,7 @@ def ensure_platform(db, slug: str, name: str | None = None) -> str:
 def _existing_record(db, romm_id: str):
     return db.execute(
         "SELECT rr.*, i.source FROM romm_records rr "
-        "JOIN items i ON i.id = rr.item_id WHERE rr.romm_id = ?",
+        "JOIN items_live i ON i.id = rr.item_id WHERE rr.romm_id = ?",
         (romm_id,),
     ).fetchone()
 

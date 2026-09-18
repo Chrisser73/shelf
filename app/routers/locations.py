@@ -80,7 +80,7 @@ async def delete_location(location_id: int):
             # clear for affected primary copies before the location row goes.
             item_ids = [
                 row["id"] for row in db.execute(
-                    "SELECT id FROM items WHERE location_id = ?", (location_id,)
+                    "SELECT id FROM items_live WHERE location_id = ?", (location_id,)
                 ).fetchall()
             ]
             db.execute(
