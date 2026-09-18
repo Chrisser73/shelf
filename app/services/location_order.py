@@ -55,7 +55,7 @@ def direct_copies(db, location_id: int) -> list[dict]:
         "SELECT c.id AS copy_id, c.copy_number, c.position_order, c.condition, "
         "c.copy_barcode, c.is_primary, i.id AS item_id, i.title, i.authors, "
         "i.media_type, i.cover_path, i.series_name, i.series_position, "
-        "i.publish_year FROM item_copies c JOIN items_live i ON i.id = c.item_id "
+        "i.publish_year FROM copies_live c JOIN items_live i ON i.id = c.item_id "
         "WHERE c.location_id = ? "
         "ORDER BY CASE WHEN c.position_order IS NULL THEN 1 ELSE 0 END, "
         "c.position_order, i.title COLLATE NOCASE, c.copy_number, c.id",
@@ -75,7 +75,7 @@ def apply_copy_order(db, location_id: int, copy_ids: list[int]) -> None:
     existing = {
         row["id"]
         for row in db.execute(
-            "SELECT id FROM item_copies WHERE location_id = ?", (location_id,)
+            "SELECT id FROM copies_live WHERE location_id = ?", (location_id,)
         ).fetchall()
     }
     supplied = set(copy_ids)

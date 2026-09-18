@@ -1507,11 +1507,11 @@ async def inventory_missing(
         # For an item with no copies the seam is the only answer there is.
         items = db.execute(
             "SELECT i.id, i.title, i.authors, i.cover_path, COUNT(c.id) AS copy_count "
-            "FROM items_live i LEFT JOIN item_copies c "
+            "FROM items_live i LEFT JOIN copies_live c "
             "  ON c.item_id = i.id AND c.location_id = ? "
             "WHERE c.id IS NOT NULL "
             "   OR (i.location_id = ? "
-            "       AND NOT EXISTS (SELECT 1 FROM item_copies c2 WHERE c2.item_id = i.id)) "
+            "       AND NOT EXISTS (SELECT 1 FROM copies_live c2 WHERE c2.item_id = i.id)) "
             "GROUP BY i.id ORDER BY i.title",
             (location_id, location_id),
         ).fetchall()

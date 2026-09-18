@@ -24,6 +24,16 @@ application code is importable) and ``backfill_legacy_locations`` below. Both
 are ``INSERT ... SELECT`` over the whole table, which a per-row funnel cannot
 express.
 
+**The read seam.** Every read of copies in this module goes through the
+``copies_live`` view, which hides a copy whose own ``deleted_at`` is set and
+every copy of an item whose ``deleted_at`` is set (``app/database.py``,
+``get_db``). Three reads deliberately stay on the physical table, because
+each one exists to predict a UNIQUE violation and the constraint sees trashed
+rows: ``backfill_legacy_locations`` (its ``NOT EXISTS`` guard against the
+literal copy number 1), ``sync_primary_location`` (numbering the new primary)
+and ``add_copy``'s numbering read. Nothing here writes ``deleted_at`` yet, so
+none of this changes an answer today.
+
 **The position-clearing rule is the funnel's, for every copy.** A location
 change clears the copy's location-scoped ``position_order``, because a shelf
 position means nothing on a different shelf. ``sync_primary_location`` has
@@ -226,7 +236,7 @@ def sync_primary_location(db, item_id: int, location_id: int | None) -> int | No
         raise ValueError("Location not found")
 
     primary = db.execute(
-        "SELECT id, location_id FROM item_copies WHERE item_id = ? AND is_primary = 1",
+        "SELECT id, location_id FROM copies_live WHERE item_id = ? AND is_primary = 1",
         (item_id,),
     ).fetchone()
     if primary:
@@ -269,7 +279,7 @@ def delete_copies_for_item(db, item_id: int) -> int:
 def copies_for_item(db, item_id: int):
     """Return physical copies in stable user-facing order."""
     return db.execute(
-        "SELECT c.*, l.name AS location_name FROM item_copies c "
+        "SELECT c.*, l.name AS location_name FROM copies_live c "
         "LEFT JOIN locations l ON l.id = c.location_id "
         "WHERE c.item_id = ? ORDER BY c.copy_number, c.id",
         (item_id,),
@@ -287,7 +297,7 @@ def _lowest_numbered_copy(db, item_id: int):
     Caller must already hold the write lock (see `delete_copy`).
     """
     return db.execute(
-        "SELECT id, location_id FROM item_copies WHERE item_id = ? "
+        "SELECT id, location_id FROM copies_live WHERE item_id = ? "
         "ORDER BY copy_number, id LIMIT 1",
         (item_id,),
     ).fetchone()
@@ -330,15 +340,26 @@ def add_copy(db, item_id: int, fields: Mapping[str, Any] | None = None) -> int:
     if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
         raise ValueError("Item not found")
 
-    existing = db.execute(
-        "SELECT COALESCE(MAX(copy_number), 0) AS highest, COUNT(*) AS n "
+    # Two reads, deliberately, because they answer questions of different
+    # kinds. Numbering asks what the UNIQUE(item_id, copy_number) constraint
+    # can see, and a trashed copy still holds its number — so `highest` reads
+    # the physical table. "Does this item have a copy at all" is an ordinary
+    # read: a trashed copy does not make the item have one, so `n` reads the
+    # view, and an item whose only copy is trashed gets its next copy as the
+    # primary rather than a secondary with no primary above it.
+    highest = db.execute(
+        "SELECT COALESCE(MAX(copy_number), 0) AS highest "
         "FROM item_copies WHERE item_id = ?",
         (item_id,),
-    ).fetchone()
-    first_copy = existing["n"] == 0
+    ).fetchone()["highest"]
+    live_count = db.execute(
+        "SELECT COUNT(*) AS n FROM copies_live WHERE item_id = ?",
+        (item_id,),
+    ).fetchone()["n"]
+    first_copy = live_count == 0
 
     values["item_id"] = item_id
-    values["copy_number"] = existing["highest"] + 1
+    values["copy_number"] = highest + 1
     values["is_primary"] = 1 if first_copy else 0
     copy_id = insert_copy(db, values)
 
@@ -377,8 +398,9 @@ def delete_copy(db, copy_id: int) -> dict[str, Any] | None:
       (G86), and so is an unlocated one.
 
     Removal is permanent — condition, acquisition detail and provenance go
-    with the row. `item_copies` now carries a `deleted_at` column, but nothing
-    writes it: this delete is still a `DELETE`, and no read filters on it.
+    with the row. `item_copies` now carries a `deleted_at` column, and every
+    read in this module goes through the `copies_live` view that filters on
+    it — but nothing writes the column yet, so this is still a `DELETE`.
 
     Caller must hold the write lock. The read that chooses the survivor and
     the writes that promote it are one serialized unit, and the copy row is
@@ -387,7 +409,7 @@ def delete_copy(db, copy_id: int) -> dict[str, Any] | None:
     Every route here opens its block with `BEGIN IMMEDIATE`.
     """
     copy = db.execute(
-        "SELECT id, item_id, is_primary FROM item_copies WHERE id = ?",
+        "SELECT id, item_id, is_primary FROM copies_live WHERE id = ?",
         (copy_id,),
     ).fetchone()
     if copy is None:
@@ -418,7 +440,7 @@ def delete_copy(db, copy_id: int) -> dict[str, Any] | None:
         item_write.update_item_fields(db, item_id, {"location_id": seam})
 
     remaining = db.execute(
-        "SELECT COUNT(*) AS n FROM item_copies WHERE item_id = ?", (item_id,)
+        "SELECT COUNT(*) AS n FROM copies_live WHERE item_id = ?", (item_id,)
     ).fetchone()["n"]
     return {
         "item_id": item_id,

@@ -114,7 +114,11 @@ anything, so it follows the households work.
 
 ## Recently shipped
 
-The last five releases. Full detail in the [changelog](../CHANGELOG.md).
+The last five releases that changed something you can see. Some releases change
+only the foundations — 0.42.4 and 0.42.5 rearranged how Shelf reads its own
+data, ahead of a Trash you can restore from — and those are left out here
+rather than listed as "nothing visible". Full detail on every release, visible
+or not, is in the [changelog](../CHANGELOG.md).
 
 | Version | What landed |
 |---|---|

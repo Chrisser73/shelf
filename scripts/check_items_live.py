@@ -1,23 +1,37 @@
 #!/usr/bin/env python3
-"""Tripwire lint: every read of `items` in app/ must go through the
-`items_live` TEMP view (app/database.py::get_db()), not the physical table.
+"""Tripwire lint: every read of `items` or `item_copies` in app/ must go
+through its TEMP view (app/database.py::get_db()), not the physical table.
 
-T1 added `deleted_at` to `items`/`item_copies`; T2 made get_db() create a
-per-connection `CREATE TEMP VIEW IF NOT EXISTS items_live AS SELECT * FROM
-items WHERE deleted_at IS NULL`. T4-T6 repointed the ~172 existing direct
-reads in app/ onto that view, so the census is 0 and this script is the
-guard that holds it there: a new direct read of `items` in app/ reds it.
+T1 added `deleted_at` to `items`/`item_copies`; the earlier soft-delete-seam
+plan's own T2 made get_db() create a per-connection `CREATE TEMP VIEW IF NOT
+EXISTS items_live AS SELECT * FROM items WHERE deleted_at IS NULL` and T4-T6
+repointed the ~172 existing direct reads in app/ onto that view, so the
+items census is 0 and this script has guarded it there ever since — a new
+direct read of `items` in app/ reds it.
 
-Only app/**/*.py is scanned. Tests legitimately read the physical table (a
+This plan's own T1 added the second view, `copies_live` — a copy is live
+only if it AND its item are untrashed (see the CREATE in get_db()). Its T2
+taught the same script the second relation, item_copies -> copies_live, as a
+parallel set of functions (`find_copy_violations`, `copy_allowlist_mismatches`)
+that share the items functions' normaliser and span-matcher rather than
+duplicating them. T3-T5 repointed every non-exempt read, driving the copies
+census to 0, and this task (T6) is what makes main() fail on it — a new
+direct read of item_copies in app/ now reds the build exactly as a new direct
+read of items already does.
+
+Only app/**/*.py is scanned. Tests legitimately read the physical tables (a
 later plan needs them to) and are out of scope.
 
 G53: prose in app/ that needs to talk about this should say "the items
-table" or "items_live", never write the literal `FROM items` / `JOIN items`
-construct in a comment or docstring — this guard strips `#`-comment *lines*
-but not inline prose inside a docstring, and a comment quoting the construct
-must not trip it.
+table"/"items_live" or "the item_copies table"/"copies_live", never write
+the literal `FROM items` / `JOIN items` / `FROM item_copies` / `JOIN
+item_copies` construct in a comment or docstring — this guard strips
+`#`-comment *lines* but not inline prose inside a docstring, and a comment
+quoting either construct must not trip it.
 
-Run directly (exit 1 on violations) or via tests/test_items_live_lint.py.
+Run directly (exit 1 on items violations, items mismatches, copies
+violations, or copies allowlist mismatches) or via
+tests/test_items_live_lint.py.
 """
 
 import re
@@ -56,6 +70,22 @@ VIOLATION_MSG = (
     "FROM/JOIN construct inside a docstring trips this too, see G53)"
 )
 
+# The item_copies twin of _ITEMS_READ. No `yield`/`import` exclusion is
+# needed here — nothing in app/ does `yield from item_copies` or
+# `from item_copies import x` today, unlike the items case (see the
+# `_ITEMS_READ` comment above) — but the DELETE exclusion still applies:
+# app/services/item_copies.py has two `DELETE FROM item_copies ...`
+# statements (writes, stay on the physical table). `\b` does not split on
+# `_`, so `copies_live` never matches.
+_COPIES_READ = re.compile(r"(?<!DELETE )\b(FROM|JOIN)\s+item_copies\b", re.I)
+
+COPIES_VIOLATION_MSG = (
+    "{path}:{line}: reads the item_copies table directly — read through "
+    "copies_live (writes and the allowlisted lookups in "
+    "scripts/check_items_live.py stay on item_copies; prose quoting the "
+    "FROM/JOIN construct inside a docstring trips this too, see G53)"
+)
+
 #: repo-relative path -> {statement substring: how many reads it may suppress}.
 #: A substring identifies a legitimate direct read of the physical `items`
 #: table, and is normalised the same way the scanner reads source (quotes
@@ -76,6 +106,11 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         # physical table by definition. Without this entry the lint reds on
         # the statement that defines it.
         "SELECT * FROM items WHERE deleted_at IS NULL": 1,
+        # The copies_live view CREATE in get_db() — it joins the items
+        # relation so that trashing an item hides its copies with no write
+        # to them, so the seam's own definition reads the physical table.
+        "FROM item_copies c JOIN items i ON i.id = c.item_id "
+        "WHERE c.deleted_at IS NULL AND i.deleted_at IS NULL": 1,
         # Migrations 20 and 21 (UPC re-filing) — the two statements share
         # this prefix and diverge after it, so one substring, two hits.
         "AND NOT EXISTS (SELECT 1 FROM items o WHERE o.upc =": 2,
@@ -100,6 +135,75 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         # CSV dedup — same reason as _find_item_by_barcode above.
         "SELECT id FROM items WHERE media_type = ? AND isbn IN (?, ?)": 1,
         "SELECT id FROM items WHERE TRIM(title) = TRIM(?)": 1,
+    },
+    "app/routers/item_copies.py": {
+        # _barcode_conflict — copy_barcode is UNIQUE collection-wide, so this
+        # predicts the raw constraint and must join the physical items table,
+        # not items_live, or a trashed item's copy would be hidden and the
+        # insert would fail on the UNIQUE with a 500 instead of returning
+        # this conflict response.
+        "SELECT c.id AS copy_id, c.item_id, i.title FROM item_copies c "
+        "JOIN items i ON i.id = c.item_id WHERE c.copy_barcode = ?": 1,
+    },
+}
+
+#: The item_copies twin of ALLOWLIST — same shape, same G88/G53 rules, a
+#: separate dict because find_violations()/allowlist_mismatches() keep their
+#: current meaning (items only, per this task's spec) and must not fold
+#: item_copies reads in. Eight entries, each at its current spelling in the
+#: tree today — allowlisted by repository-relative path, never by basename
+#: (G88): app/services/item_copies.py and app/routers/item_copies.py are
+#: both keys here on purpose, and an entry under one must never excuse a
+#: read in the other.
+COPIES_ALLOWLIST: dict[str, dict[str, int]] = {
+    "app/database.py": {
+        # The copies_live view CREATE in get_db() itself — the seam reads
+        # the physical table by definition, same reasoning as the
+        # items_live entry above.
+        "SELECT c.* FROM item_copies c JOIN items i ON i.id = c.item_id": 1,
+        # Migration 26 — backfill primary copies from legacy locations; the
+        # NOT EXISTS guard reads item_copies to decide whether a row needs
+        # backfilling at all.
+        "WHERE i.owned = 1 AND i.location_id IS NOT NULL AND NOT EXISTS "
+        "(SELECT 1 FROM item_copies c WHERE c.item_id = i.id)": 1,
+    },
+    "app/services/item_copies.py": {
+        # backfill_legacy_locations — the app-level rerun of migration 26's
+        # backfill (idempotent), same NOT EXISTS guard and the same quoted
+        # text as the app/database.py migration entry above; this is fine,
+        # they are separate path keys.
+        "WHERE i.owned = 1 AND i.location_id IS NOT NULL AND NOT EXISTS "
+        "(SELECT 1 FROM item_copies c WHERE c.item_id = i.id)": 1,
+        # sync_primary_location — numbers a new primary copy above whatever
+        # copy_number this item already has.
+        "SELECT COALESCE(MAX(copy_number), 0) + 1 AS n FROM item_copies "
+        "WHERE item_id = ?": 1,
+        # add_copy — the numbering half only. A trashed copy still holds its
+        # (item_id, copy_number) slot, so numbering must see what the UNIQUE
+        # constraint sees. The "does this item have a copy" half is a
+        # separate statement and reads the view.
+        "SELECT COALESCE(MAX(copy_number), 0) AS highest "
+        "FROM item_copies WHERE item_id = ?": 1,
+    },
+    "app/services/item_merge.py": {
+        # _reparent_copies — numbers the losing item's copies above the
+        # keeper's own highest copy_number so nothing collides.
+        "SELECT COALESCE(MAX(copy_number), 0) AS n FROM item_copies "
+        "WHERE item_id = ?": 1,
+    },
+    "app/routers/item_copies.py": {
+        # _barcode_conflict — copy_barcode is UNIQUE collection-wide, so the
+        # conflict check has to read item_copies directly to find the other
+        # item holding the barcode. (The join is now `items`, not
+        # `items_live` — allowlisted separately under the items ALLOWLIST
+        # above, for the same reason.)
+        "SELECT c.id AS copy_id, c.item_id, i.title FROM item_copies c "
+        "JOIN items i ON i.id = c.item_id WHERE c.copy_barcode = ?": 1,
+    },
+    "app/services/archive.py": {
+        # Archive import — same copy_barcode UNIQUE conflict check as
+        # _barcode_conflict above, on the import path instead of the API.
+        "SELECT item_id FROM item_copies WHERE copy_barcode = ?": 1,
     },
 }
 
@@ -161,26 +265,48 @@ def _spanning(buf: str, sub: str, match: re.Match) -> bool:
     return False
 
 
-def find_violations(root: Path = ROOT) -> list[str]:
+def _find_violations(
+    root: Path, pattern: re.Pattern, allowlist: dict[str, dict[str, int]], message: str
+) -> list[str]:
+    """Shared scan behind both find_violations() and find_copy_violations().
+
+    One `_spanning` call, one normaliser (`_normalise_file`) — both
+    relations scan the same normalised text and suppress the same way, they
+    differ only in which pattern and which allowlist they carry (G88).
+    """
     violations = []
     for path in sorted((root / "app").rglob("*.py")):
         rel = str(path.relative_to(root))
         buf, offsets = _normalise_file(path)
-        allowed = ALLOWLIST.get(rel, {})
-        for match in _ITEMS_READ.finditer(buf):
+        allowed = allowlist.get(rel, {})
+        for match in pattern.finditer(buf):
             if any(_spanning(buf, sub, match) for sub in allowed):
                 continue
             line = _line_for(offsets, match.start())
-            violations.append(VIOLATION_MSG.format(path=rel, line=line))
+            violations.append(message.format(path=rel, line=line))
     return violations
 
 
-def allowlist_mismatches(root: Path = ROOT) -> list[str]:
-    """Every allowlist entry must span exactly the number of reads declared
-    beside it in ALLOWLIST.
+def find_violations(root: Path = ROOT) -> list[str]:
+    return _find_violations(root, _ITEMS_READ, ALLOWLIST, VIOLATION_MSG)
 
-    A count of 0 is the stale case — an entry the code no longer produces,
-    sitting there silently over-permissive (mirrors
+
+def find_copy_violations(root: Path = ROOT) -> list[str]:
+    """The item_copies twin of find_violations(). Deliberately not folded
+    into it. Gates main() from this task onward — see the module docstring
+    and main() below."""
+    return _find_violations(root, _COPIES_READ, COPIES_ALLOWLIST, COPIES_VIOLATION_MSG)
+
+
+def _allowlist_mismatches(
+    root: Path, pattern: re.Pattern, allowlist: dict[str, dict[str, int]]
+) -> list[str]:
+    """Shared scan behind both allowlist_mismatches() and
+    copy_allowlist_mismatches().
+
+    Every allowlist entry must span exactly the number of reads declared
+    beside it. A count of 0 is the stale case — an entry the code no longer
+    produces, sitting there silently over-permissive (mirrors
     test_raw_update_allowlist_has_no_stale_entries in
     tests/test_item_write.py). A count ABOVE the declared one is the
     ride-along case: a new direct read written inside text an existing entry
@@ -193,9 +319,9 @@ def allowlist_mismatches(root: Path = ROOT) -> list[str]:
         buf_by_path[rel] = _normalise_file(path)[0]
 
     mismatches = []
-    for rel, expected in ALLOWLIST.items():
+    for rel, expected in allowlist.items():
         buf = buf_by_path.get(rel, "")
-        matches = list(_ITEMS_READ.finditer(buf))
+        matches = list(pattern.finditer(buf))
         for sub, want in expected.items():
             got = sum(1 for m in matches if _spanning(buf, sub, m))
             if got != want:
@@ -205,9 +331,23 @@ def allowlist_mismatches(root: Path = ROOT) -> list[str]:
     return mismatches
 
 
+def allowlist_mismatches(root: Path = ROOT) -> list[str]:
+    return _allowlist_mismatches(root, _ITEMS_READ, ALLOWLIST)
+
+
+def copy_allowlist_mismatches(root: Path = ROOT) -> list[str]:
+    """The item_copies twin of allowlist_mismatches(). Gates main() from
+    this task onward, same as find_copy_violations() above — the copies
+    allowlist must stay accurate and the copies census must stay at 0."""
+    return _allowlist_mismatches(root, _COPIES_READ, COPIES_ALLOWLIST)
+
+
 def main() -> int:
     violations = find_violations()
     mismatches = allowlist_mismatches()
+    copy_violations = find_copy_violations()
+    copy_mismatches = copy_allowlist_mismatches()
+
     if violations:
         print(f"items_live lint: {len(violations)} violation(s)\n")
         for v in violations:
@@ -216,7 +356,23 @@ def main() -> int:
         print(f"items_live lint: {len(mismatches)} allowlist mismatch(es)\n")
         for m in mismatches:
             print(f"  {m}")
-    if violations or mismatches:
+    if copy_violations:
+        print(
+            f"copies_live lint: {len(copy_violations)} violation(s) — reads the "
+            "item_copies table directly instead of copies_live (the "
+            "constraint-mirror exemptions in COPIES_ALLOWLIST — the reads "
+            "that stay physical to predict a UNIQUE violation, since a "
+            "trashed copy still holds its copy_number and copy_barcode — "
+            "are the only reads excused)\n"
+        )
+        for v in copy_violations:
+            print(f"  {v}")
+    if copy_mismatches:
+        print(f"copies_live lint: {len(copy_mismatches)} allowlist mismatch(es)\n")
+        for m in copy_mismatches:
+            print(f"  {m}")
+
+    if violations or mismatches or copy_violations or copy_mismatches:
         return 1
     print("items_live lint: every read goes through the view.")
     return 0

@@ -45,7 +45,7 @@ DATA_DIR=./data-dev uvicorn app.main:app --reload
 | `make test-contract` | Live UPC Item DB contract check — spends one trial lookup; run at release, never on a gate |
 | `python -m pytest tests/test_items.py::test_x -v` | One unit test |
 | `python -m pytest tests/e2e/test_scan.py -v -m e2e` | One E2E file |
-| `make checks-fast` | Offline lints: secrets, CSRF, `items_live` read seam, Alpine CSP, service-worker version, test conventions, README test-count badges |
+| `make checks-fast` | Offline lints: secrets, CSRF, `items_live`/`copies_live` read seams, Alpine CSP, service-worker version, test conventions, README test-count badges |
 | `make badges` | Restamp README's two test-count badges from `pytest --co` — **required after adding or deleting tests** |
 | `make checks` | All checks incl. `pip-audit` and licenses (network) |
 | `make css` | Rebuild `static/css/app.css` and restamp `SW_VERSION` — **required after any template/JS change**, and commit both |
@@ -194,11 +194,14 @@ it posted from.
   `app/services/item_write.py`. Call it inside an existing `with get_db()`
   block. Adding a column to `items` no longer means auditing a dozen insert
   sites.
-- **Items are read through one view**, `items_live` — `get_db()` creates it per
-  connection, filtering `deleted_at IS NULL`. Write `FROM items_live` /
-  `JOIN items_live`, never the bare table; `make check-deleted` enforces it and
-  matches `JOIN` as well as `FROM`, because four files reach `items` through a
-  join alone. Writes stay on `items`.
+- **Items and copies are each read through a view** — `items_live` and
+  `copies_live`, both created per connection by `get_db()`. `items_live`
+  filters `deleted_at IS NULL`; `copies_live` joins the items relation, so a
+  copy is live only if it and its item are untrashed. Write `FROM items_live` /
+  `JOIN copies_live`, never the bare tables; `make check-deleted` enforces both
+  and matches `JOIN` as well as `FROM`, because several files reach a table
+  through a join alone. Writes stay on the physical tables, as do the reads
+  that exist to predict a UNIQUE violation (`GOTCHAS.md` G107).
 - **A route that decides on a `SELECT` guards and writes in one
   transaction.** `db.execute("BEGIN IMMEDIATE")` goes first in the block,
   above the guard query — a bare `SELECT` opens no transaction, so guarding in

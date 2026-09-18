@@ -24,7 +24,7 @@ def _location(db, location_id: int):
 def _copy_by_barcode(db, raw: str):
     row = db.execute(
         "SELECT c.id AS copy_id, c.item_id, c.copy_number, c.is_primary, "
-        "i.title, i.media_type FROM item_copies c "
+        "i.title, i.media_type FROM copies_live c "
         "JOIN items_live i ON i.id = c.item_id WHERE c.copy_barcode = ? LIMIT 1",
         (raw,),
     ).fetchone()
@@ -48,7 +48,7 @@ def _append_copy_position(db, copy_id: int | None, location_id: int) -> int | No
     if copy_id is None or not _has_position_order(db):
         return None
     next_position = db.execute(
-        "SELECT COALESCE(MAX(position_order), 0) + 1 AS n FROM item_copies "
+        "SELECT COALESCE(MAX(position_order), 0) + 1 AS n FROM copies_live "
         "WHERE location_id = ? AND id != ?",
         (location_id, copy_id),
     ).fetchone()["n"]
@@ -77,7 +77,7 @@ def _place_item(db, item_id: int, location_id: int) -> dict:
     # primary item_copies row, creating that primary copy when necessary.
     update_item_fields(db, item_id, fields)
     primary = db.execute(
-        "SELECT id, copy_number FROM item_copies "
+        "SELECT id, copy_number FROM copies_live "
         "WHERE item_id = ? AND is_primary = 1", (item_id,),
     ).fetchone()
     position_order = _append_copy_position(
@@ -141,12 +141,12 @@ def _shelf_summary(db, location_id: int) -> dict:
         "SELECT COUNT(*) AS total, "
         "COUNT(position_order) AS placed, "
         "COALESCE(MAX(position_order), 0) AS last_position "
-        "FROM item_copies WHERE location_id = ?",
+        "FROM copies_live WHERE location_id = ?",
         (location_id,),
     ).fetchone() if _has_position_order(db) else None
     if row is None:
         total = db.execute(
-            "SELECT COUNT(*) AS total FROM item_copies WHERE location_id = ?",
+            "SELECT COUNT(*) AS total FROM copies_live WHERE location_id = ?",
             (location_id,),
         ).fetchone()["total"]
         return {"total": total, "placed": 0, "next_position": None}

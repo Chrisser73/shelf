@@ -797,6 +797,24 @@ def get_db():
         "CREATE TEMP VIEW IF NOT EXISTS items_live AS "
         "SELECT * FROM items WHERE deleted_at IS NULL"
     )
+    # The same seam for physical copies. A copy is live only if it is not
+    # trashed AND its item is not trashed, which is why this one joins the
+    # items relation where items_live does not have to. That join is the
+    # design decision: trashing an item then needs no write to its copies at
+    # all, and the readers that never look at the item — Shelf Fill's
+    # per-location totals, apply_copy_order, _append_copy_position — stop
+    # counting a trashed item's copies with no per-site predicate. One choke
+    # point, not twenty (G29, restated in G105).
+    #
+    # Same TEMP reasoning as above: a persistent view would ride into every
+    # VACUUM INTO backup and make it unrestorable. `c.*` rather than a column
+    # list, so a later ALTER TABLE item_copies needs no change here. Resolved
+    # at use, not at creation, so this is safe before SCHEMA has run.
+    conn.execute(
+        "CREATE TEMP VIEW IF NOT EXISTS copies_live AS "
+        "SELECT c.* FROM item_copies c JOIN items i ON i.id = c.item_id "
+        "WHERE c.deleted_at IS NULL AND i.deleted_at IS NULL"
+    )
     try:
         yield conn
         conn.commit()

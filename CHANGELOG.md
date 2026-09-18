@@ -6,6 +6,70 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.42.5] - 2026-09-18
+
+0.42.4 gave every read of an *item* a single filtered view to go through, so
+that a Trash you can restore from could be built without any of Shelf's 172
+item reads forgetting to skip the deleted ones. It left the physical copies of
+those items — the second paperback, the one at the cabin, the one you lent out —
+out of that arrangement, on the stated grounds that copies are read in few
+places and all of them flow through one function.
+
+That was not true, and it had not been true when it was written. Copies are read
+in 31 places, and only 10 of them go through that function. The other 21 are
+hand-written queries spread across seven files: your shelf totals, the arrange
+page, the inventory sheet, the cover review queue, merging two items, ordering a
+shelf, and the archive export. Worse, 0.42.4's build check could not see any of
+them — the pattern it matched stopped at the word `items` and never noticed
+`item_copies`, so the rule it enforces had a hole exactly the width of this
+release. Had the Trash landed next, it would have started marking copies deleted
+with twenty readers still counting them: a shelf reporting more copies than it
+holds, an inventory audit asking you to find a copy you had thrown away.
+
+This release closes that, the same way and with the same discipline. Nothing you
+can see changes, and nothing is deleted yet. The whole of the proof is that the
+existing suite passes untouched — 3480 unit tests and 255 end-to-end, plus a new
+set that hand-marks a copy deleted and checks each surface, because nothing in
+Shelf can produce that state yet. The Trash itself still follows in a later
+release.
+
+### Internal
+
+Not user-visible, but it is what the release is made of:
+
+- **Every read of a physical copy goes through one view, `copies_live`**,
+  created fresh on each database connection beside `items_live`. It hides a copy
+  two ways: the copy's own deleted mark, **and** its item's. That join is the
+  design decision — it means trashing an item will not have to write to its
+  copies at all, and the readers that never look at the item — per-location
+  shelf totals, shelf ordering, shelf position — stop counting a trashed item's
+  copies without needing a line of their own.
+- **Three reads deliberately stay on the real table**, and they are one class,
+  not three exceptions: each exists to predict a clash with a uniqueness rule,
+  and a deleted row still holds its slot. So a new copy is numbered from what
+  the constraint can see. Add a third copy after deleting the second and it
+  becomes copy 3 — the number of a deleted copy is never handed out again.
+- **The build check, `make check-deleted`, now covers both tables and matches
+  `JOIN` as well as `FROM`**, which is the hole that let this one through. It
+  counts how many reads each exemption is allowed to cover, so a new read cannot
+  quietly hide inside an existing one.
+- **The view is temporary, by connection**, so it never lands in a backup file.
+  A backup taken with deleted rows present was checked against the real file: no
+  views in it, and every row still there with its mark intact. A restore can
+  neither drop a row nor resurrect one.
+
+Deliberately unchanged, and worth knowing:
+
+- **Nothing is hidden from you, and nothing is recoverable yet.** No code marks
+  a copy or an item deleted. Removing a copy in 0.42.5 still removes it,
+  permanently, exactly as before.
+- **One rough edge is known and is the next release's to fix.** If a copy is
+  marked deleted while it is still flagged as the item's primary, adding
+  another copy to that item is refused cleanly — a plain error, nothing
+  half-written. Nothing in Shelf can reach that state today; the Trash release
+  demotes the flag in the same step that marks the copy, which is where the fix
+  belongs.
+
 ## [0.42.4] - 2026-09-18
 
 Deleting something in Shelf is permanent and immediate. There is no undo, and
@@ -3683,6 +3747,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.42.5]: https://github.com/dgahagan/shelf/releases/tag/v0.42.5
 [0.42.4]: https://github.com/dgahagan/shelf/releases/tag/v0.42.4
 [0.42.3]: https://github.com/dgahagan/shelf/releases/tag/v0.42.3
 [0.42.2]: https://github.com/dgahagan/shelf/releases/tag/v0.42.2

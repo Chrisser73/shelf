@@ -74,8 +74,11 @@ rather than move one.
 Removal is permanent. A copy's condition, acquisition details and provenance go
 with the row — the delete is a `DELETE`, not a flag — which is why the UI
 control is guarded by a confirmation naming what is lost. Both `items` and
-`item_copies` now carry a `deleted_at` column, but nothing writes it and no
-read filters on it; it is the seam a later soft-delete feature switches on.
+`item_copies` now carry a `deleted_at` column. Nothing writes it yet — the
+delete is still a `DELETE` — but the read side is already behind it: every read
+of copies goes through the `copies_live` view, which hides a copy whose own
+column is set and every copy of an item whose column is set. It is the seam a
+later soft-delete feature switches on, with the readers already repointed.
 
 ## Which surfaces write copies
 

@@ -117,11 +117,13 @@ check-secrets:
 check-csrf:
 	python scripts/check_csrf_fetch.py
 
-# Every read of items in app/ must go through the items_live TEMP view
-# (app/database.py::get_db()), never the physical table directly — a direct
-# read sees soft-deleted rows. Catches both FROM items and JOIN items; the
-# latter has no FROM items anywhere in some files (app/routers/checkouts.py),
-# so a lint that only looked for FROM would miss it silently.
+# Every read of items or item_copies in app/ must go through its TEMP view
+# (app/database.py::get_db() creates items_live and copies_live on every
+# connection), never the physical table directly — a direct read sees
+# soft-deleted rows, and for item_copies a live-item's trashed copy too.
+# Catches both FROM items/item_copies and JOIN items/item_copies; the latter
+# has no FROM items anywhere in some files (app/routers/checkouts.py), so a
+# lint that only looked for FROM would miss it silently.
 check-deleted:
 	python scripts/check_items_live.py
 

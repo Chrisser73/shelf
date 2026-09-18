@@ -84,14 +84,14 @@ def _reparent_links(db, keep_id: int, other_id: int) -> None:
 
 def _reparent_copies(db, keep_id: int, other_id: int) -> None:
     keep_has_primary = db.execute(
-        "SELECT 1 FROM item_copies WHERE item_id = ? AND is_primary = 1", (keep_id,)
+        "SELECT 1 FROM copies_live WHERE item_id = ? AND is_primary = 1", (keep_id,)
     ).fetchone() is not None
     highest = db.execute(
         "SELECT COALESCE(MAX(copy_number), 0) AS n FROM item_copies WHERE item_id = ?",
         (keep_id,),
     ).fetchone()["n"]
     rows = db.execute(
-        "SELECT id FROM item_copies WHERE item_id = ? ORDER BY copy_number, id",
+        "SELECT id FROM copies_live WHERE item_id = ? ORDER BY copy_number, id",
         (other_id,),
     ).fetchall()
 

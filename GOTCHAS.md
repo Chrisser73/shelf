@@ -2729,15 +2729,27 @@ grep -n '_toast_header' app/routers/items.py app/routers/items_common.py
   gate is invoked, not of anything the repo contains, so no `make check-*`
   tripwire can see it. It belongs in the orchestrator's habits, which is why
   it is written down rather than automated.
-  **Three recorded instances now, across three plans, each by someone who
+  **A fourth instance, 2026-09-18** (plan `soft-delete-copies-seam`), by the
+  `/run-plan` orchestrator, which had this entry in its own context: every gate
+  for T1-T5 ran as `make test 2>&1 | tail -3 && make check-csrf && ...`, so
+  `tail` supplied the status and a red pytest would have carried the `&&` chain
+  through to a green report. Nothing was mis-reported — the `3457 passed` line
+  was visible in each run, and HEAD was re-verified unpiped afterwards — but the
+  mechanism was live for five commits, and the shape is new: not a background
+  runner and not a trimmed `make checks`, but a **pipe inside an `&&` chain**,
+  where the pipe's status silently becomes the chain's guard.
+  **Four recorded instances now, across four plans, each by someone who
   could have quoted the rule.** That is the signal that prose is the wrong
   mechanism here. The cheap fix is not a lint but a *habit with a default*:
   when output must be trimmed, `make <target> > /tmp/gate.log 2>&1; echo $?`
   and read the file — one form that is correct for every target, foreground or
-  background, instead of a judgement call per invocation. **Revisit trigger:**
-  a fourth instance; at that point add a `make checks-quiet` that tees to a
-  file and exits with the real status, so the convenient thing is also the
-  correct one.
+  background, instead of a judgement call per invocation.
+  **Revisit trigger: FIRED** (2026-09-18, the fourth instance above). The
+  prescribed fix — a `make checks-quiet` that tees to a file and exits with the
+  real status, so the convenient thing is also the correct one — is **not
+  implemented here**: it adds a gate target, which changes the verification
+  surface and belongs to a plan of its own rather than to another plan's
+  curation step. Raised with Dan at the close of `soft-delete-copies-seam`.
 
 ## G64 — When writing a "Test key" button for a new provider
 
@@ -3933,8 +3945,12 @@ python -m pytest "tests/test_archive.py::TestArchiveCopiesImport::test_a_rejecte
   such reader must decide the *same* way, or two surfaces will contradict each
   other about the same shelf. The answer in this codebase is: fall back to the
   `items.location_id` seam, which is then the only answer there is. Guard it
-  with `NOT EXISTS (SELECT 1 FROM item_copies WHERE item_id = i.id)` so an item
-  that *has* copies is judged entirely on them.
+  with `NOT EXISTS (SELECT 1 FROM copies_live WHERE item_id = i.id)` so an
+  item that *has* copies is judged entirely on them. **Since
+  `feat/soft-delete-copies-seam` that guard reads the view, so an item whose
+  only copy is trashed is a zero-copy item** — it falls back to the seam,
+  which is the same answer `delete_copy` already produces for a hard-deleted
+  last copy.
 - **Why:** the copy backfill is deliberately conservative — migration 26 and
   `backfill_legacy_locations` create a primary copy only for rows that are
   `owned = 1` **and** already located, because `owned` alone is not evidence
@@ -4620,13 +4636,23 @@ EOF
   the field is genuinely optional.
 
 
-## G105 — When writing a query that reads `items`
+## G105 — When writing a query that reads `items` or `item_copies`
 
-- **Rule:** read through `items_live`, never `FROM items` or `JOIN items`. The
-  view is created per connection in `get_db()` and filters `deleted_at IS
-  NULL`. Writes stay on `items` — a `DELETE FROM items` matches the same text
-  pattern and is not a violation — and so do the five allowlisted lookups in
-  `scripts/check_items_live.py`, each with its reason at the entry.
+- **Rule:** read through the relation's view, never the physical table. Both
+  views are created per connection in `get_db()`:
+  - `items_live` — `items` where `deleted_at IS NULL`.
+  - `copies_live` — `item_copies` **joined to `items`**, where *both*
+    `deleted_at` columns are NULL. A copy is live only if it and its item are
+    untrashed, so trashing an item needs no write to its copies at all, and the
+    readers that never join the items relation stop counting them with no
+    per-site predicate.
+
+  Writes stay on the physical tables — a `DELETE FROM items` matches the same
+  text pattern and is not a violation — and so do the allowlisted lookups in
+  `scripts/check_items_live.py`, each with its reason at the entry: **11 items
+  entries excusing 12 reads across 4 files, and 8 copies entries excusing 8
+  reads across 5 files** (counts read from the script, 2026-09-18). The copies
+  exemptions are all one class; see **G107**.
 - **The half a rewrite gets wrong: four files reach the table through a `JOIN`
   and contain no `FROM items` at all** — `app/routers/checkouts.py`,
   `app/routers/periodicals.py`, `app/services/location_order.py`,
@@ -4652,6 +4678,18 @@ EOF
   `tests/test_items_live_lint.py::test_every_read_goes_through_items_live`,
   naming the line. The `checkouts.py` half is the one that matters: that file
   greps zero for `FROM items`.
+
+  `feat/soft-delete-copies-seam`, 2026-09-18, did the same for `item_copies` —
+  `a95cec0` added the view, `d8c7102` taught the lint the second relation as a
+  *second block in the same script* (one normaliser, one `_spanning` — two
+  allowlist formats for one invariant was the rejected design),
+  `d80a143`/`94a96cc`/`2acef76` drove the census 23 → 18 → 6 → 0, `a225397`
+  gated it. Same mutation proof at census zero, and the JOIN half matters again:
+  `LEFT JOIN copies_live` → `LEFT JOIN item_copies` at `app/routers/items.py:1510`
+  reds the lint on a statement whose only physical-table keyword is `JOIN`.
+  The whole repoint passed the existing suite **unchanged**, which is what made
+  it safe and also why it proved nothing about the exemptions — `9a85469` added
+  `tests/test_copies_live_contract.py` for that.
 - **Verify:** `make check-deleted`
 - **Status:** `linted: make check-deleted` (also inside `make test`, via
   `tests/test_items_live_lint.py`).
@@ -4693,6 +4731,12 @@ EOF
   `tests/`. After updating them, the pin was re-verified live by moving
   `BEGIN IMMEDIATE` below the guard SELECT at `app/routers/items.py:492`: it
   reds on `got 'acquired'`, the real G18 property.
+
+  **The counter-case, `feat/soft-delete-copies-seam`, 2026-09-18:** a repoint
+  of comparable shape — 23 statements, including a full rewrite of every
+  column qualifier in `archive._copies_by_item` — detached **nothing**. The
+  Verify script below returned zero both before and after. Run it; do not
+  infer either outcome from the size of the diff.
 - **Verify:** every literal SQL predicate in the suite still names a statement
   that exists in `app/` —
 
@@ -4715,6 +4759,69 @@ EOF
 - **Status:** documented. **Lint candidate** — the Verify script above is the
   lint, near enough; what it cannot decide is whether a detached predicate
   should be re-pointed or the pin deleted.
+
+
+## G107 — When a read exists to predict a UNIQUE violation
+
+- **Rule:** it reads the **physical table**, not the soft-delete view, because
+  the constraint does. A trashed row still occupies its unique slot, so a guard
+  that asks "will this insert collide?" must see trashed rows or it will predict
+  *no collision* and hand the collision to the database instead. Everything else
+  reads the view (**G105**). When one statement answers both kinds of question,
+  **split it** — see the worked example below.
+- **The three uniqueness rules on `item_copies`** (`app/database.py:291-300`)
+  and the reads that mirror them, each allowlisted with its reason in
+  `scripts/check_items_live.py`:
+
+  | rule | reads that stay physical |
+  |---|---|
+  | `UNIQUE(item_id, copy_number)` | `item_copies.py` `sync_primary_location` and `add_copy` (the `MAX` half); `item_merge.py` `_reparent_copies` |
+  | `copy_barcode UNIQUE` | `routers/item_copies.py` `_barcode_conflict`; `archive.py`'s import clash read |
+  | the literal `copy_number = 1` in the backfill | `item_copies.py` `backfill_legacy_locations`, whose `NOT EXISTS` guard would otherwise pass for an item whose only copy is trashed |
+
+- **A join is part of the read.** `_barcode_conflict` is
+  `FROM item_copies c JOIN items i` — **both** physical. Keeping only the `FROM`
+  physical does not work: the inner join to `items_live` hides a trashed
+  *item's* copy just as effectively, and the insert then fails on the raw
+  constraint with a 500 instead of returning the conflict response. This was
+  found at plan time and is pinned by
+  `test_add_copy_refuses_a_trashed_items_copy_barcode`, which reds on that one
+  change and nothing else.
+- **The worked example — one statement, both classes.** `add_copy` used to read
+  `SELECT COALESCE(MAX(copy_number), 0) AS highest, COUNT(*) AS n FROM
+  item_copies WHERE item_id = ?`. `highest` predicts the constraint; `n == 0`
+  answers "does this item have a copy at all", which is an ordinary read. Left
+  whole on the physical table, an item whose only copy was trashed would get its
+  next copy as a **secondary**, leaving the item with no live primary. Split in
+  `d80a143`: `MAX` on `item_copies`, `COUNT(*)` on `copies_live`, both inside the
+  caller's `BEGIN IMMEDIATE` (**G18**).
+- **Cross-plan contract — read this before changing what trashes a copy.** The
+  partial unique index `idx_item_copies_one_primary` needs **no** exemption, and
+  the three primary-lookup reads that moved to the view
+  (`item_copies.py` `sync_primary_location`, `item_merge.py` `_reparent_copies`,
+  `archive.py` `_import_copies`) are correct **only because the Trash plan
+  demotes a copy when it trashes it**. The day a copy can be trashed while still
+  holding `is_primary = 1`, those three reads are wrong and this row joins the
+  table above.
+- **Why:** the failure is a 500 on a path that has a designed, friendly refusal
+  a few lines away, and it cannot happen until something starts writing
+  `deleted_at` — so it ships green and surfaces in the plan *after* the one that
+  introduced it.
+- **Evidence:** `feat/soft-delete-copies-seam`, 2026-09-18. The class was named
+  in the design plan and derived per-statement at `/impl-plan`; `a95cec0`
+  through `2acef76` repointed everything else. `9a85469` pinned each exemption
+  by hand-mutating it onto `copies_live` and watching the constraint fire —
+  `UNIQUE constraint failed: item_copies.item_id, item_copies.copy_number` for
+  the numbering reads, `… item_copies.copy_barcode` for the archive clash read.
+- **Verify:**
+
+```bash
+python -m pytest tests/test_copies_live_contract.py -q
+```
+
+- **Status:** documented; census of violations zero (`make check-deleted`).
+  Not a lint candidate — only a human can say whether a given read exists to
+  predict a constraint or to answer a question about the collection.
 
 
 ## Graveyard

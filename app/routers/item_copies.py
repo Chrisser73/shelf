@@ -99,12 +99,18 @@ def _barcode_conflict(db, barcode: str, copy_id: int | None):
 
     `copy_barcode` is UNIQUE collection-wide, so the collision is always with
     some other item's copy and the message has to name it — "that barcode is
-    taken" without saying by what is not actionable. Same join shape as Shelf
-    Fill's own barcode lookup.
+    taken" without saying by what is not actionable. Shelf Fill's own barcode
+    lookup reads the same two relations, but through the views: it is finding
+    a copy to place, not predicting a constraint, so a trashed one is simply
+    not there to find.
     """
+    # Joins raw `items`, not `items_live`: this predicts the UNIQUE on
+    # `copy_barcode`, so it must see what the constraint sees, including a
+    # trashed item's copy — else the insert would hit the raw UNIQUE and
+    # 500 instead of returning this conflict response.
     row = db.execute(
         "SELECT c.id AS copy_id, c.item_id, i.title FROM item_copies c "
-        "JOIN items_live i ON i.id = c.item_id WHERE c.copy_barcode = ? LIMIT 1",
+        "JOIN items i ON i.id = c.item_id WHERE c.copy_barcode = ? LIMIT 1",
         (barcode,),
     ).fetchone()
     if row is None or row["copy_id"] == copy_id:
@@ -182,7 +188,7 @@ async def edit_panel(
     """
     with get_db() as db:
         copy = db.execute(
-            "SELECT * FROM item_copies WHERE id = ? AND item_id = ?",
+            "SELECT * FROM copies_live WHERE id = ? AND item_id = ?",
             (copy_id, item_id),
         ).fetchone()
         if copy is None:
@@ -267,7 +273,7 @@ async def update_copy(
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
         copy = db.execute(
-            "SELECT id, item_id, is_primary FROM item_copies WHERE id = ? AND item_id = ?",
+            "SELECT id, item_id, is_primary FROM copies_live WHERE id = ? AND item_id = ?",
             (copy_id, item_id),
         ).fetchone()
         if copy is None:
@@ -319,10 +325,11 @@ async def remove_copy(
     _=Depends(require_role("editor")),
 ):
     """Remove one copy, permanently. Its condition, acquisition detail and
-    provenance go with it — the row is deleted rather than marked, which is why
-    the control is guarded by an `hx-confirm` naming what is lost. The
-    `deleted_at` column on the table is the seam a later plan switches on;
-    nothing here sets it.
+    provenance go with it — the row is deleted rather than marked, which is
+    why the control is guarded by an `hx-confirm` naming what is lost.
+    `item_copies` now carries a `deleted_at` column, and every read here
+    goes through the `copies_live` view that filters on it — but nothing
+    writes the column yet, so this is still a `DELETE`.
 
     Removing the primary promotes the lowest-numbered survivor and re-points
     the seam; removing the last copy nulls the seam and leaves the item
@@ -331,7 +338,7 @@ async def remove_copy(
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
         copy = db.execute(
-            "SELECT id FROM item_copies WHERE id = ? AND item_id = ?",
+            "SELECT id FROM copies_live WHERE id = ? AND item_id = ?",
             (copy_id, item_id),
         ).fetchone()
         if copy is None:

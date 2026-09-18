@@ -84,6 +84,34 @@ no view and fails with `no such table: items_live`. That is loud rather than
 silent, and the only other `sqlite3.connect` calls in the app operate on
 uploaded temp files during a restore and never read items.
 
+**A second TEMP view, `copies_live`, does the same for `item_copies`** — and it
+**joins the items relation**, which is the design decision rather than an
+implementation detail:
+
+```sql
+CREATE TEMP VIEW IF NOT EXISTS copies_live AS
+SELECT c.* FROM item_copies c JOIN items i ON i.id = c.item_id
+WHERE c.deleted_at IS NULL AND i.deleted_at IS NULL;
+```
+
+A copy is live only if **it** is untrashed **and its item** is untrashed. Two
+things follow. Trashing an item needs no write to its copies at all, so a
+restore can still tell the copies the user removed individually from the ones
+that merely belonged to a trashed item — the alternative, cascading `deleted_at`
+onto the copies, cannot, and would need a second column to remember why each row
+was stamped. And the readers that never join the items relation — Shelf Fill's
+per-location totals, `apply_copy_order`, `_append_copy_position` — stop counting
+a trashed item's copies with no per-site predicate. One choke point rather than
+twenty hand-written `WHERE` clauses, which is the same argument `items_live`
+makes.
+
+The same three properties are load-bearing here: `TEMP` for the backup reason
+above, `c.*` rather than a frozen column list, and writes that fail with
+`cannot modify copies_live because it is a view`. Measured on the SQLite the
+container ships (3.46.1): a 500-copy location count costs 151 µs through the
+view against 13 µs raw, the difference being a per-row primary-key probe into
+`items`. At that size it changes no decision.
+
 **`locations` is a tree, stored denormalised.** `label` is the node's own name
 and `parent_id` its parent (`ON DELETE RESTRICT`, so a node with children
 cannot be deleted out from under them); `name` holds the full path —
@@ -114,8 +142,10 @@ is not treated as evidence that a row is physical.
 
 **The seam is no longer the whole story in the UI.** Since 0.38.0 (issue #116)
 the item page, the shelf audit (`/api/inventory/missing`), Scan's Inventory and
-Lookup modes, and the portable archive all read `item_copies` directly, because
-a merged item legitimately has copies in two rooms and the seam names only one.
+Lookup modes, and the portable archive all read the copies relation rather than
+the seam, because a merged item legitimately has copies in two rooms and the
+seam names only one. (They read it through `copies_live`, not the physical
+table — see the read invariant below.)
 Where an item has no copy rows at all — the conservative backfill leaves
 wishlist rows without one — those readers fall back to the seam, which is then
 the only answer there is. Browse, Scan's Move mode, the valuation report and
@@ -1042,30 +1072,41 @@ and `platform = NULL` cascades, the name-keyed series rename, three
 migrations) — a new user-value write anywhere else fails the suite, and so
 does a stale allowlist entry.
 
-### Reading items
+### Reading items and copies
 
 The mirror of the write funnel: **every read of `items` in `app/` goes through
-the `items_live` view**, never `FROM items` or `JOIN items`. `make
-check-deleted` (`scripts/check_items_live.py`, in `checks-fast`) enforces it,
-and `tests/test_items_live_lint.py` runs the same check inside `make test`, so
-a new direct read fails the suite as well as the lint. Two details decide
-whether the guard actually guards:
+the `items_live` view, and every read of `item_copies` goes through
+`copies_live`** — never the physical table. `make check-deleted`
+(`scripts/check_items_live.py`, in `checks-fast`) enforces both, and
+`tests/test_items_live_lint.py` runs the same checks inside `make test`, so a
+new direct read fails the suite as well as the lint.
 
-- **It matches `JOIN items` as well as `FROM items`.** Four files reach the
-  table only through a join and contain no `FROM items` at all
+**It is one script with two blocks, not two scripts.** Each relation has its own
+pattern and its own allowlist, but they share one normaliser and one
+span-matcher. Two scripts would mean two allowlist formats and two suppression
+rules for one invariant — and the window bug described below was fixed in one
+place and would have had to be remembered in the other.
+
+Two details decide whether the guard actually guards:
+
+- **It matches `JOIN` as well as `FROM`, for both relations.** Four files reach
+  `items` only through a join and contain no `FROM items` at all
   (`routers/checkouts.py`, `routers/periodicals.py`, `services/location_order.py`,
   `services/romm_records.py`), so a guard keyed on `FROM` alone would pass them
-  while they read deleted rows forever. A `DELETE FROM items` matches the same
+  while they read deleted rows forever. The same holds on the copies side —
+  the shelf audit's `LEFT JOIN` in `routers/items.py` is a copies read whose
+  only relation keyword is `JOIN`. A `DELETE FROM` on either table matches the
   pattern and is excluded, because it is a write.
 - **It strips a string literal's prefix together with its opening quote.**
   Otherwise `f"FROM items i "` normalises to `fFROM items` and slips past the
   word boundary; three statements had exactly that shape at census.
 
-Five reads stay on the physical table, each allowlisted by repository-relative
-path with its reason at the entry:
+Some reads stay on the physical tables, each allowlisted by repository-relative
+path — never by basename — with its reason at the entry. On the **items** side,
+11 entries excusing 12 reads:
 
 - the `items_live` CREATE in `get_db()` itself — the seam reads the physical
-  table by definition;
+  table by definition, and so does the `copies_live` CREATE, which joins `items`;
 - the four historical backfills inside the append-only `MIGRATIONS` tuple, which
   ran against the table at a past schema version;
 - `_find_item_by_barcode`'s two lookups (`routers/items.py`) and the CSV dedup
@@ -1073,9 +1114,36 @@ path with its reason at the entry:
   still *see* a soft-deleted row, so that a later restore can match on it
   rather than creating a duplicate;
 - the `series_meta` garbage collector in `database.py` — a soft-deleted item
-  keeps its series alive, so restoring it finds the series intact.
+  keeps its series alive, so restoring it finds the series intact;
+- `_barcode_conflict`'s join (`routers/item_copies.py`) — see the class below.
 
-A stale allowlist entry fails the suite, exactly as the write funnel's does.
+On the **copies** side, 8 entries excusing 8 reads, and they are all **one
+class: a read that exists to predict a UNIQUE violation reads the physical
+table, because the constraint does.** A trashed row still occupies its unique
+slot, so a guard asking "will this insert collide?" must see trashed rows or it
+predicts *no collision* and hands the collision to SQLite. `item_copies` carries
+three such rules, and each has its mirroring reads:
+
+| rule | reads that stay physical |
+|---|---|
+| `UNIQUE(item_id, copy_number)` | `sync_primary_location` and `add_copy`'s `MAX` half (`services/item_copies.py`); `_reparent_copies` (`services/item_merge.py`) |
+| `copy_barcode UNIQUE` | `_barcode_conflict` (`routers/item_copies.py`); the archive import's clash read (`services/archive.py`) |
+| the literal `copy_number = 1` in the backfill | `backfill_legacy_locations` (`services/item_copies.py`), plus migration 26, its append-only twin |
+
+Two consequences are easy to get wrong. **A join is part of the read**:
+`_barcode_conflict` is `FROM item_copies c JOIN items i`, both physical, because
+an inner join to `items_live` would hide a trashed *item's* copy just as
+effectively as reading the view would. And **one statement can carry both
+classes** — `add_copy` reads the highest `copy_number` (predicts the constraint)
+and whether the item has any copy at all (an ordinary read) and is therefore
+split in two, the `MAX` on `item_copies` and the `COUNT(*)` on `copies_live`.
+
+The partial unique index `idx_item_copies_one_primary` needs no exemption, on
+the stated contract that trashing a copy also demotes it. The three
+primary-lookup reads that go through the view depend on that contract holding.
+
+A stale allowlist entry fails the suite, exactly as the write funnel's does, and
+so does one whose declared hit count drifts from what the code produces.
 
 ## Testing
 

@@ -61,13 +61,13 @@ _QUEUE_COLUMNS = """
     i.id, i.title, i.authors, i.media_type, i.cover_path,
     i.publish_year, i.platform,
     COALESCE(
-        (SELECT l.name FROM item_copies c
+        (SELECT l.name FROM copies_live c
            JOIN locations l ON l.id = c.location_id
           WHERE c.item_id = i.id AND c.location_id IS NOT NULL
           ORDER BY c.id LIMIT 1),
         (SELECT l.name FROM locations l
           WHERE l.id = i.location_id
-            AND NOT EXISTS (SELECT 1 FROM item_copies c2 WHERE c2.item_id = i.id))
+            AND NOT EXISTS (SELECT 1 FROM copies_live c2 WHERE c2.item_id = i.id))
     ) AS location_name
 """
 

@@ -113,21 +113,21 @@ def _copies_by_item(db) -> dict[int, list[dict]]:
     one grouped query for the whole export, mirroring `_tags_by_item` so
     `_build_items` stays free of an N+1 over item_copies."""
     rows = db.execute(
-        "SELECT item_copies.item_id AS item_id, "
-        "item_copies.copy_number AS copy_number, "
+        "SELECT c.item_id AS item_id, "
+        "c.copy_number AS copy_number, "
         "locations.name AS location, "
-        "item_copies.is_primary AS is_primary, "
-        "item_copies.position_order AS position_order, "
-        "item_copies.condition AS condition, "
-        "item_copies.acquired_date AS acquired_date, "
-        "item_copies.acquisition_source AS acquisition_source, "
-        "item_copies.acquisition_price AS acquisition_price, "
-        "item_copies.provenance AS provenance, "
-        "item_copies.notes AS notes, "
-        "item_copies.copy_barcode AS copy_barcode "
-        "FROM item_copies LEFT JOIN locations "
-        "ON locations.id = item_copies.location_id "
-        "ORDER BY item_copies.item_id, item_copies.copy_number, item_copies.id"
+        "c.is_primary AS is_primary, "
+        "c.position_order AS position_order, "
+        "c.condition AS condition, "
+        "c.acquired_date AS acquired_date, "
+        "c.acquisition_source AS acquisition_source, "
+        "c.acquisition_price AS acquisition_price, "
+        "c.provenance AS provenance, "
+        "c.notes AS notes, "
+        "c.copy_barcode AS copy_barcode "
+        "FROM copies_live c LEFT JOIN locations "
+        "ON locations.id = c.location_id "
+        "ORDER BY c.item_id, c.copy_number, c.id"
     ).fetchall()
     out: dict[int, list[dict]] = {}
     for r in rows:
@@ -259,7 +259,7 @@ def _import_copies(db, real_id: int, copies: list[dict] | None, get_location_id,
         return
 
     existing_primary = db.execute(
-        "SELECT id FROM item_copies WHERE item_id = ? AND is_primary = 1",
+        "SELECT id FROM copies_live WHERE item_id = ? AND is_primary = 1",
         (real_id,),
     ).fetchone()
 

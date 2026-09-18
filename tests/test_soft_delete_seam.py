@@ -218,9 +218,136 @@ class TestTheItemsLiveViewExistsOnEveryConnection:
             assert conn.in_transaction is False
 
 
+class TestTheCopiesLiveViewExistsOnEveryConnection:
+    """The second seam, for `item_copies`. `get_db()` creates it; nothing else.
+
+    Mutation-checked (G31): removing the `CREATE TEMP VIEW` for `copies_live`
+    from `get_db()` reds `test_two_successive_connections_can_both_read_the_view`
+    with `no such table: copies_live`, on the second connection as well as the
+    first. Dropping `AND i.deleted_at IS NULL` from the view's body reds
+    `test_the_view_hides_every_copy_of_a_trashed_item` and nothing else, which
+    is what makes that clause's own pin non-vacuous. Dropping `TEMP` reds
+    `test_the_view_is_temp_and_therefore_not_in_the_persistent_schema` and both
+    tests in `TestBackupsStayRestorableWithTheViewInPlace`.
+    """
+
+    def _seed_item_with_copy(self, db, title, copy_number=1):
+        cur = db.execute("INSERT INTO items (title) VALUES (?)", (title,))
+        item_id = cur.lastrowid
+        cur = db.execute(
+            "INSERT INTO item_copies (item_id, copy_number, is_primary) "
+            "VALUES (?, ?, 1)",
+            (item_id, copy_number),
+        )
+        return item_id, cur.lastrowid
+
+    def test_two_successive_connections_can_both_read_the_view(self, db):
+        """Two connections, not one: a per-process flag would pass with one."""
+        with get_db() as first:
+            assert first.execute(
+                "SELECT COUNT(*) AS c FROM copies_live"
+            ).fetchone()["c"] == 0
+        with get_db() as second:
+            assert second.execute(
+                "SELECT COUNT(*) AS c FROM copies_live"
+            ).fetchone()["c"] == 0
+
+    def test_the_view_is_queryable_before_the_schema_exists(self, tmp_path, monkeypatch):
+        """Same bootstrap ordering as `items_live`: `init_db()` opens its first
+        connection before SCHEMA runs, so neither `item_copies` nor `items`
+        exists when this CREATE executes. A view's body is resolved at use.
+        """
+        db_path = tmp_path / "scratch" / "shelf.db"
+        monkeypatch.setattr("app.config.DATABASE_PATH", db_path)
+        monkeypatch.setattr("app.config.COVERS_DIR", tmp_path / "scratch" / "covers")
+        monkeypatch.setattr("app.database.DATABASE_PATH", db_path)
+        monkeypatch.setattr("app.database.COVERS_DIR", tmp_path / "scratch" / "covers")
+
+        init_db()
+        init_db()
+
+        with get_db() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) AS c FROM copies_live"
+            ).fetchone()["c"] == 0
+
+    def test_the_view_hides_a_copy_whose_own_column_is_set(self, db):
+        """The first half of the predicate. Nothing in `app/` writes
+        `deleted_at`, so this is the only place in the suite that does."""
+        item_id, live_copy = self._seed_item_with_copy(db, "Two copies")
+        cur = db.execute(
+            "INSERT INTO item_copies (item_id, copy_number, is_primary, deleted_at) "
+            "VALUES (?, 2, 0, '2026-09-18T00:00:00')",
+            (item_id,),
+        )
+        trashed_copy = cur.lastrowid
+        db.commit()
+
+        visible = {r["id"] for r in db.execute("SELECT id FROM copies_live")}
+        assert visible == {live_copy}
+        assert trashed_copy not in visible
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM item_copies"
+        ).fetchone()["c"] == 2
+
+    def test_the_view_hides_every_copy_of_a_trashed_item(self, db):
+        """The join is the design decision: trashing an item needs no write to
+        its copies, so their own column stays NULL and they still vanish."""
+        live_item, live_copy = self._seed_item_with_copy(db, "Kept")
+        trashed_item, orphan_copy = self._seed_item_with_copy(db, "Trashed")
+        db.execute(
+            "UPDATE items SET deleted_at = '2026-09-18T00:00:00' WHERE id = ?",
+            (trashed_item,),
+        )
+        db.commit()
+
+        visible = {r["id"] for r in db.execute("SELECT id FROM copies_live")}
+        assert visible == {live_copy}
+        assert orphan_copy not in visible
+        # The copy itself was never stamped — the join is what hid it.
+        assert db.execute(
+            "SELECT deleted_at FROM item_copies WHERE id = ?", (orphan_copy,)
+        ).fetchone()["deleted_at"] is None
+
+    @pytest.mark.parametrize("statement", [
+        "UPDATE copies_live SET copy_number = 9",
+        "INSERT INTO copies_live (item_id, copy_number) VALUES (1, 1)",
+        "DELETE FROM copies_live",
+    ])
+    def test_writing_through_the_view_fails_loudly(self, statement, db):
+        """The runtime backstop behind the lint, same as `items_live`."""
+        with pytest.raises(sqlite3.OperationalError, match="cannot modify copies_live"):
+            db.execute(statement)
+
+    def test_the_view_is_temp_and_therefore_not_in_the_persistent_schema(self, db):
+        """TEMP is why backups stay restorable — see the round-trip below."""
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM sqlite_master WHERE type = 'view'"
+        ).fetchone()["c"] == 0
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM sqlite_temp_master "
+            "WHERE type = 'view' AND name = 'copies_live'"
+        ).fetchone()["c"] == 1
+
+    def test_select_star_picks_up_a_column_added_after_the_view(self, db):
+        """`c.*` rather than a frozen column list: a future `item_copies`
+        migration needs no change in `get_db()`."""
+        before = {d[0] for d in db.execute("SELECT * FROM copies_live").description}
+        assert "_probe_copy_col" not in before
+
+        db.execute("ALTER TABLE item_copies ADD COLUMN _probe_copy_col TEXT")
+        after = {d[0] for d in db.execute("SELECT * FROM copies_live").description}
+        assert "_probe_copy_col" in after
+
+
 class TestBackupsStayRestorableWithTheViewInPlace:
     """The regression the TEMP choice exists to prevent, end to end through
-    the real validator rather than by inspecting the schema."""
+    the real validator rather than by inspecting the schema.
+
+    Both tests assert **zero** persistent views of any name, so they cover
+    `copies_live` with no edit — adding a second TEMP view changes neither
+    assertion, and making either view persistent reds both.
+    """
 
     def _align_paths(self, monkeypatch):
         import app.config as config

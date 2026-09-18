@@ -429,3 +429,372 @@ def test_both_fixture_files_appear_in_output(tmp_path):
     violations = check_items_live.find_violations(tmp_path)
     assert any("one.py" in v for v in violations)
     assert any("two.py" in v for v in violations)
+
+
+# --- item_copies -> copies_live (T2 of the soft-delete-copies-seam plan) ---
+#
+# The tests below pin find_copy_violations()/copy_allowlist_mismatches(),
+# the item_copies twin of find_violations()/allowlist_mismatches() above.
+# They share the same _normalise_file/_spanning machinery (see
+# check_items_live.py's `_find_violations`/`_allowlist_mismatches` helpers),
+# so most of the mutations that would red these are the same mutations that
+# red the items-side pins above — each docstring below says which.
+
+
+def test_copies_census_has_no_allowlist_mismatches():
+    """The copies allowlist DOES gate main() from this task onward, even
+    though the copies violation census itself does not yet (see the module
+    docstring). Every COPIES_ALLOWLIST entry must span exactly the read
+    count declared beside it, against the real app/ tree, today.
+    """
+    mismatches = check_items_live.copy_allowlist_mismatches()
+    assert not mismatches, "\n" + "\n".join(mismatches)
+
+
+def test_catches_copies_from_join_and_lowercase_shapes(tmp_path):
+    """The item_copies twin of test_catches_from_join_and_lowercase_shapes:
+    `FROM item_copies`, `JOIN item_copies`, `LEFT JOIN item_copies c`, and
+    lowercase `from item_copies`.
+
+    Mutation -> pin: verified by hand — dropping `re.I` from `_COPIES_READ`
+    reds only the lowercase case (2/4 hits survive); narrowing the
+    `(FROM|JOIN)` alternation to `FROM` only reds the `JOIN` and `LEFT JOIN`
+    cases.
+    """
+    _write_tree(tmp_path, {
+        "app/routers/basic_copies.py": (
+            'def f(db):\n'
+            '    db.execute("SELECT * FROM item_copies WHERE id = ?")\n'
+            '    db.execute("SELECT c.id FROM items i JOIN item_copies c ON c.item_id = i.id")\n'
+            '    db.execute("SELECT * FROM items i LEFT JOIN item_copies c ON c.item_id = i.id")\n'
+            '    db.execute("select * from item_copies where id = ?")\n'
+        ),
+    })
+    violations = check_items_live.find_copy_violations(tmp_path)
+    assert len(violations) == 4
+    for line in (2, 3, 4, 5):
+        assert any(f"basic_copies.py:{line}" in v for v in violations), (line, violations)
+
+
+def test_catches_copies_adjacent_literal_split(tmp_path):
+    """The item_copies twin of test_catches_adjacent_literal_split: a
+    statement split across two adjacent plain string literals,
+    `"SELECT id FROM " "item_copies WHERE id = ?"`.
+
+    Mutation -> pin: verified by hand — joining `buf_parts` with `"".join`
+    instead of `" ".join` in `_normalise_file` glues the two fragments into
+    `...FROMitem_copies...`, breaking the `\b` boundary between `FROM` and
+    `item_copies`, and this pin reds.
+    """
+    _write_tree(tmp_path, {
+        "app/routers/split_copies.py": (
+            'def f(db):\n'
+            '    db.execute(\n'
+            '        "SELECT id FROM "\n'
+            '        "item_copies WHERE id = ?"\n'
+            '    )\n'
+        ),
+    })
+    violations = check_items_live.find_copy_violations(tmp_path)
+    assert len(violations) == 1
+    assert "split_copies.py:3" in violations[0]
+
+
+def test_catches_copies_fstring_prefix(tmp_path):
+    """Pins the f-string-fragment shape from app/routers/items.py:901,
+    ported to item_copies: `f"{sql} AS x " f"FROM item_copies c "`.
+
+    Mutation -> pin: removing the `_STRING_PREFIX_QUOTE` strip step (leaving
+    only the bare-quote strip) turns `f"FROM item_copies c "` into
+    `fFROM item_copies c`, and `\\bFROM` no longer matches since `f` and `F`
+    are both word characters with no boundary between them — the same
+    regression the items-side fstring pin catches, exercised here against
+    `_COPIES_READ` instead of `_ITEMS_READ`.
+    """
+    _write_tree(tmp_path, {
+        "app/routers/fsplit_copies.py": (
+            'def f(db, sql):\n'
+            '    copies = db.execute(\n'
+            '        f"{sql} AS x "\n'
+            '        f"FROM item_copies c "\n'
+            '        "WHERE 1=1"\n'
+            '    ).fetchall()\n'
+        ),
+    })
+    violations = check_items_live.find_copy_violations(tmp_path)
+    assert len(violations) == 1
+    assert "fsplit_copies.py:4" in violations[0]
+
+
+def test_ignores_delete_and_copies_live(tmp_path):
+    """Pins the excluded shapes for the copies pattern: `DELETE FROM
+    item_copies ...` (a write, stays on the physical table) and
+    `FROM copies_live c` (the view itself — `\\b` does not split on `_`).
+
+    Mutation -> pin: dropping the `(?<!DELETE )` lookbehind from
+    `_COPIES_READ` reds the DELETE line; `copies_live` needs no mutation to
+    prove wrong (it is pinned as a guard against a future rewrite that stops
+    using `\\b`), same reasoning as the items-side ignore test.
+    """
+    _write_tree(tmp_path, {
+        "app/routers/ignores_copies.py": (
+            'def f(db):\n'
+            '    db.execute("DELETE FROM item_copies WHERE id = ?")\n'
+            '    db.execute("SELECT * FROM copies_live c")\n'
+        ),
+    })
+    violations = check_items_live.find_copy_violations(tmp_path)
+    assert violations == []
+
+
+def test_copies_allowlist_suppresses_a_from_read_directly_before_its_own_statement(
+    tmp_path,
+):
+    """Adjacency pin 1/4: a non-allowlisted `FROM item_copies` read on the
+    line directly BEFORE the real COPIES_ALLOWLIST entry for
+    app/database.py's copies_live view CREATE. The allowlist entry must not
+    excuse its neighbour.
+
+    Mutation -> pin: verified by hand — replacing `_spanning`'s match-extent
+    check with a plain `sub in buf` test (the pre-fix ±200/300-char window
+    equivalent) makes the allowlisted substring wrongly suppress the
+    neighbour too, dropping violations from 1 to 0.
+    """
+    content = (
+        'def f(db):\n'
+        '    db.execute("SELECT id FROM item_copies WHERE id = ?")\n'
+        '    conn.execute("SELECT c.* FROM item_copies c JOIN items i ON i.id = c.item_id")\n'
+    )
+    _write_tree(tmp_path, {"app/database.py": content})
+    violations = check_items_live.find_copy_violations(tmp_path)
+    assert len(violations) == 1, violations
+    assert "database.py:2:" in violations[0]
+
+
+def test_copies_allowlist_suppresses_a_from_read_directly_after_its_own_statement(
+    tmp_path,
+):
+    """Adjacency pin 2/4: same shape, reversed order — the non-allowlisted
+    `FROM item_copies` read comes directly AFTER the allowlisted statement.
+
+    Mutation -> pin: verified by hand — the restored window check reds this
+    one too (the pre-fix window was asymmetric, so both orders need pinning
+    independently — see the items-side pin pair this mirrors).
+    """
+    content = (
+        'def f(db):\n'
+        '    conn.execute("SELECT c.* FROM item_copies c JOIN items i ON i.id = c.item_id")\n'
+        '    db.execute("SELECT id FROM item_copies WHERE id = ?")\n'
+    )
+    _write_tree(tmp_path, {"app/database.py": content})
+    violations = check_items_live.find_copy_violations(tmp_path)
+    assert len(violations) == 1, violations
+    assert "database.py:3:" in violations[0]
+
+
+def test_copies_allowlist_suppresses_a_join_read_directly_before_its_own_statement(
+    tmp_path,
+):
+    """Adjacency pin 3/4: the JOIN twin of pin 1/4 — a non-allowlisted
+    `JOIN item_copies` read directly BEFORE the allowlisted statement.
+
+    Mutation -> pin: same as pin 1/4 — restoring a proximity-window
+    `_spanning` implementation reds this.
+    """
+    content = (
+        'def f(db):\n'
+        '    db.execute("SELECT * FROM checkouts x JOIN item_copies c ON c.id = x.copy_id")\n'
+        '    conn.execute("SELECT c.* FROM item_copies c JOIN items i ON i.id = c.item_id")\n'
+    )
+    _write_tree(tmp_path, {"app/database.py": content})
+    violations = check_items_live.find_copy_violations(tmp_path)
+    assert len(violations) == 1, violations
+    assert "database.py:2:" in violations[0]
+
+
+def test_copies_allowlist_suppresses_a_join_read_directly_after_its_own_statement(
+    tmp_path,
+):
+    """Adjacency pin 4/4: the JOIN twin of pin 2/4 — a non-allowlisted
+    `JOIN item_copies` read directly AFTER the allowlisted statement.
+
+    Mutation -> pin: same as pin 2/4 — restoring a proximity-window
+    `_spanning` implementation reds this. This is the load-bearing
+    requirement this task calls out: all four orders/keywords must be
+    pinned independently, since a proximity window can pass one shape while
+    failing another.
+    """
+    content = (
+        'def f(db):\n'
+        '    conn.execute("SELECT c.* FROM item_copies c JOIN items i ON i.id = c.item_id")\n'
+        '    db.execute("SELECT * FROM checkouts x JOIN item_copies c ON c.id = x.copy_id")\n'
+    )
+    _write_tree(tmp_path, {"app/database.py": content})
+    violations = check_items_live.find_copy_violations(tmp_path)
+    assert len(violations) == 1, violations
+    assert "database.py:3:" in violations[0]
+
+
+def test_copies_allowlist_mismatches_reports_a_substring_the_code_no_longer_produces(
+    tmp_path,
+):
+    """The item_copies twin of
+    test_allowlist_mismatches_reports_a_substring_the_code_no_longer_produces:
+    a real COPIES_ALLOWLIST substring that spans no hit in an empty tree is
+    reported as stale.
+
+    Mutation -> pin: verified by hand — replacing the `got != want` test
+    with `False` (nothing is ever reported) reds this pin.
+    """
+    _write_tree(tmp_path, {"app/__init__.py": "\n"})
+    mismatches = check_items_live.copy_allowlist_mismatches(tmp_path)
+    assert any(
+        "app/database.py" in s
+        and "SELECT c.* FROM item_copies c JOIN items i ON i.id = c.item_id" in s
+        for s in mismatches
+    )
+
+
+def test_copies_allowlist_mismatches_reports_a_read_riding_along_inside_an_entry(
+    tmp_path, monkeypatch
+):
+    """The item_copies twin of
+    test_allowlist_mismatches_reports_a_read_riding_along_inside_an_entry: an
+    entry that spans MORE reads than it declares (a new direct read written
+    inside text an existing entry already covers).
+
+    Mutation -> pin: verified by hand — narrowing the check to the stale
+    case only (`if got == 0`) leaves this pin red-free and it fails.
+    """
+    monkeypatch.setitem(
+        check_items_live.COPIES_ALLOWLIST,
+        "app/ride_copies.py",
+        {"SELECT id FROM item_copies WHERE legacy = 1": 1},
+    )
+    _write_tree(tmp_path, {
+        "app/ride_copies.py": (
+            'def f(db):\n'
+            '    db.execute("SELECT id FROM item_copies WHERE legacy = 1")\n'
+            '    db.execute("SELECT id FROM item_copies WHERE legacy = 1")\n'
+        ),
+    })
+    assert check_items_live.find_copy_violations(tmp_path) == []
+    mismatches = check_items_live.copy_allowlist_mismatches(tmp_path)
+    assert any(
+        "app/ride_copies.py" in s and "spans 2 read(s), expected 1" in s
+        for s in mismatches
+    ), mismatches
+
+
+def test_copies_allowlist_does_not_exempt_by_basename(tmp_path):
+    """G88 pin: a fixture at app/routers/item_copies.py is NOT exempted by a
+    COPIES_ALLOWLIST entry keyed on app/services/item_copies.py — the real
+    allowlist has both paths as separate keys, and this proves neither
+    excuses the other.
+
+    The fixture statement here is the exact text of the real
+    app/services/item_copies.py entry for sync_primary_location's next
+    copy_number read (`SELECT COALESCE(MAX(copy_number), 0) + 1 AS n FROM
+    item_copies WHERE item_id = ?`) — chosen deliberately so a basename-keyed
+    bypass would have *something* to wrongly match against, rather than a
+    fixture text that would go unreported regardless of the bug (which
+    proves nothing).
+
+    Mutation -> pin: verified by hand — changing the allowlist lookup in
+    `_find_violations` from `allowlist.get(rel, {})` to `allowlist.get(path.name,
+    {})` (basename instead of full repo-relative path) and re-keying
+    COPIES_ALLOWLIST's app/services/item_copies.py entries onto the bare
+    name `item_copies.py` makes this fixture's read at
+    app/routers/item_copies.py wrongly inherit the services file's
+    allowlist by basename, and the pin reds — this is exactly the issue
+    #116 bypass G88 documents.
+    """
+    _write_tree(tmp_path, {
+        "app/routers/item_copies.py": (
+            'def f(db):\n'
+            '    db.execute(\n'
+            '        "SELECT COALESCE(MAX(copy_number), 0) + 1 AS n "\n'
+            '        "FROM item_copies WHERE item_id = ?"\n'
+            '    )\n'
+        ),
+    })
+    violations = check_items_live.find_copy_violations(tmp_path)
+    assert len(violations) == 1
+    assert "app/routers/item_copies.py:4" in violations[0]
+
+
+# --- T6: main() now fails the build on a copies violation, not just an
+# allowlist mismatch — census-zero contract + main() exit-code pins ---
+
+
+def test_every_copy_read_goes_through_copies_live():
+    """The item_copies twin of test_every_read_goes_through_items_live — the
+    census-zero contract, run against the real app/ tree (not a tmp_path
+    fixture). T3-T5 of this plan repointed every non-exempt direct read of
+    item_copies onto copies_live, driving the census to 0; this is the gate
+    that keeps it there going forward — a new direct read of item_copies
+    anywhere in app/ reds this test (and, from this task onward, main() /
+    `make check-deleted`) rather than shipping unnoticed.
+    """
+    violations = check_items_live.find_copy_violations()
+    assert not violations, "\n" + "\n".join(violations)
+
+
+def test_copy_allowlist_entries_span_exactly_their_declared_read_count():
+    """The item_copies twin of
+    test_allowlist_entries_span_exactly_their_declared_read_count. Every
+    entry in the real COPIES_ALLOWLIST must span exactly the number of reads
+    declared beside it — 0 is the stale case (an entry the code no longer
+    produces, silently over-permissive), and more than declared is the
+    ride-along case (a new direct read written inside text an existing entry
+    already covers). Both must fail the suite, not sit there unused.
+    """
+    mismatches = check_items_live.copy_allowlist_mismatches()
+    assert not mismatches, "\n" + "\n".join(mismatches)
+
+
+def test_main_reports_a_copy_violation_and_exits_non_zero(capsys, monkeypatch):
+    """The item_copies twin of test_main_reports_a_violation_and_exits_non_zero.
+    This is the pin that proves main() actually fails the build on a copies
+    violation now, not just reports it as an informational census line (the
+    pre-T6 behaviour) — flip the `copy_violations` term out of main()'s
+    `if violations or mismatches or copy_violations or copy_mismatches:`
+    condition, or drop the `find_copy_violations()` call entirely, and this
+    reds while every other test in this file (including the census-zero
+    contract above, which calls find_copy_violations() directly rather than
+    through main()) stays green.
+    """
+    sentinel = "SENTINEL copies_live violation"
+    monkeypatch.setattr(check_items_live, "find_violations", lambda *a, **k: [])
+    monkeypatch.setattr(check_items_live, "allowlist_mismatches", lambda *a, **k: [])
+    monkeypatch.setattr(
+        check_items_live, "find_copy_violations", lambda *a, **k: [sentinel]
+    )
+    monkeypatch.setattr(
+        check_items_live, "copy_allowlist_mismatches", lambda *a, **k: []
+    )
+    assert check_items_live.main() == 1
+    assert sentinel in capsys.readouterr().out
+
+
+def test_main_reports_a_copy_allowlist_mismatch_and_exits_non_zero(
+    capsys, monkeypatch
+):
+    """The item_copies twin of
+    test_main_reports_an_allowlist_mismatch_and_exits_non_zero — a clean
+    copies violation census is not enough to exit 0 if a COPIES_ALLOWLIST
+    entry no longer spans what it declares. Dropping the
+    copy_allowlist_mismatches() call, or its term, from main()'s failure
+    condition reds this while leaving the copy-violation pin above green.
+    """
+    sentinel = "SENTINEL copies allowlist mismatch"
+    monkeypatch.setattr(check_items_live, "find_violations", lambda *a, **k: [])
+    monkeypatch.setattr(check_items_live, "allowlist_mismatches", lambda *a, **k: [])
+    monkeypatch.setattr(
+        check_items_live, "find_copy_violations", lambda *a, **k: []
+    )
+    monkeypatch.setattr(
+        check_items_live, "copy_allowlist_mismatches", lambda *a, **k: [sentinel]
+    )
+    assert check_items_live.main() == 1
+    assert sentinel in capsys.readouterr().out
