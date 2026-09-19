@@ -408,6 +408,29 @@ class TestBookShapedControls:
         assert self.HEADING not in viewer_client.get(f"/item/{item_id}").text
 
 
+class TestFetchSynopsisControl:
+    """The "Fetch synopsis" button (T6) renders only for the synopsis
+    media-type set — `synopsis_media_types`, not `book_media_types` — so
+    comics and manga, which the metadata sources can't answer for, don't
+    get an offer that always fails. Asserted on the element (`data-testid`),
+    never on its prose, per G69."""
+
+    TESTID = 'data-testid="fetch-synopsis"'
+
+    def test_a_book_with_no_description_offers_it(self, editor_client, db):
+        item_id = _insert_item(db, title="No Synopsis Yet", isbn=None, media_type="book")
+        db.commit()
+
+        assert self.TESTID in editor_client.get(f"/item/{item_id}").text
+
+    @pytest.mark.parametrize("media_type", ["comic", "manga"])
+    def test_a_comic_or_manga_does_not_offer_it(self, editor_client, db, media_type):
+        item_id = _insert_item(db, title="No Synopsis Comic", isbn=None, media_type=media_type)
+        db.commit()
+
+        assert self.TESTID not in editor_client.get(f"/item/{item_id}").text
+
+
 class TestLinkedItemsAreFormatOnly:
     """"Also available as:" claims the target is the same content in another
     format. media_groups.link_items() also writes 'related' and 'adaptation'

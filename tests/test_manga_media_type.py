@@ -16,7 +16,7 @@ def test_manga_is_a_first_class_book_family_media_type():
 
 def test_manga_does_not_enable_generic_synopsis_backfill():
     """Treat Manga like Comic for synopsis until provider coverage justifies it."""
-    assert "manga" not in synopsis.BOOK_MEDIA_TYPES
+    assert "manga" not in synopsis.SYNOPSIS_MEDIA_TYPES
 
 
 def test_isbn_scan_preserves_an_explicit_manga_choice():

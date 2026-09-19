@@ -403,6 +403,10 @@ document.addEventListener('alpine:init', function () {
             var stored = '';
             try {
                 stored = localStorage.getItem('shelf_media_type') || '';
+                if (stored === 'kids_book') {
+                    stored = 'book';
+                    localStorage.setItem('shelf_media_type', stored);
+                }
             } catch (e) {
                 stored = '';
             }

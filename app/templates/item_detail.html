@@ -110,10 +110,11 @@
                             x-text="expanded ? 'Show less' : 'Read more'"></button>
                     {% endif %}
                 </div>
-                {% elif user and user.role in ('admin', 'editor') and item.media_type in ('book', 'ebook', 'audiobook', 'kids_book') %}
+                {% elif user and user.role in ('admin', 'editor') and item.media_type in synopsis_media_types %}
                 <div class="mb-6" x-data="synopsisFetcher" data-item-id="{{ item.id }}">
                     <button @click="fetchSynopsis"
                             :disabled="fetching"
+                            data-testid="fetch-synopsis"
                             class="inline-flex items-center gap-1 px-3 py-1.5 bg-shelf-hover text-shelf-muted rounded-lg text-sm hover:bg-shelf-border hover:text-shelf-text transition-colors disabled:opacity-50">
                         <span x-show="!fetching">Fetch synopsis</span>
                         <span x-show="fetching">Searching&hellip;</span>

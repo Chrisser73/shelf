@@ -8,7 +8,12 @@ IntegrityError instead.
 
 import pytest
 
-from tests.conftest import _insert_borrower, _insert_item, _insert_location
+from tests.conftest import (
+    _assert_ownership_partition,
+    _insert_borrower,
+    _insert_item,
+    _insert_location,
+)
 
 
 def _tag(db, item_id, name):
@@ -245,3 +250,71 @@ class TestRoleGating:
         resp = client.post("/api/items/merge", json={"keep_id": keep, "merge_ids": [other]})
         assert resp.status_code == 403
         assert db.execute("SELECT 1 FROM items WHERE id = ?", (other,)).fetchone() is not None
+
+
+class TestWishlistMembershipSurvivesAMerge:
+    """The live defect this plan closes (#86's seventh child table).
+
+    `reparent_children` covered six of the child tables and not `list_items`,
+    so merging a wishlisted row into another row silently dropped the want —
+    in the merge route today, and irreversibly in the boot-time kids_book
+    rewrite that lands next.
+    """
+
+    def _wishlist(self, db, item_id):
+        db.execute(
+            "INSERT OR IGNORE INTO list_items (list_id, item_id) "
+            "SELECT id, ? FROM lists WHERE slug = 'wishlist'",
+            (item_id,),
+        )
+
+    def _is_wishlisted(self, db, item_id):
+        return db.execute(
+            "SELECT 1 FROM list_items li JOIN lists l ON l.id = li.list_id "
+            "WHERE l.slug = 'wishlist' AND li.item_id = ?",
+            (item_id,),
+        ).fetchone() is not None
+
+    def test_merging_a_wishlisted_row_keeps_the_want_on_an_unowned_keeper(
+        self, admin_client, db
+    ):
+        keep = _insert_item(db, title="Keep", isbn=None, owned=0)
+        other = _insert_item(db, title="Other", isbn=None, owned=0)
+        self._wishlist(db, other)
+        db.commit()
+
+        assert _merge(admin_client, keep, [other]) == {"ok": True, "merged": 1}
+
+        assert self._is_wishlisted(db, keep), (
+            "the merged row's wishlist membership must move onto the kept "
+            "row — before this it was dropped with the cascade"
+        )
+
+    def test_an_owned_keeper_sheds_the_inherited_want(self, admin_client, db):
+        """`owned = 1` never coexists with wishlist membership."""
+        keep = _insert_item(db, title="Keep", isbn=None, owned=1)
+        other = _insert_item(db, title="Other", isbn=None, owned=0)
+        self._wishlist(db, other)
+        db.commit()
+
+        assert _merge(admin_client, keep, [other]) == {"ok": True, "merged": 1}
+
+        assert not self._is_wishlisted(db, keep)
+        _assert_ownership_partition(db)
+
+    def test_a_list_both_rows_are_on_collapses_to_one_row(self, admin_client, db):
+        keep = _insert_item(db, title="Keep", isbn=None, owned=0)
+        other = _insert_item(db, title="Other", isbn=None, owned=0)
+        self._wishlist(db, keep)
+        self._wishlist(db, other)
+        db.commit()
+
+        assert _merge(admin_client, keep, [other]) == {"ok": True, "merged": 1}
+
+        rows = db.execute(
+            "SELECT COUNT(*) AS c FROM list_items WHERE item_id = ?", (keep,)
+        ).fetchone()["c"]
+        assert rows == 1, "PRIMARY KEY (list_id, item_id) — no duplicate row"
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM list_items WHERE item_id = ?", (other,)
+        ).fetchone()["c"] == 0

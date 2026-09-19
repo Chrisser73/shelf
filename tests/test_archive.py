@@ -164,7 +164,9 @@ class TestBuildArchive:
 
         # locations/tags/borrowers by name
         assert library["locations"] == [{"name": "Living Room", "sort_order": 0}]
-        assert library["tags"] == [{"name": "sci-fi"}]
+        # `media_type` rides on every tag, null for a global one — absent
+        # and null are deliberately one answer here (the scope is advisory).
+        assert library["tags"] == [{"name": "sci-fi", "media_type": None}]
         assert library["borrowers"] == [{"name": "Alex"}]
 
         # series
@@ -2837,3 +2839,368 @@ class TestWishlistRoundTripFidelity:
             "SELECT id FROM items WHERE title = 'Wanted Book'"
         ).fetchone()
         assert lists.is_member(db, lists.WISHLIST, restored["id"])
+
+
+def _rewrite_library(path, mutate):
+    """Rewrite an archive's library.json through `mutate`, in place.
+
+    The pattern `test_an_archive_predating_the_dismissal_column_still_imports`
+    uses, factored out so the kids_book and scope tests can each hand-build
+    the shape an older Shelf would have written.
+    """
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        blobs = {n: zf.read(n) for n in names}
+    library = json.loads(blobs["library.json"])
+    mutate(library)
+    blobs["library.json"] = json.dumps(library).encode()
+    with zipfile.ZipFile(path, "w") as zf:
+        for n in names:
+            zf.writestr(n, blobs[n])
+    return path
+
+
+class TestTagScopeRoundTrip:
+    def test_a_scoped_tag_survives_export_and_import(self, db):
+        item_id = _insert_item(db, title="Scoped", isbn=None, media_type="book")
+        db.execute("INSERT INTO tags (name, media_type) VALUES ('Cookbook', 'book')")
+        tag_id = db.execute("SELECT id FROM tags WHERE name = 'Cookbook'").fetchone()["id"]
+        db.execute("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?)", (item_id, tag_id))
+        db.execute("COMMIT")
+        path = build_archive(db)
+        _wipe_library(db)
+
+        with read_archive(path) as reader:
+            merge_archive(db, reader, mode="skip")
+        db.execute("COMMIT")
+
+        assert db.execute(
+            "SELECT media_type FROM tags WHERE name = 'Cookbook'"
+        ).fetchone()["media_type"] == "book"
+
+    def test_an_existing_tags_scope_is_not_overwritten(self, db):
+        """`_get_or_create_by_name` never touches an existing row's other
+        columns, and the archive's scope must not be an exception."""
+        item_id = _insert_item(db, title="Scoped", isbn=None, media_type="book")
+        db.execute("INSERT INTO tags (name, media_type) VALUES ('Cookbook', 'book')")
+        tag_id = db.execute("SELECT id FROM tags WHERE name = 'Cookbook'").fetchone()["id"]
+        db.execute("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?)", (item_id, tag_id))
+        db.execute("COMMIT")
+        path = build_archive(db)
+
+        # The local tag is global; the archive says `book`. Local wins.
+        db.execute("UPDATE tags SET media_type = NULL WHERE id = ?", (tag_id,))
+        db.execute("COMMIT")
+
+        with read_archive(path) as reader:
+            merge_archive(db, reader, mode="update")
+        db.execute("COMMIT")
+
+        assert db.execute(
+            "SELECT media_type FROM tags WHERE name = 'Cookbook'"
+        ).fetchone()["media_type"] is None
+
+    def test_an_archive_without_the_scope_key_still_imports(self, db):
+        """Every archive written before this release lacks it entirely."""
+        item_id = _insert_item(db, title="Old Archive", isbn=None, media_type="book")
+        db.execute("INSERT INTO tags (name) VALUES ('sci-fi')")
+        tag_id = db.execute("SELECT id FROM tags WHERE name = 'sci-fi'").fetchone()["id"]
+        db.execute("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?)", (item_id, tag_id))
+        db.execute("COMMIT")
+        path = build_archive(db)
+
+        def strip_scope(library):
+            for tag in library["tags"]:
+                tag.pop("media_type", None)
+            assert "media_type" not in library["tags"][0]
+
+        _rewrite_library(path, strip_scope)
+        _wipe_library(db)
+
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader, mode="skip")
+        db.execute("COMMIT")
+
+        assert report["errors"] == []
+        row = db.execute("SELECT media_type FROM tags WHERE name = 'sci-fi'").fetchone()
+        assert row is not None and row["media_type"] is None
+
+    def test_an_unknown_scope_value_imports_as_global(self, db):
+        item_id = _insert_item(db, title="Odd Scope", isbn=None, media_type="book")
+        db.execute("INSERT INTO tags (name) VALUES ('sci-fi')")
+        tag_id = db.execute("SELECT id FROM tags WHERE name = 'sci-fi'").fetchone()["id"]
+        db.execute("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?)", (item_id, tag_id))
+        db.execute("COMMIT")
+        path = build_archive(db)
+
+        def bad_scope(library):
+            for tag in library["tags"]:
+                tag["media_type"] = "not_a_media_type"
+
+        _rewrite_library(path, bad_scope)
+        _wipe_library(db)
+
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader, mode="skip")
+        db.execute("COMMIT")
+
+        assert report["errors"] == []
+        assert db.execute(
+            "SELECT media_type FROM tags WHERE name = 'sci-fi'"
+        ).fetchone()["media_type"] is None
+
+
+class TestTheRetiredKidsBookAliasInAnArchive:
+    """An archive written by an older Shelf can still say `kids_book`."""
+
+    def _aged(self, db, *, media_type="kids_book", tags=None, **kw):
+        """Build an archive, then rewrite one item to the retired type."""
+        _insert_item(db, title="The Kids Book", media_type="book", **kw)
+        if tags:
+            item_id = db.execute(
+                "SELECT id FROM items WHERE title = 'The Kids Book'"
+            ).fetchone()["id"]
+            for name in tags:
+                db.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (name,))
+                tid = db.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()["id"]
+                db.execute(
+                    "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
+                    (item_id, tid),
+                )
+        db.execute("COMMIT")
+        path = build_archive(db)
+
+        def age(library):
+            for item in library["items"]:
+                if item["title"] == "The Kids Book":
+                    item["media_type"] = media_type
+
+        _rewrite_library(path, age)
+        return path
+
+    def test_it_is_planned_and_applied_as_book_plus_kids(self, db):
+        path = self._aged(db, isbn="9789000040018")
+        _wipe_library(db)
+
+        with read_archive(path) as reader:
+            plan = plan_archive(db, reader, mode="skip")
+            verdicts = {r["title"]: r["verdict"] for r in plan["items"]}
+            assert verdicts["The Kids Book"] == "create"
+            apply_plan(db, reader, plan)
+        db.execute("COMMIT")
+
+        row = db.execute(
+            "SELECT id, media_type FROM items WHERE title = 'The Kids Book'"
+        ).fetchone()
+        assert row["media_type"] == "book"
+        names = {
+            r["name"] for r in db.execute(
+                "SELECT t.name FROM tags t JOIN item_tags it ON it.tag_id = t.id "
+                "WHERE it.item_id = ?", (row["id"],)
+            )
+        }
+        assert "Kids" in names
+
+    def test_an_item_already_tagged_kids_gets_one_association(self, db):
+        """The create path inserts associations; two spellings of one tag
+        would collide on the primary key and leave a half-written record."""
+        path = self._aged(db, isbn="9789000040025", tags=["kids"])
+        _wipe_library(db)
+
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader, mode="skip")
+        db.execute("COMMIT")
+
+        assert report["errors"] == []
+        item_id = db.execute(
+            "SELECT id FROM items WHERE title = 'The Kids Book'"
+        ).fetchone()["id"]
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM item_tags WHERE item_id = ?", (item_id,)
+        ).fetchone()["c"] == 1
+
+    def _twin_archive(self, db, *, isbn=None, upc=None):
+        """An archive holding `kids_book` X *and* `book` X — the shape an
+        older Shelf could legitimately have written."""
+        _insert_item(db, title="The Book", isbn=isbn, upc=upc, media_type="book")
+        _insert_item(db, title="The Kids Book", isbn=None, upc=None, media_type="book")
+        db.execute("COMMIT")
+        path = build_archive(db)
+
+        def age(library):
+            for item in library["items"]:
+                if item["title"] == "The Kids Book":
+                    item["media_type"] = "kids_book"
+                    item["isbn"] = isbn
+                    item["upc"] = upc
+
+        _rewrite_library(path, age)
+        return path
+
+    @pytest.mark.parametrize(
+        "kwargs", [{"isbn": "9789000040032"}, {"upc": "0012345678905"}]
+    )
+    def test_an_intra_archive_twin_is_refused_in_plan_and_apply(self, db, kwargs):
+        """Canonicalised, both members occupy one identity slot. The dedupe
+        lookup is bounded to pre-import rows, so the second insert would
+        raise — after the location get-or-create had already written."""
+        path = self._twin_archive(db, **kwargs)
+        _wipe_library(db)
+
+        with read_archive(path) as reader:
+            plan = plan_archive(db, reader, mode="skip")
+            planned_titles = {r["title"] for r in plan["items"]}
+            assert "The Kids Book" not in planned_titles
+            assert "The Book" in planned_titles
+            assert any("The Kids Book" in e for e in plan["summary"]["errors"])
+
+            report = apply_plan(db, reader, plan)
+        db.execute("COMMIT")
+
+        assert any("The Kids Book" in e for e in report["errors"])
+        # Assert on the database, not the response: nothing of the refused
+        # record may be left behind.
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE title = 'The Kids Book'"
+        ).fetchone()["c"] == 0
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE title = 'The Book'"
+        ).fetchone()["c"] == 1
+
+    def test_a_string_id_pair_is_refused_without_taking_down_the_plan(
+        self, db, tmp_path
+    ):
+        """A hand-made archive numbers its items however it likes — `_ref_key`
+        says so. The collision pre-scan must key on that, not on `int()`,
+        which raises outside the per-item `try` and turns one bad record into
+        a failed import."""
+        library = {"items": [
+            {"id": "kid-1", "title": "The Kids Book",
+             "isbn": "9789000041008", "media_type": "kids_book"},
+            {"id": "book-1", "title": "The Book",
+             "isbn": "9789000041008", "media_type": "book"},
+        ]}
+        path = _zip_for(tmp_path, library)
+
+        with read_archive(path) as reader:
+            plan = plan_archive(db, reader, mode="skip")
+            assert {r["title"] for r in plan["items"]} == {"The Book"}
+            assert any("The Kids Book" in e for e in plan["summary"]["errors"])
+            report = apply_plan(db, reader, plan)
+        db.execute("COMMIT")
+
+        assert any("The Kids Book" in e for e in report["errors"])
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE title = 'The Book'"
+        ).fetchone()["c"] == 1
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE title = 'The Kids Book'"
+        ).fetchone()["c"] == 0
+
+    def test_string_ids_with_no_collision_still_import(self, db, tmp_path):
+        """Nothing about the pre-scan may narrow what a string-id archive can
+        do: with no aliased pair it refuses nothing at all, and both rows land.
+
+        `report["errors"]` is deliberately not asserted empty. `apply_plan`
+        still writes `id_map[int(archive_id)]`, which raises on a string id
+        and is caught per item — a **pre-existing** seam (identical on
+        `main`), unrelated to the retired-type pre-scan this class covers.
+        Its only effect is that such an item's reading log and checkouts do
+        not re-attach; the item itself imports.
+        """
+        library = {"items": [
+            {"id": "a", "title": "One", "isbn": "9789000041008",
+             "media_type": "book"},
+            {"id": "b", "title": "Two", "isbn": "9789000041015",
+             "media_type": "kids_book"},
+        ]}
+        with read_archive(_zip_for(tmp_path, library)) as reader:
+            plan = plan_archive(db, reader, mode="skip")
+            assert {r["title"] for r in plan["items"]} == {"One", "Two"}
+            assert plan["summary"]["errors"] == []
+            apply_plan(db, reader, plan)
+        db.execute("COMMIT")
+
+        # Both landed, and the aliased one still became a book with the tag.
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items"
+        ).fetchone()["c"] == 2
+        assert db.execute(
+            "SELECT media_type FROM items WHERE title = 'Two'"
+        ).fetchone()["media_type"] == "book"
+
+    def test_a_float_id_is_not_the_same_slot_as_the_int_beside_it(
+        self, db, tmp_path
+    ):
+        """`int(1.0) == int(1)`, so keying the refusal by `int()` would refuse
+        the keeper along with the aliased member and import nothing."""
+        library = {"items": [
+            {"id": 1.0, "title": "The Kids Book",
+             "isbn": "9789000041008", "media_type": "kids_book"},
+            {"id": 1, "title": "The Book",
+             "isbn": "9789000041008", "media_type": "book"},
+        ]}
+        with read_archive(_zip_for(tmp_path, library)) as reader:
+            plan = plan_archive(db, reader, mode="skip")
+            assert {r["title"] for r in plan["items"]} == {"The Book"}
+            apply_plan(db, reader, plan)
+        db.execute("COMMIT")
+
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE title = 'The Book'"
+        ).fetchone()["c"] == 1
+
+    def test_a_plain_duplicate_pair_is_left_alone(self, db):
+        """Two `book` rows sharing an identity are not this plan's doing, and
+        the archive is a faithful copy rather than a de-duplicator."""
+        _insert_item(db, title="First", isbn="9789000040049", media_type="book")
+        db.execute("COMMIT")
+        path = build_archive(db)
+
+        def twin(library):
+            clone = dict(library["items"][0])
+            clone["id"] = 9999
+            clone["title"] = "Second"
+            library["items"].append(clone)
+
+        _rewrite_library(path, twin)
+        _wipe_library(db)
+
+        with read_archive(path) as reader:
+            plan = plan_archive(db, reader, mode="skip")
+
+        titles = {r["title"] for r in plan["items"]}
+        assert {"First", "Second"} <= titles
+
+    def test_plan_and_apply_classify_an_aliased_item_identically(self, db):
+        """The parity contract: the archive has no pydantic model for this,
+        so plan and apply must read the media type through one helper.
+
+        With a matching `book` row already present, a plan that classified on
+        the *raw* `kids_book` finds no match and says `create`, while apply
+        canonicalises first and finds one — the two stages then disagree
+        about the same item, which is the drift the shared helper prevents.
+        """
+        isbn = "9789000040056"
+        path = self._aged(db, isbn=isbn)
+        _wipe_library(db)
+        # The row the archive's item canonicalises onto, already here.
+        _insert_item(db, title="The Book", isbn=isbn, media_type="book")
+        db.execute("COMMIT")
+
+        with read_archive(path) as reader:
+            plan = plan_archive(db, reader, mode="skip")
+            verdicts = {r["title"]: r["verdict"] for r in plan["items"]}
+            assert verdicts["The Kids Book"] == "skip", (
+                "the plan must see the existing book row — it can only do "
+                "that if it canonicalised the archive's media type first"
+            )
+            report = apply_plan(db, reader, plan)
+        # db.commit(), not COMMIT: a skip-only apply writes nothing, so there
+        # may be no transaction open to commit.
+        db.commit()
+
+        assert report["errors"] == []
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE isbn = ?", (isbn,)
+        ).fetchone()["c"] == 1, "no second row may be created"

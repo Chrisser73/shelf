@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import _insert_item
+from tests.conftest import _assert_ownership_partition, _insert_item
 
 from app.services.lists import (
     WISHLIST,
@@ -22,6 +22,7 @@ from app.services.lists import (
     is_member,
     list_id,
     remove,
+    reparent,
     set_membership,
 )
 
@@ -95,17 +96,23 @@ class TestSingleWritePath:
         )
 
     def test_only_lists_module_updates_list_items(self):
+        """Both spellings. The needle was `UPDATE list_items SET` alone until
+        `lists.reparent` introduced the first `UPDATE OR IGNORE list_items
+        SET` in the tree — a conflict-tolerant update is still an update, and
+        a literal needle that cannot see it would wave the next one through
+        from outside the module."""
         offenders = []
-        for path in APP_DIR.rglob("*.py"):
-            rel = str(path.relative_to(REPO_ROOT))
-            if rel in (LISTS_MODULE, DATABASE_MODULE):
-                continue
-            for line_no, _ in _raw_update_hits(path, "UPDATE list_items SET", re.I):
-                offenders.append(f"{rel}:{line_no}")
+        for needle in ("UPDATE list_items SET", "UPDATE OR IGNORE list_items SET"):
+            for path in APP_DIR.rglob("*.py"):
+                rel = str(path.relative_to(REPO_ROOT))
+                if rel in (LISTS_MODULE, DATABASE_MODULE):
+                    continue
+                for line_no, _ in _raw_update_hits(path, needle, re.I):
+                    offenders.append(f"{rel}:{line_no}")
         assert not offenders, (
-            "list_items has no update path today; a raw `UPDATE list_items "
-            "SET` outside app.services.lists is a funnel bypass:\n  "
-            + "\n  ".join(offenders)
+            "list_items has no update path outside the module; a raw "
+            "`UPDATE [OR IGNORE] list_items SET` outside app.services.lists "
+            "is a funnel bypass:\n  " + "\n  ".join(sorted(set(offenders)))
         )
 
     def test_only_lists_module_deletes_list_items(self):
@@ -254,3 +261,81 @@ class TestWishlistedSql:
             (item_id,),
         ).fetchone()
         assert bool(row["w"]) is False
+
+
+class TestReparent:
+    """`reparent` moves a merged row's memberships onto the kept row.
+
+    Called from `item_merge.reparent_children`; the route-level pin for the
+    defect it closes lives in `tests/test_mutation_integrity.py`.
+    """
+
+    def _other_list(self, db, slug="reading-soon"):
+        db.execute(
+            "INSERT INTO lists (slug, name) VALUES (?, ?)", (slug, "Reading soon")
+        )
+        return slug
+
+    def test_membership_moves_to_the_kept_row(self, db):
+        keep = _insert_item(db, title="Keep", isbn=None, owned=0)
+        other = _insert_item(db, title="Other", isbn=None, owned=0)
+        add(db, WISHLIST, other)
+
+        reparent(db, keep, other)
+
+        assert is_member(db, WISHLIST, keep)
+        assert not is_member(db, WISHLIST, other)
+
+    def test_a_list_both_rows_are_on_collapses_to_one_row(self, db):
+        keep = _insert_item(db, title="Keep", isbn=None, owned=0)
+        other = _insert_item(db, title="Other", isbn=None, owned=0)
+        add(db, WISHLIST, keep)
+        add(db, WISHLIST, other)
+
+        reparent(db, keep, other)
+
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM list_items WHERE item_id = ?", (keep,)
+        ).fetchone()["c"] == 1
+        assert not is_member(db, WISHLIST, other)
+
+    def test_an_owned_keeper_sheds_the_moved_wishlist_membership(self, db):
+        keep = _insert_item(db, title="Keep", isbn=None, owned=1)
+        other = _insert_item(db, title="Other", isbn=None, owned=0)
+        add(db, WISHLIST, other)
+
+        reparent(db, keep, other)
+
+        assert not is_member(db, WISHLIST, keep)
+        _assert_ownership_partition(db)
+
+    def test_an_unowned_keeper_keeps_it(self, db):
+        keep = _insert_item(db, title="Keep", isbn=None, owned=0)
+        other = _insert_item(db, title="Other", isbn=None, owned=0)
+        add(db, WISHLIST, other)
+
+        reparent(db, keep, other)
+
+        assert is_member(db, WISHLIST, keep)
+
+    @pytest.mark.parametrize("owned", [0, 1])
+    def test_a_non_wishlist_list_moves_regardless_of_owned(self, db, owned):
+        """Only the wishlist carries the ownership rule; every other list is
+        an ordinary membership and moves either way."""
+        slug = self._other_list(db)
+        keep = _insert_item(db, title="Keep", isbn=None, owned=owned)
+        other = _insert_item(db, title="Other", isbn=None, owned=owned)
+        add(db, slug, other)
+
+        reparent(db, keep, other)
+
+        assert is_member(db, slug, keep)
+        assert not is_member(db, slug, other)
+
+    def test_a_row_with_no_memberships_is_a_no_op(self, db):
+        keep = _insert_item(db, title="Keep", isbn=None, owned=0)
+        other = _insert_item(db, title="Other", isbn=None, owned=0)
+
+        reparent(db, keep, other)
+
+        assert not is_member(db, WISHLIST, keep)

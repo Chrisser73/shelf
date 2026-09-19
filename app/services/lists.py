@@ -93,6 +93,50 @@ def remove(db, slug: str, item_id: int) -> None:
     )
 
 
+def reparent(db, keep_id: int, other_id: int) -> None:
+    """Move every list membership from ``other_id`` onto ``keep_id``.
+
+    Called from ``item_merge.reparent_children`` before the merged row is
+    deleted. It lives here rather than beside the other reparent helpers
+    because this module is the one write path for ``list_items``.
+
+    Two rules, and the second is not bookkeeping:
+
+    - Memberships move with ``UPDATE OR IGNORE`` and the leftovers are
+      cleared explicitly, the same shape and for the same reason as
+      ``item_merge._reparent_tags`` — a list both rows are on would
+      otherwise collide on ``PRIMARY KEY (list_id, item_id)``, and the
+      effect must not depend on the caller's DELETE.
+    - **An owned keeper then sheds the wishlist membership it just
+      inherited.** ``owned = 1`` never coexists with wishlist membership
+      (``tests/conftest.py::_assert_ownership_partition``), so moving a
+      wishlisted row's membership onto a keeper the user already owns would
+      break that partition. Owning the thing is the stronger statement, so
+      the want is dropped.
+
+    The keeper's ``owned`` is read through ``items_live``, so a trashed
+    keeper reads as absent and is treated as not owned. That is unreachable
+    today — nothing writes ``deleted_at`` before this release — and is left
+    for the Trash plan to decide deliberately rather than settled here by
+    accident.
+
+    Runs in the caller's transaction and logs nothing (G3): a caller may
+    hold a write lock around it, and a log record would open a second
+    connection and wait out the busy timeout.
+    """
+    db.execute(
+        "UPDATE OR IGNORE list_items SET item_id = ? WHERE item_id = ?",
+        (keep_id, other_id),
+    )
+    db.execute("DELETE FROM list_items WHERE item_id = ?", (other_id,))
+
+    keeper = db.execute(
+        "SELECT owned FROM items_live WHERE id = ?", (keep_id,)
+    ).fetchone()
+    if keeper and keeper["owned"]:
+        remove(db, WISHLIST, keep_id)
+
+
 def set_membership(db, slug: str, item_ids: Iterable[int], member: bool) -> None:
     """Set membership for every id in `item_ids` in one statement.
 

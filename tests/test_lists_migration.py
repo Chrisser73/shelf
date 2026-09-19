@@ -27,6 +27,7 @@ from app.database import (
     SCHEMA,
     _run_migrations,
 )
+from tests.conftest import bootstrap_sql_before
 
 # The two tables this plan adds. The pre-33 fixture is the current bootstrap
 # SQL minus their CREATEs and their index — derived, not copied, so it cannot
@@ -35,8 +36,16 @@ _NEW_TABLES = ("lists", "list_items")
 
 
 def _bootstrap_sql_before_33():
-    """`MIGRATION_TABLES` as it stood before migrations 33 and 34."""
-    sql = MIGRATION_TABLES
+    """`MIGRATION_TABLES` as it stood before migrations 33 and 34.
+
+    The *columns* half comes from `bootstrap_sql_before`, shared with the
+    other legacy fixtures: a column added above migration 32 must come out of
+    its CREATE too, or the numbered ALTER that adds it raises
+    `duplicate column name` here instead of on the path a real upgrade takes
+    (`_is_benign_migration_error` forgives that only for versions <= 21).
+    This file's own concern is the two *tables*, stripped below.
+    """
+    sql = bootstrap_sql_before(32)
     for table in _NEW_TABLES:
         sql = re.sub(
             rf"CREATE TABLE IF NOT EXISTS {table} \(.*?\);\n",

@@ -120,8 +120,12 @@ the account menu — not from Settings.
   routing follows the ISBN's registration group and has no on/off switch, for
   SBN or for DNB.
 - Outbound API pacing per host is fixed to each provider's published limit.
-- Media types are a fixed list: book, kids book, audiobook, eBook, magazine,
+- Media types are a fixed list: book, audiobook, eBook, magazine,
   DVD / Blu-ray, vinyl, cassette, CD, digital music, comic / graphic novel,
-  Manga, video game. The scan tab's **Auto** is a choice about how to scan,
+  Manga, video game. A kids' book is a **book carrying a `Kids` tag**, not a
+  media type of its own — see [Items → Tags](user-guide/items.md).
+  `kids_book` is still accepted on *input* (a CSV, an archive, or a device
+  whose cached form still offers it) and is stored as `book`; from a CSV or
+  an archive it also adds the `Kids` tag. The scan tab's **Auto** is a choice about how to scan,
   not a stored media type — it is never stored on an item; see
   [Scanning → Media types](user-guide/scanning.md#media-types).

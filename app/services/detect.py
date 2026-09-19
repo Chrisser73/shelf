@@ -62,7 +62,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from app.config import BOOK_MEDIA_TYPES, MEDIA_TYPES
+from app.config import BOOK_MEDIA_TYPES, MEDIA_TYPES, canonical_media_type
 
 # How detection reached its verdict. Callers branch on what the answer is
 # *worth*, never on which tier produced it — a tier number is a fact about
@@ -336,6 +336,10 @@ def detect_media_type(
     `title` must be the raw scanned title, not a shortened search-query rung
     (see the G46 note in the module docstring).
     """
+    # Canonicalise first, so a stale client's retired value is read as the
+    # type that replaced it rather than silently becoming "no hint" — a
+    # `kids_book` hint is a confirmed *book* hint, not an absent one.
+    hint = canonical_media_type(hint)
     hint = hint if hint in MEDIA_TYPES else None
 
     # Tier 1: barcode prefix. Only an ISBN decides anything at this tier —

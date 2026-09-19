@@ -228,6 +228,26 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
      "ALTER TABLE items ADD COLUMN deleted_at TEXT DEFAULT NULL"),
     (38, "Add soft-delete timestamp to item copies",
      "ALTER TABLE item_copies ADD COLUMN deleted_at TEXT DEFAULT NULL"),
+    # 39 goes in MIGRATION_TABLES *as well*, which is the opposite of what 37
+    # and 38 just above deliberately do — and the difference is only where the
+    # table is created, not a change of policy.
+    #
+    # `items` and `item_copies` exist before the loop runs (SCHEMA creates the
+    # first, and the second is reached the same way on any database old enough
+    # to have one), so on a fresh install their ALTERs actually *execute*, and
+    # a copy of the column in the CREATE would make them raise "duplicate
+    # column name" — which _is_benign_migration_error forgives only for
+    # versions <= 21, so startup would abort.
+    #
+    # `tags` is created by executescript(MIGRATION_TABLES), which runs *after*
+    # this loop. So on a fresh database this ALTER answers "no such table:
+    # tags" and is skipped — benign, because _is_benign_migration_error checks
+    # that MIGRATION_TABLES names the table. The fresh path therefore never
+    # applies the column, and the CREATE below is the only thing that can give
+    # it to a new install. Both places, or one of the two bootstrap routes ends
+    # up without the column (G1).
+    (39, "Add tags media_type scope column",
+     "ALTER TABLE tags ADD COLUMN media_type TEXT DEFAULT NULL"),
 )
 
 MIGRATION_TABLES = """
@@ -345,9 +365,17 @@ CREATE TABLE IF NOT EXISTS game_platforms (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- media_type is also added via ALTER in MIGRATIONS (39) for upgrades of a
+-- database that already has this table; baked in here too (same pattern as
+-- series_meta below) because this CREATE runs after the MIGRATIONS loop, so
+-- on a fresh database the ALTER is skipped as benign and this line is the
+-- only thing that supplies the column. It is an *advisory* scope: NULL means
+-- the tag is global, and nothing strips or refuses an out-of-scope
+-- association.
 CREATE TABLE IF NOT EXISTS tags (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    media_type TEXT DEFAULT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -646,6 +674,9 @@ def _run_migrations(db: sqlite3.Connection) -> list[str]:
 
     db.executescript(MIGRATION_TABLES)
     _seed_game_platforms(db)
+    retired = _retire_kids_book(db)
+    if retired:
+        logs.append(retired)
     return logs
 
 
@@ -660,6 +691,126 @@ def _seed_game_platforms(db: sqlite3.Connection) -> None:
             "INSERT OR IGNORE INTO game_platforms (slug, name, sort_order) VALUES (?, ?, ?)",
             (slug, name, i),
         )
+
+
+def _retire_kids_book(db: sqlite3.Connection) -> str | None:
+    """Rewrite every `kids_book` row to `book` carrying a `Kids` tag.
+
+    Returns one log line for `_run_migrations` to hand to its caller, or
+    None when there was nothing to do. Logs nothing itself (G3): this runs
+    inside its own write transaction, and a log record would open a second
+    connection and wait out the busy timeout.
+
+    **Python rather than a MIGRATIONS entry**, because a collision needs
+    `reparent_children`. Splitting one logical operation across SQL and
+    Python creates an ordering hazard: on a database that never booted a
+    tags-bearing version, an `INSERT INTO item_tags` migration would be
+    benign-skipped while the row rewrite ran, leaving books with no Kids tag.
+
+    **It reads the physical items table, not the view** — allowlisted by
+    path in `scripts/check_items_live.py` with a reason at each entry. Two
+    reasons, and they are different. A trashed row must be rewritten too,
+    or it comes back on restore with a media type the write funnel refuses.
+    And the twin lookup predicts a `UNIQUE(isbn, media_type)` collision, so
+    it must see trashed rows the constraint still sees (G107).
+
+    **Idempotent.** It short-circuits on zero matching rows before taking
+    any lock, so a second boot returns None and changes nothing.
+
+    Two edge cases a user-initiated merge refuses and a boot step cannot,
+    because it has nobody to refuse to:
+
+    - **Both rows on loan.** Merge anyway and keep both `checkouts` rows;
+      the second becomes visible once the first is checked in.
+    - **A trashed twin.** Nothing writes `deleted_at` before this release
+      and no `kids_book` row can exist after it, so the pair is
+      unreachable. The rule is stated for the Trash plan to inherit rather
+      than implemented: the live row of the pair survives, and both live or
+      both trashed means the `book` twin survives.
+
+    **What the merge keeps.** The existing book's own columns win — its
+    title, notes, value, reading status. What moves across is the child
+    records: tags, copies, scan and reading history, loans and list
+    memberships. Ownership is the one exception: an owned kids book raises
+    an unowned twin to owned, because a one-way rewrite must not quietly
+    turn something the user owns into something they merely want.
+    """
+    if not db.execute(
+        "SELECT 1 FROM items WHERE media_type = 'kids_book' LIMIT 1"
+    ).fetchone():
+        return None
+
+    # A fresh database reaches here with _seed_game_platforms' implicit
+    # transaction still open, and BEGIN IMMEDIATE inside one raises.
+    if db.in_transaction:
+        db.commit()
+    db.execute("BEGIN IMMEDIATE")
+
+    # Re-read under the lock: the short-circuit above ran without it (G18).
+    rows = db.execute(
+        "SELECT id, isbn, upc, owned FROM items "
+        "WHERE media_type = 'kids_book' ORDER BY id"
+    ).fetchall()
+
+    db.execute("INSERT OR IGNORE INTO tags (name) VALUES ('Kids')")
+    # tags.name is UNIQUE COLLATE NOCASE, so an existing `kids` row is the
+    # one found here and is reused. Its scope is never touched.
+    tag_id = db.execute(
+        "SELECT id FROM tags WHERE name = 'Kids'"
+    ).fetchone()["id"]
+
+    from app.services import item_merge  # deferred: it imports item_copies
+
+    rewritten = 0
+    merged = 0
+    for row in rows:
+        # Bind NULL as '' so a blank identifier cannot match another blank
+        # one. UNIQUE(isbn, media_type) allows a single '' row per type, so
+        # read literally an empty-ISBN kids book and an unrelated empty-ISBN
+        # book would be "twins" and get irreversibly merged.
+        isbn = row["isbn"] or ""
+        upc = row["upc"] or ""
+        twin = db.execute(
+            "SELECT id FROM items WHERE media_type = 'book' AND "
+            "((? <> '' AND isbn = ?) OR (? <> '' AND upc = ?)) "
+            "ORDER BY id LIMIT 1",
+            (isbn, isbn, upc, upc),
+        ).fetchone()
+
+        if twin:
+            target = twin["id"]
+            if row["owned"]:
+                # Raise the twin before reparenting, so lists.reparent sees
+                # an owned keeper and sheds the wishlist membership it is
+                # about to move. Raw UPDATE rather than the write funnel: a
+                # trashed twin is invisible to the funnel's view (G96).
+                db.execute(
+                    "UPDATE items SET owned = 1 WHERE id = ?", (target,)
+                )
+            item_merge.reparent_children(db, target, row["id"])
+            db.execute("DELETE FROM items WHERE id = ?", (row["id"],))
+            merged += 1
+        else:
+            target = row["id"]
+            # NULLIF collapses a blank identifier to NULL on the way past,
+            # so the row stops occupying the one '' slot its type allows.
+            db.execute(
+                "UPDATE items SET media_type = 'book', "
+                "isbn = NULLIF(isbn, ''), upc = NULLIF(upc, '') WHERE id = ?",
+                (row["id"],),
+            )
+            rewritten += 1
+
+        db.execute(
+            "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
+            (target, tag_id),
+        )
+
+    db.commit()
+    return (
+        f"Retired kids_book: {rewritten} rewritten, "
+        f"{merged} merged into existing books"
+    )
 
 
 def get_setting(db, key: str) -> str:

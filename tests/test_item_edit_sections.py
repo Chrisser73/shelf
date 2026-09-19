@@ -38,10 +38,11 @@ def test_item_edit_is_sectioned_without_changing_the_save_contract():
 
     # Media-specific groups stay in the DOM so changing Media Type can reveal
     # them immediately without changing what the form submits.
-    assert 'data-media-types="book kids_book audiobook ebook comic manga"' in template
+    assert 'data-media-types="book audiobook ebook comic manga"' in template
     assert 'data-media-types="video_game audiobook"' in template
     assert "updateEditSectionVisibility" in script
     assert "mediaSelect.addEventListener('change'" in script
+    assert "kids_book" not in template
 
     # Artwork exposes the existing safe manual-cover URL route directly from
     # Edit without nesting another form inside the item-save form. The HTMX

@@ -360,8 +360,14 @@ def _fetch_locations(db) -> list[dict]:
 
 
 def _fetch_tags(db) -> list[dict]:
-    rows = db.execute("SELECT name FROM tags ORDER BY name COLLATE NOCASE").fetchall()
-    return [{"name": r["name"]} for r in rows]
+    # `media_type` is emitted on every tag, null for a globally-scoped one,
+    # so a reader never has to distinguish "absent" from "global" — they are
+    # the same answer and always will be. FORMAT_VERSION stays 1: the key is
+    # additive and an older Shelf ignores it.
+    rows = db.execute(
+        "SELECT name, media_type FROM tags ORDER BY name COLLATE NOCASE"
+    ).fetchall()
+    return [{"name": r["name"], "media_type": r["media_type"]} for r in rows]
 
 
 def _fetch_borrowers(db) -> list[dict]:
@@ -922,6 +928,120 @@ def _dedupe_lookup(db, *, title: str, isbn_val: str | None, media: str,
     return row, "title_authors"
 
 
+def _item_media_and_tags(item: dict) -> tuple[str, list[str]]:
+    """The canonical media type and effective tag list for one archive item.
+
+    One helper, called by both plan_archive and apply_plan, because the two
+    must classify an item identically — the archive has no pydantic model
+    for this, and two inline expressions drifted apart is exactly how a plan
+    says "create" and an apply does something else.
+
+    An item whose stored type names a retired alias becomes the canonical
+    type *and* earns the Kids tag: an archive that says kids_book is making
+    a statement about the book, the same statement the boot-time rewrite
+    acted on. The tag list is deduped NOCASE because the create path inserts
+    associations without OR IGNORE, so `kids` already present plus an
+    appended `Kids` would raise on the primary key and leave a half-written
+    record.
+    """
+    raw = (item.get("media_type") or "book").strip() or "book"
+    media = config.canonical_media_type(raw)
+
+    names: list[str] = []
+    seen: set[str] = set()
+    for name in item.get("tags") or []:
+        name = (name or "").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    if media != raw and "kids" not in seen:
+        names.append("Kids")
+    return media, names
+
+
+def _identity_key(item: dict, media: str) -> tuple[str, str] | None:
+    """The uniqueness slot this item would occupy, or None if it has none.
+
+    Mirrors the two constraints the import can collide on:
+    `UNIQUE(isbn, media_type)` and the partial unique on `(upc, media_type)`.
+    Blank identifiers are not identities — one blank row per type is legal,
+    and treating two of them as the same slot would be wrong in the other
+    direction.
+    """
+    raw_isbn = (item.get("isbn") or "").strip()
+    if raw_isbn:
+        pair = isbn_svc.canonical_isbn_pair(raw_isbn)
+        if pair:
+            return ("isbn", f"{pair[0]}\x00{media}")
+    raw_upc = (item.get("upc") or "").strip()
+    if raw_upc:
+        return ("upc", f"{raw_upc}\x00{media}")
+    return None
+
+
+def _aliased_collisions(library: dict) -> dict[int, str]:
+    """Archive-local item ids that must be refused, mapped to the reason.
+
+    An archive written by an older Shelf can hold `kids_book` X *and*
+    `book` X. Canonicalised, both occupy one slot — and the dedupe lookup
+    is deliberately bounded to rows that predate the import, so the second
+    one is not seen as a duplicate of the first and its insert raises,
+    after the location get-or-create has already written.
+
+    So the aliased member of such a pair is refused up front, in plan and
+    apply alike, before anything is written. The true `book` row imports
+    untouched: the collision is an artefact of canonicalising, so the row
+    that was canonicalised is the one that loses.
+    """
+    by_slot: dict[tuple[str, str], list[dict]] = {}
+    for item in library.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        raw = (item.get("media_type") or "book").strip() or "book"
+        media = config.canonical_media_type(raw)
+        key = _identity_key(item, media)
+        if key is None:
+            continue
+        by_slot.setdefault(key, []).append(item)
+
+    refused: dict = {}
+    for members in by_slot.values():
+        if len(members) < 2:
+            continue
+        aliased = [
+            m for m in members
+            if config.canonical_media_type(
+                (m.get("media_type") or "book").strip() or "book"
+            ) != ((m.get("media_type") or "book").strip() or "book")
+        ]
+        if not aliased:
+            continue  # a plain duplicate, not our doing — leave it alone
+        keepers = [m for m in members if m not in aliased]
+        kept_title = (keepers[0].get("title") if keepers else "") or "(untitled)"
+        for m in aliased:
+            ref = m.get("id")
+            if ref is None:
+                continue
+            # Keyed by `_ref_key`, the same coercion the plan index uses, and
+            # never by `int()`. An id is an int when Shelf wrote the archive
+            # and "strings or nothing" in a hand-made one, so `int()` raises
+            # on `"item-1"` — out here, outside the per-item `try`, which
+            # takes down the whole plan rather than erroring one record. It
+            # also folds `1.0` and `1` into one slot, so a refusal meant for
+            # the aliased member would land on the keeper too.
+            refused[_ref_key(ref)] = (
+                f"{(m.get('title') or '(untitled)')!r} becomes the same book as "
+                f"{kept_title!r} once its retired media type is canonicalised, "
+                f"and both cannot occupy one identity — importing "
+                f"{kept_title!r} only"
+            )
+    return refused
+
+
 def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
     """Classify what merging this archive would do, writing nothing.
 
@@ -982,6 +1102,10 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
     for s in library.get("series") or []:
         note_name("series", (s or {}).get("name") if isinstance(s, dict) else None)
 
+    # Refused before anything is classified, so plan and apply agree and
+    # neither writes on behalf of a record that cannot land.
+    refused_refs = _aliased_collisions(library)
+
     records: list[dict] = []
     errors: list[str] = []
     counts = {"create": 0, "skip": 0, "update": 0}
@@ -999,10 +1123,13 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
             # The same pre-clean apply_plan uses, so plan and apply dedupe on
             # the same value: a bad-ISBN row matches by title in both stages
             # rather than planning `create` and applying `update` (drift).
+            if _ref_key(ref) in refused_refs:
+                errors.append(f"Archive item {ref}: {refused_refs[_ref_key(ref)]}")
+                continue
             raw_isbn = (item.get("isbn") or "").strip() or None
             isbn_pair = isbn_svc.canonical_isbn_pair(raw_isbn) if raw_isbn else None
             isbn_val = isbn_pair[0] if isbn_pair else None
-            media = (item.get("media_type") or "book").strip() or "book"
+            media, item_tag_names = _item_media_and_tags(item)
             authors = item.get("authors")
             cover_arcname = item.get("cover")
             has_cover_entry = bool(cover_arcname) and cover_arcname in cover_names
@@ -1018,7 +1145,7 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
                 # Only an item that is actually created carries its
                 # location/tag names in; a match reuses whatever is there.
                 note_name("locations", item.get("location"))
-                for tag_name in item.get("tags") or []:
+                for tag_name in item_tag_names:
                     note_name("tags", tag_name)
             elif mode == "update":
                 verdict = "update"
@@ -1029,7 +1156,7 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
                 else:
                     cover = "install"
                 note_name("locations", item.get("location"))
-                for tag_name in item.get("tags") or []:
+                for tag_name in item_tag_names:
                     note_name("tags", tag_name)
             else:
                 verdict, cover = "skip", "none"
@@ -1193,12 +1320,36 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
             loc_cache[key] = _get_or_create_by_name(db, "locations", name, {"sort_order": 0})
         return loc_cache[key]
 
+    # The same pre-scan plan_archive ran, so apply refuses exactly what the
+    # user was shown — and refuses it before the location and tag caches
+    # write anything on that record's behalf.
+    refused_refs = _aliased_collisions(library)
+
+    # Scope per tag name, from the archive's own top-level list. A value the
+    # importer does not recognise imports as global rather than refusing the
+    # tag: the scope is advisory, so a wrong one is not worth losing the tag
+    # over. The key passed to _get_or_create_by_name below is the literal
+    # written here, never a key read from the archive — that dict is
+    # interpolated into the INSERT's column list.
+    tag_scopes: dict[str, str] = {}
+    for tag in library.get("tags") or []:
+        if not isinstance(tag, dict):
+            continue
+        name = (tag.get("name") or "").strip()
+        if not name:
+            continue
+        scope = config.canonical_media_type((tag.get("media_type") or "").strip())
+        if scope in config.MEDIA_TYPES:
+            tag_scopes[name.casefold()] = scope
+
     def get_tag_id(name):
         key = (name or "").strip().casefold()
         if not key:
             return None
         if key not in tag_cache:
-            tag_cache[key] = _get_or_create_by_name(db, "tags", name)
+            scope = tag_scopes.get(key)
+            extra = {"media_type": scope} if scope else None
+            tag_cache[key] = _get_or_create_by_name(db, "tags", name, extra)
         return tag_cache[key]
 
     def get_borrower_id(name):
@@ -1241,6 +1392,15 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
                 errors.append(f"Archive item {archive_id}: missing title")
                 continue
 
+            # Above the plan lookup: plan_archive left this record out of
+            # `items` on purpose, so finding no plan record for it is not
+            # drift and must not be counted as such.
+            if _ref_key(archive_id) in refused_refs:
+                errors.append(
+                    f"Archive item {archive_id}: {refused_refs[_ref_key(archive_id)]}"
+                )
+                continue
+
             queue = planned.get(_ref_key(archive_id))
             record = queue.popleft() if queue else None
             if record is None:
@@ -1260,7 +1420,7 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
             raw_isbn = (item.get("isbn") or "").strip() or None
             isbn_pair = isbn_svc.canonical_isbn_pair(raw_isbn) if raw_isbn else None
             isbn_val, isbn10_val = isbn_pair or (None, None)
-            media = (item.get("media_type") or "book").strip() or "book"
+            media, item_tag_names = _item_media_and_tags(item)
             authors = item.get("authors")
 
             # Both lookups are confined to rows that existed *before* this
@@ -1345,7 +1505,7 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
                 # created as a side effect of ignoring it. B1.
                 _apply_item_update(db, real_id, item_norm, loc_name,
                                    get_location_id)
-                for tag_name in item.get("tags") or []:
+                for tag_name in item_tag_names:
                     tag_id = get_tag_id(tag_name)
                     if tag_id:
                         db.execute(
@@ -1424,11 +1584,13 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
                 if archive_id is not None:
                     id_map[int(archive_id)] = real_id
 
-                for tag_name in item.get("tags") or []:
+                # item_tag_names is already NOCASE-deduped, so two archive
+                # spellings of one tag cannot raise on the primary key here.
+                for tag_name in item_tag_names:
                     tag_id = get_tag_id(tag_name)
                     if tag_id:
                         db.execute(
-                            "INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?)",
+                            "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
                             (real_id, tag_id),
                         )
                 # An archive with no `copies` key at all — every archive taken

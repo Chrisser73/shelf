@@ -4,8 +4,18 @@ function scanPage() {
         // Auto for a *new* user. A stored value is deliberately never
         // migrated: "book" is also what someone who scans books chose, and
         // reinterpreting that as "no choice" is guessing at intent. The
-        // barcode rule (§1) is what reaches those users instead.
-        mediaType: localStorage.getItem('shelf_media_type') || 'auto',
+        // barcode rule (§1) is what reaches those users instead. The one
+        // exception is `kids_book`: that option no longer exists, so a
+        // device whose cache still holds it is normalized to `book` here
+        // and the stored value corrected, not merely reinterpreted.
+        mediaType: (function () {
+            var v = localStorage.getItem('shelf_media_type') || 'auto';
+            if (v === 'kids_book') {
+                v = 'book';
+                localStorage.setItem('shelf_media_type', v);
+            }
+            return v;
+        })(),
         platform: localStorage.getItem('shelf_platform') || '',
         location: localStorage.getItem('shelf_location') || '',
         borrowerId: '',

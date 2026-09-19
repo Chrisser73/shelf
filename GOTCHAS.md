@@ -2386,8 +2386,10 @@ grep -n "^async def\|^def " app/services/tmdb.py app/services/igdb.py
   grow. `9fd9425` (2026-08-30) gave tier 2 an audio-marker arm and tier 3 a
   `Music CDs` category arm, so **`cd` came off the list** — the values
   detection can never produce are now the book family only (`book`,
-  `kids_book`, `audiobook`, `ebook`, `comic`), which is exactly
-  `_BOOK_FAMILY_HINTS`. The rule did not change and the hint branch was not
+  `audiobook`, `ebook`, `comic`, `manga`), which is exactly
+  `_BOOK_FAMILY_HINTS`. (`kids_book` was on that list until it was retired
+  as a media type; it is an input alias for `book` now and never reaches
+  detection as a value of its own.) The rule did not change and the hint branch was not
   touched; what changed is which values depend on it, and that is the part a
   reader will assume is still true.
 - **Evidence:** `1df2409` (2026-08-26, issue #36 T4) — `detect.py`'s tier 4
@@ -2408,7 +2410,7 @@ from app.config import MEDIA_TYPES
 from app.services.detect import detect_media_type as d
 for k in MEDIA_TYPES:
     got = d('upc', k, None, None).media_type
-    assert got == k or k in {'book','kids_book','audiobook','ebook','comic'}, (k, got)
+    assert got == k or k in {'book','audiobook','ebook','comic','manga'}, (k, got)
 print('every non-book hint survives tier 4')"
 ```
 
@@ -3180,8 +3182,19 @@ grep -n 'get_by_role(.*)\.first\|get_by_text(.*)\.first' tests/e2e/*.py
   the scrub, with the full old→new table in the commit body), `0c103f9` (T3 —
   the enforcement, and the two archive seeds). The Gemini plan review named
   the shape before the run (`gemini-GC1`).
-- **Verify:** the scrub's own acceptance line still holds — no
-  checksum-invalid ISBN-13 literal outside the deliberate negative pins:
+- **Verify — and read this before believing the result.** The script below
+  reports **35 checksum-invalid ISBN-13 literals** on `main` as of 2026-09-18,
+  so it does **not** currently come back clean and a hit is not by itself a
+  regression. The scrub in `ffd3329` fixed the literals that *reached a write
+  path*; the survivors are raw `_insert_item` seeds in files the funnel never
+  validates (`test_national.py`, `test_abs_public_url.py`,
+  `test_manual_cover_url.py`, `test_copies_live_contract.py`, several E2E
+  files). They are live debt, not a clean baseline: each one goes red the day
+  its seed reaches a validating path. **Use the script as a ratchet — compare
+  the count against `main` and require that your branch adds none** — rather
+  than as a pass/fail gate. Measured that way on
+  `feat/tags-retire-kids-book`: 39 on the branch, 35 on `main`, four new ones
+  introduced by new tests and corrected before the branch was finished.
 
 ```bash
 python3 - <<'EOF'
@@ -4649,8 +4662,8 @@ EOF
 
   Writes stay on the physical tables — a `DELETE FROM items` matches the same
   text pattern and is not a violation — and so do the allowlisted lookups in
-  `scripts/check_items_live.py`, each with its reason at the entry: **11 items
-  entries excusing 12 reads across 4 files, and 8 copies entries excusing 8
+  `scripts/check_items_live.py`, each with its reason at the entry: **13 items
+  entries excusing 15 reads across 4 files, and 8 copies entries excusing 8
   reads across 5 files** (counts read from the script, 2026-09-18). The copies
   exemptions are all one class; see **G107**.
 - **The half a rewrite gets wrong: four files reach the table through a `JOIN`
@@ -4823,6 +4836,99 @@ python -m pytest tests/test_copies_live_contract.py -q
   Not a lint candidate — only a human can say whether a given read exists to
   predict a constraint or to answer a question about the collection.
 
+
+## G108 — When a mutation check passes, suspect the check before the code
+
+- **Rule:** a mutation that leaves the suite green has told you one of two
+  things, and they are not the same: the code is unprotected, or **the test
+  you aimed at cannot see that line**. Find out which before recording either.
+  Re-aim at the statement the property actually depends on, and if the plan
+  named the mutation, treat the plan's claim as the thing under test too.
+- **Why:** a green mutation reads as "nothing pins this", which invites either
+  writing a redundant test or shrugging and moving on. Both are wrong when the
+  real cause is that the property has a second guard upstream, or that the
+  scenario never reaches the mutated branch. Three instances in one run, each
+  a different shape:
+  - **The test never reached the line.** `/run-plan` for
+    `tags-retire-kids-book` predicted "remove the scan route's
+    canonicalisation → the pre-seeded-duplicate test reds". It did not, and
+    neither did removing `detect.py`'s. The ISBN path's duplicate guard keys
+    on `detect`'s *resolved* type, and an unrecognised hint already resolves
+    to `book` for an ISBN barcode — so the outcome was identical either way
+    and the test was **vacuous for the property it claimed**. The
+    discriminating site was `/api/items/manual`, which runs no detection at
+    all: removing its canonicalisation reds with
+    `UNIQUE constraint failed: items.isbn, items.media_type`.
+  - **A second defence absorbed it.** Dropping the NOCASE tag dedupe in
+    `archive.py` stayed green, because the same task had switched the create
+    path to `INSERT OR IGNORE`. Neither alone is load-bearing; removing
+    **both** reproduces the `item_tags` primary-key violation. Record the
+    mutation as the pair, not as one.
+  - **The scenario lacked the state.** Pointing `_retire_kids_book`'s twin
+    lookup at `items_live` passed, because the suite had a trashed *kids row*
+    and no trashed *twin* — the one case the physical read exists for (G107).
+- **And a mutation that reds for the wrong reason proves nothing either.**
+  Deleting the `NULLIF`s from the same step's `UPDATE` left
+  `SET media_type = 'book', WHERE id = ?` — a syntax error — and reddened 11
+  tests that had nothing to do with blank identifiers. Rewritten as
+  `isbn = isbn, upc = upc` it reds exactly the two blank-identifier pins. This
+  is **G17's rule applied to mutations**: run the broken version and read the
+  failure before trusting it.
+- **Evidence:** `feat/tags-retire-kids-book`, 2026-09-18 — `7cb3191` (the
+  scan/manual finding, with each test's docstring naming which kind of pin it
+  is), `c56015e` (the archive pair), `144d4a7` (the trashed twin, and the
+  malformed `NULLIF` mutation).
+- **Verify:** judgement. When a mutation comes back green, ask which of the
+  three shapes above it is before writing anything down.
+- **Status:** documented. Not a lint candidate — whether a mutation aimed at
+  the right line is a judgement about intent.
+
+## G109 — A column added to a MIGRATION_TABLES-managed table above version 21
+
+- **Rule:** adding a column to a table that `MIGRATION_TABLES` creates — not
+  `SCHEMA` — breaks every legacy-database fixture that builds itself from the
+  **current** `MIGRATION_TABLES` and then runs `_run_migrations`. Build such a
+  fixture from the bootstrap SQL *as it was before* the migration under test:
+  `tests/conftest.py::bootstrap_sql_before(up_to)` does it, deriving the strip
+  from `MIGRATIONS` so the next column strips itself.
+- **Why:** `_is_benign_migration_error` forgives `duplicate column name` only
+  for versions `<= _PRE_ATOMIC_MAX_VERSION` (21). Every column previously added
+  to such a table — 16-19 on `series_meta` — sat under that amnesty, so a
+  fixture could run the current CREATE and have the redundant ALTER waved
+  through. Migration **39** (`tags.media_type`) is the first one above the
+  line, and there the same fixture raises instead. This is G98's rule met from
+  the column side rather than the table side, and the cost of not knowing it is
+  a red gate that looks like a defect in the new migration.
+- **The real bootstrap paths are unaffected, and that is worth checking rather
+  than assuming.** A fresh install skips the ALTER as benign and takes the
+  column from the CREATE; a real upgrade runs the ALTER against a table that
+  lacks it. Both were verified against a copy of a real v38 database before the
+  fixtures were touched — which is what made it safe to fix the fixtures rather
+  than widen the classifier.
+- **Do not widen `_is_benign_migration_error` to make this go away.** Forgiving
+  `duplicate column name` for MIGRATION_TABLES-managed tables would be tidy and
+  would also weaken a guard on the one path that is irreversible against a real
+  collection, to fix a problem that exists only in test fixtures.
+- **Evidence:** `1d8278b` (2026-09-18, plan `tags-retire-kids-book` T2). Eight
+  tests across `test_items.py` and `test_lists_migration.py` went red on
+  migration 39; the derived helper fixed all eight and left
+  `item_copies.position_order` alone, since a MIGRATIONS-only column (31, 37,
+  38) is never in the CREATE to begin with.
+- **Verify:** the helper is a no-op at the current head and really strips below
+  it —
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0,'.')
+from tests.conftest import bootstrap_sql_before
+from app.database import MIGRATION_TABLES
+assert bootstrap_sql_before(39) == MIGRATION_TABLES
+assert 'media_type' not in bootstrap_sql_before(38).split('CREATE TABLE IF NOT EXISTS tags')[1].split(');')[0]
+print('OK')"
+```
+
+- **Status:** documented. Not a lint candidate — which cutoff a fixture is
+  claiming to represent is intent, not a grep.
 
 ## Graveyard
 

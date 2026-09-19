@@ -100,6 +100,15 @@ RAW_UPDATE_ALLOWLIST: dict[str, set[str]] = {
         "upc = '0' || upc",
         "upc = isbn, isbn = NULL, isbn10 = NULL",
         "language = CASE",
+        # _retire_kids_book's row rewrite: a one-time vocabulary repair at
+        # boot, not a request-path write of a user-supplied value. The
+        # NULLIFs collapse a blank identifier so the row stops occupying
+        # the single '' slot UNIQUE(isbn, media_type) allows.
+        "media_type = 'book', isbn = NULLIF",
+        # The same step's ownership raise on a merge. An owned kids book
+        # merging into an unowned twin must not silently become a wish;
+        # the value is the step's own literal 1, never user input.
+        "owned = 1 WHERE id = ?",
     },
 }
 
@@ -897,3 +906,38 @@ class TestPromoteWishlisted:
         assert self._state(db, item_id) == (1, False)
         after = db.execute("SELECT updated_at FROM items WHERE id = ?", (item_id,)).fetchone()[0]
         assert after == before
+
+
+class TestTheRetiredMediaTypeAlias:
+    """`kids_book` is accepted on input and stored as `book`.
+
+    The funnel is the backstop: routes canonicalise earlier, above their own
+    duplicate guards, but this is what guarantees that nothing retired can
+    reach the table by any path — including one added later that forgets.
+    """
+
+    def _media_type(self, db, item_id):
+        return db.execute(
+            "SELECT media_type FROM items WHERE id = ?", (item_id,)
+        ).fetchone()["media_type"]
+
+    def test_insert_stores_the_canonical_value(self, db):
+        item_id = insert_item(db, title="Goodnight Moon", media_type="kids_book")
+        assert self._media_type(db, item_id) == "book"
+
+    def test_update_stores_the_canonical_value(self, db):
+        item_id = insert_item(db, title="Goodnight Moon", media_type="book")
+        update_item_fields(db, item_id, {"media_type": "kids_book"})
+        assert self._media_type(db, item_id) == "book"
+
+    def test_bulk_update_stores_the_canonical_value(self, db):
+        first = insert_item(db, title="One", isbn=None, media_type="book")
+        second = insert_item(db, title="Two", isbn=None, media_type="book")
+        update_items_fields(db, [first, second], {"media_type": "kids_book"})
+        assert self._media_type(db, first) == "book"
+        assert self._media_type(db, second) == "book"
+
+    def test_an_unknown_value_still_raises(self, db):
+        """Canonicalising must not become a way to smuggle a bad value in."""
+        with pytest.raises(UnknownMediaType):
+            insert_item(db, title="X", media_type="not_a_type")

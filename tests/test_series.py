@@ -78,7 +78,7 @@ class TestUnassignedBlock:
     def test_unassigned_block_books_only(self, admin_client, db):
         _insert_item(db, title="Loose Book", isbn="9789000010011", media_type="book")
         _insert_item(db, title="Loose Comic", isbn="9789000010028", media_type="comic")
-        _insert_item(db, title="Loose Kids Book", isbn="9789000010035", media_type="kids_book")
+        _insert_item(db, title="Loose Manga", isbn="9789000010035", media_type="manga")
         _insert_item(db, title="Loose DVD", isbn="9789000010042", media_type="dvd")
         _insert_item(db, title="Loose CD", isbn="9789000010059", media_type="cd")
         _insert_item(db, title="Loose Game", isbn="9789000010066", media_type="video_game")
@@ -90,7 +90,7 @@ class TestUnassignedBlock:
         after_block = html[block_start:]
         assert "Loose Book" in after_block
         assert "Loose Comic" in after_block
-        assert "Loose Kids Book" in after_block
+        assert "Loose Manga" in after_block
         assert "Loose DVD" not in html
         assert "Loose CD" not in html
         assert "Loose Game" not in html

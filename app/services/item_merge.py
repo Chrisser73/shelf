@@ -23,9 +23,14 @@ own conflict rule, and getting one wrong raises ``IntegrityError`` mid-merge:
   index allowing one primary copy per item, so copies must be renumbered and
   at most one primary may survive.
 - ``checkouts`` has no uniqueness constraint and is the only plain UPDATE.
+- ``list_items`` is keyed on (list_id, item_id), so a list both rows are on
+  collides — and it carries one rule the others do not, because ownership
+  and wanting are mutually exclusive. ``app.services.lists.reparent`` holds
+  both; the move lives there because that module is the one write path for
+  the table.
 """
 
-from app.services import item_copies
+from app.services import item_copies, lists
 
 
 def active_loan_ids(db, item_ids) -> set[int]:
@@ -112,6 +117,13 @@ def reparent_children(db, keep_id: int, other_id: int) -> None:
 
     Must run before ``DELETE FROM items WHERE id = other_id``. Safe to call
     when the merged row has no children.
+
+    **What is deliberately not moved, and why.** ``romm_records``,
+    ``komga_records``, ``periodical_issues`` and the ``music_*`` tables each
+    key a single item by design — a row there describes *this* item's
+    external record or its track list, not a fact about the work that should
+    survive onto another row. They are left to the cascade. Everything whose
+    loss the user would notice, and could not reconstruct, is moved here.
     """
     db.execute("UPDATE scan_log SET item_id = ? WHERE item_id = ?", (keep_id, other_id))
     db.execute("UPDATE reading_log SET item_id = ? WHERE item_id = ?", (keep_id, other_id))
@@ -119,3 +131,4 @@ def reparent_children(db, keep_id: int, other_id: int) -> None:
     _reparent_tags(db, keep_id, other_id)
     _reparent_links(db, keep_id, other_id)
     _reparent_copies(db, keep_id, other_id)
+    lists.reparent(db, keep_id, other_id)

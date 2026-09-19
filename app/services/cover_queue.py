@@ -30,7 +30,7 @@ import httpx
 
 from app.config import HTTP_TIMEOUT
 from app.database import get_db
-from app.services.synopsis import BOOK_MEDIA_TYPES
+from app.services.synopsis import SYNOPSIS_MEDIA_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ REQUEUE_WINDOW_HOURS = 48
 # video game through it writes a novel's cover and a book ISBN onto the
 # disc — silently, on every boot. Comics and Manga share the same safe
 # book-catalogue cover path; non-book cover misses stay manual.
-COVER_REQUEUE_MEDIA_TYPES = BOOK_MEDIA_TYPES + ("comic", "manga")
+COVER_REQUEUE_MEDIA_TYPES = SYNOPSIS_MEDIA_TYPES + ("comic", "manga")
 
 
 @dataclass

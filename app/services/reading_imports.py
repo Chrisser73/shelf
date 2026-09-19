@@ -19,10 +19,17 @@ Each normalizer returns the shelf-native shape consumed by the CSV import:
         "date_finished": str | None,    # ISO date
         "owned": bool | None,        # generic: None when absent/blank
         "wishlisted": bool | None,   # generic only; None when absent/blank
+        "tags": list[str],           # generic only; [] when absent/blank —
+                                      # Goodreads/StoryGraph emit no "tags"
+                                      # key at all, so callers must read
+                                      # norm.get("tags") or [].
     }
 """
 
 import re
+
+from app import config
+from app.services import tags as tags_svc
 
 GOODREADS = "goodreads"
 STORYGRAPH = "storygraph"
@@ -184,11 +191,23 @@ def normalize_storygraph(row: dict) -> dict:
 
 def normalize_generic(row: dict) -> dict:
     """Shelf's own CSV format — mirrors the pre-existing import behavior."""
+    raw_media = (row.get("media_type") or "book").strip()
+    media_type = config.canonical_media_type(raw_media)
+    tags = tags_svc.parse_tag_list(row.get("tags"))
+    if media_type != raw_media:
+        # The raw value named a retired alias (e.g. kids_book) — that is a
+        # statement about the book itself, the same way a live kids_book row
+        # earned the tag at boot (database.py's _retire_kids_book), so this
+        # row earns it too. Contrast a stale media_type sitting in an
+        # in-page form value, which is just a transient and gets no tag —
+        # this only fires for a value the row itself actually carried.
+        if not any(t.casefold() == "kids" for t in tags):
+            tags.append("Kids")
     return {
         "title": (row.get("title") or "").strip(),
         "authors": (row.get("authors") or row.get("author") or "").strip() or None,
         "isbn": (row.get("isbn") or "").strip() or None,
-        "media_type": (row.get("media_type") or "book").strip(),
+        "media_type": media_type,
         "publisher": (row.get("publisher") or "").strip() or None,
         "publish_year": (row.get("publish_year") or row.get("year") or "").strip() or None,
         "page_count": (row.get("page_count") or row.get("pages") or "").strip() or None,
@@ -200,6 +219,7 @@ def normalize_generic(row: dict) -> dict:
         # column is absent or blank; items_csv.py applies the defaults.
         "owned": _parse_flag(row.get("owned")),
         "wishlisted": _parse_flag(row.get("wishlisted")),
+        "tags": tags,
     }
 
 

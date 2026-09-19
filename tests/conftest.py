@@ -275,3 +275,77 @@ def _insert_location(db, name="Test Location"):
     """Insert a test location and return its ID."""
     cursor = db.execute("INSERT INTO locations (name) VALUES (?)", (name,))
     return cursor.lastrowid
+
+
+#: Matches the ALTER statements in MIGRATIONS, so `bootstrap_sql_before` can
+#: work out which columns a given cutoff has not reached yet.
+_ALTER_COLUMN = re.compile(r"ALTER TABLE (\w+) ADD COLUMN (\w+)", re.I)
+
+
+def bootstrap_sql_before(up_to: int) -> str:
+    """`MIGRATION_TABLES` as it stood *before* migration ``up_to + 1`` (G98).
+
+    A legacy-database fixture must be built from the bootstrap schema as it
+    was before the migration under test — never from the current
+    `MIGRATION_TABLES`. Running the current one first creates each table
+    complete, so the numbered entry the fixture exists to exercise becomes a
+    no-op and the test passes with that entry deleted.
+
+    For a *table* the fixture simply omits the CREATE. For a *column* the trap
+    is quieter and only opened up at migration 39. `_is_benign_migration_error`
+    forgives `duplicate column name` for versions <= `_PRE_ATOMIC_MAX_VERSION`
+    (21), and every column added to a MIGRATION_TABLES-managed table before
+    that — 16-19 on `series_meta` — sat under the amnesty, so a fixture could
+    run the current CREATE and the redundant ALTER was waved through. Migration
+    39 (`tags.media_type`) is the first one above the line, and there the same
+    fixture raises instead.
+
+    So this strips every column added by a migration **above** `up_to`,
+    derived from `MIGRATIONS` rather than listed by hand: migration 40 strips
+    itself and no fixture has to be revisited.
+    """
+    from app.database import MIGRATION_TABLES, MIGRATIONS
+
+    sql = MIGRATION_TABLES
+    for version, _description, statement in MIGRATIONS:
+        if version <= up_to:
+            continue
+        match = _ALTER_COLUMN.search(statement or "")
+        if not match:
+            continue
+        table, column = match.group(1), match.group(2)
+        # Only touch the column inside that table's own CREATE, so a column
+        # name two tables share cannot be stripped from the wrong one.
+        create = re.search(
+            rf"(CREATE TABLE IF NOT EXISTS {table} \()(.*?)(\n\);)",
+            sql,
+            flags=re.S,
+        )
+        if not create:
+            continue  # the table is not one MIGRATION_TABLES creates
+        # A column the CREATE never carried needs no stripping: that is the
+        # MIGRATIONS-only pattern (31's item_copies.position_order, 37 and
+        # 38's deleted_at), where a copy in the CREATE would make the ALTER
+        # raise on the fresh path instead. Only a column that IS in the body
+        # has to come out.
+        if not re.search(rf"\n\s*{column}\s", create.group(2)):
+            continue
+        # Two shapes, because the last column in a CREATE carries no trailing
+        # comma: strip `\n  col ...,` normally, and `,\n  col ...` when the
+        # column is last. Missing the second silently leaves the column in
+        # place and the fixture stops being a legacy one at all.
+        body, hits = re.subn(
+            rf"\n\s*{column}\s+[^,\n]+,", "", create.group(2), count=1
+        )
+        if not hits:
+            body, hits = re.subn(
+                rf",\n\s*{column}\s+[^,\n]+(?=\n|$)", "", create.group(2), count=1
+            )
+        assert hits, (
+            f"bootstrap_sql_before({up_to}) found {table}.{column} in its "
+            f"CREATE but could not strip it, so the fixture it builds would "
+            f"already have a column migration {version} is supposed to add — "
+            f"the test would be vacuously green (G98)."
+        )
+        sql = sql[: create.start(2)] + body + sql[create.end(2) :]
+    return sql

@@ -6,6 +6,62 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-09-19
+
+Shelf has always had a separate media type for children's books. It never earned
+its keep: a kids book was filed, scanned, searched, edited and counted exactly
+like any other book, so the only thing the type really did was split your books
+into two piles and make you remember which pile a title was in. Worse, it was a
+one-way door — a book filed as a kids book could not be found by a filter for
+books, so a shelf of 200 books that quietly held 40 kids books reported 160.
+
+This release retires the type. On first boot every kids book becomes an ordinary
+book carrying a `Kids` tag, which is what the distinction always was: a label,
+not a kind. Nothing is lost — the books are all in one pile now, and the tag
+still tells you which ones are for the children. Two related pieces land with
+it, because a tag can only do that job if it survives a backup: tags now travel
+through the CSV export and the portable archive.
+
+**Read the upgrade note before you upgrade.** The conversion is one-way, and
+merging is part of it — a kids book that shares an ISBN or barcode with a book
+you already own is folded into that book rather than left beside it as a
+duplicate.
+
+### Changed
+
+- **Kids books are now books carrying a `Kids` tag.** `kids_book` was a media
+  type with no behaviour of its own — every place it appeared, it sat beside
+  `book` doing the same thing. On first boot every kids book is rewritten to a
+  `book` with the `Kids` tag, and one that shares an ISBN or barcode with a
+  book you already have is merged into it, keeping that book's own details and
+  moving across the tags, copies, history, loans, wishlist membership and
+  ownership. This is one-way: the way back is a backup taken before the
+  upgrade **and** the image you were running, since restoring through this
+  version converts the restored database again.
+- `kids_book` is still accepted on **input** — from a CSV, a portable archive,
+  or a device whose cached form still offers it — and is stored as `book`.
+  From a CSV or an archive it also adds the `Kids` tag, because a file that
+  says `kids_book` is making a statement about the book.
+
+### Added
+
+- **A `tags` column in the CSV export and import.** Tags are `; `-separated.
+  Import is additive: it adds tags and never removes one, so a file from an
+  older Shelf with no `tags` column imports exactly as before.
+- **Tags in the portable archive carry an optional media-type scope**, and
+  archives written before this release still import — their tags arrive
+  global, which is what they were. An existing tag keeps its own scope.
+- A nullable `media_type` scope on tags. It is advisory: nothing refuses or
+  strips an association because of it, and nothing sets it yet.
+
+### Fixed
+
+- **Merging two items no longer silently drops the merged-away row's wishlist
+  membership.** Every child table of an item cascades on delete, and list
+  membership was not being moved across first, so the want disappeared with no
+  error and no way to recover it. This affected every merge, not only the ones
+  this release performs.
+
 ## [0.42.5] - 2026-09-18
 
 0.42.4 gave every read of an *item* a single filtered view to go through, so
@@ -3747,6 +3803,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.43.0]: https://github.com/dgahagan/shelf/releases/tag/v0.43.0
 [0.42.5]: https://github.com/dgahagan/shelf/releases/tag/v0.42.5
 [0.42.4]: https://github.com/dgahagan/shelf/releases/tag/v0.42.4
 [0.42.3]: https://github.com/dgahagan/shelf/releases/tag/v0.42.3

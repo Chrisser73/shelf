@@ -7,7 +7,6 @@ COVERS_DIR = DATA_DIR / "covers"
 
 MEDIA_TYPES = {
     "book": "Book",
-    "kids_book": "Kids Book",
     "audiobook": "Audiobook",
     "ebook": "eBook",
     "magazine": "Magazine",
@@ -26,7 +25,29 @@ MEDIA_TYPES = {
 # names its own family below — periodicals are issue-based, music is
 # release-based. `dvd` and `video_game` belong to no family; `cd` belongs to
 # the music one. Declared here, beside the types themselves.
-BOOK_MEDIA_TYPES = frozenset({"book", "kids_book", "audiobook", "ebook", "comic", "manga"})
+BOOK_MEDIA_TYPES = frozenset({"book", "audiobook", "ebook", "comic", "manga"})
+
+# Retired physical types, mapped to the canonical value that replaced them.
+# `kids_book` was a user *category* wearing a format's clothes — it had no
+# behaviour of its own anywhere, and every existing row became a `book`
+# carrying a `Kids` tag at boot.
+#
+# The map is input-only: a key must never be a MEDIA_TYPES member, or the
+# vocabulary would have two spellings of one type and every consumer would
+# need to know both. Old CSVs, old archives and a client whose cached form
+# still offers the retired value keep working because of this, and nothing
+# at rest keeps the old spelling.
+MEDIA_TYPE_ALIASES = {"kids_book": "book"}
+
+
+def canonical_media_type(value):
+    """Map a retired media type onto the one that replaced it.
+
+    Anything else — including None, '' and an outright unknown value — is
+    returned unchanged, so this never decides whether a value is *valid*.
+    That stays with the caller's own membership test, which runs after.
+    """
+    return MEDIA_TYPE_ALIASES.get(value, value)
 
 # Periodicals are modelled as publication + concrete issue records. The
 # family is named separately even though the first supported format is
@@ -71,6 +92,23 @@ CREATOR_LABELS = {
 def creator_label(media_type):
     """The label for the creator field of `media_type`."""
     return CREATOR_LABELS.get(media_type, DEFAULT_CREATOR_LABEL)
+
+# Starter tag suggestions offered per media type by
+# app.services.tags.suggestions_for(), shown only until the user scopes a
+# tag of their own to that type. The three music formats share one list
+# since a genre vocabulary does not vary by physical format.
+MUSIC_GENRES = ["Rock", "Pop", "Jazz", "Classical", "Hip-hop", "Country",
+                "Electronic", "Folk", "Soundtrack", "Kids"]
+
+TAG_SUGGESTIONS = {
+    "book": ["Fiction", "Non-fiction", "Kids", "Cookbook", "Reference",
+             "Signed", "First edition", "Book club"],
+    "dvd": ["Movie", "TV series", "Kids", "Documentary", "Blu-ray", "4K"],
+    "video_game": ["Multiplayer", "Co-op", "Kids", "Collector's edition", "Sealed"],
+    "cd": MUSIC_GENRES,
+    "vinyl": MUSIC_GENRES,
+    "cassette": MUSIC_GENRES,
+}
 
 # Seed data — runtime platform list comes from game_platforms table
 GAME_PLATFORMS = {

@@ -20,11 +20,18 @@ from app.routers import items_common
 from app.services import cover_queue
 from app.services import isbn as isbn_svc
 from app.services import lists
+from app.services import tags as tags_svc
 from app.services.item_write import ItemValueError, insert_item, update_item_fields
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+
+# 50 MB, chosen deliberately: there is no MAX_COVER_SIZE equivalent to reuse
+# for a text upload. Read this many bytes + 1 (never the whole body
+# unbounded) so the existing `> MAX_CSV_UPLOAD_SIZE` branch below still
+# fires on an oversized file (G55).
+MAX_CSV_UPLOAD_SIZE = 50 * 1024 * 1024
 
 @router.get("/export/csv")
 async def export_csv(_=Depends(require_role("viewer"))):
@@ -34,7 +41,7 @@ async def export_csv(_=Depends(require_role("viewer"))):
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value", "owned", "wishlisted"])
+    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value", "owned", "wishlisted", "tags"])
 
     with get_db() as db:
         rows = db.execute(
@@ -43,6 +50,8 @@ async def export_csv(_=Depends(require_role("viewer"))):
             "LEFT JOIN locations l ON i.location_id = l.id "
             "ORDER BY i.title"
         ).fetchall()
+        # One grouped query for the whole result set — never a per-row query.
+        tags_by_item = tags_svc.tags_for_items(db, [row["id"] for row in rows])
 
     for row in rows:
         writer.writerow([
@@ -51,6 +60,7 @@ async def export_csv(_=Depends(require_role("viewer"))):
             row["series_name"], row["location_name"], row["source"],
             row["estimated_value"], row["manual_value"],
             row["owned"], 1 if row["wishlisted"] else 0,
+            "; ".join(tags_by_item.get(row["id"], [])),
         ])
 
     output.seek(0)
@@ -89,8 +99,8 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
     if not csv_file or not hasattr(csv_file, "read"):
         return {"error": "No file uploaded", "imported": 0, "skipped": 0, "errors": []}
 
-    raw = await csv_file.read()
-    if len(raw) > 50 * 1024 * 1024:  # 50 MB cap
+    raw = await csv_file.read(MAX_CSV_UPLOAD_SIZE + 1)
+    if len(raw) > MAX_CSV_UPLOAD_SIZE:  # 50 MB cap
         return {"error": "File too large (max 50 MB)", "imported": 0, "skipped": 0, "errors": []}
     content = raw.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(content))
@@ -134,6 +144,17 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 if norm["series_name"] and len(norm["series_name"]) > _CSV_MAX_TEXT:
                     errors.append(f"Row {i}: series_name too long (max {_CSV_MAX_TEXT} chars)")
                     continue
+                # Only the generic format reads a `tags` column. StoryGraph's
+                # own export already has a `Tags` column, and the header
+                # lowercasing above means row["tags"] exists for StoryGraph
+                # rows too — length-checking it unconditionally would start
+                # failing rows a StoryGraph file used to import fine, for a
+                # cell normalize_storygraph never reads.
+                if fmt == reading_imports.GENERIC:
+                    raw_tags = row.get("tags")
+                    if raw_tags and len(raw_tags) > _CSV_MAX_TEXT:
+                        errors.append(f"Row {i}: tags too long (max {_CSV_MAX_TEXT} chars)")
+                        continue
 
                 isbn_val = norm["isbn"]
                 media = norm["media_type"]
@@ -207,6 +228,15 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     # mode == update: refresh metadata, and reading state
                     # for reading-tracker imports
                     _update_from_csv_row(db, existing["id"], norm)
+                    # Additive only — import never removes a tag. An absent
+                    # `tags` column and an empty `tags` cell are deliberately
+                    # the *same* answer here (contrast the owned/wishlisted
+                    # flags above, G87, where absence and presence-but-empty
+                    # differ): parse_tag_list already turns both into [],
+                    # so attach_tags on [] is a no-op either way — there is
+                    # no "clear the tags" state for a CSV row to express.
+                    if norm.get("tags"):
+                        tags_svc.attach_tags(db, existing["id"], norm["tags"])
                     # Each state flag changes only when this row says
                     # something about it (G87) — a metadata-only CSV must not
                     # flip a wishlisted or neither row to owned. Reading-
@@ -246,6 +276,8 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     wishlisted=wishlisted,
                     source=source,
                 )
+                if norm.get("tags"):  # additive only — see the update path's comment
+                    tags_svc.attach_tags(db, new_id, norm["tags"])
                 if isbn_val:
                     new_item_ids.append(new_id)
                 imported += 1

@@ -26,6 +26,42 @@ Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
 
+### After upgrading to 0.43.0
+
+**Kids books become books with a tag.** `kids_book` was a media type that had
+no behaviour of its own — everything it did, `book` already did. On the first
+boot after this upgrade, every kids book in your library becomes a **book
+carrying the `Kids` tag**. Nothing is lost: the tag is filterable on Browse
+exactly as the old type was, and the `Kids` tag is global, so you can put it
+on anything.
+
+**A kids book that shares an ISBN or barcode with a book you already have is
+merged into it.** That happens because the two rows become the same book once
+the type is translated, and they cannot both exist. The existing book's own
+details are kept — its title, notes, value and reading status. What moves
+across is everything you would miss: tags, physical copies, scan and reading
+history, loans (including both, if the two were on loan at once), and wishlist
+membership. If the kids book was one you owned, the surviving book is marked
+owned too. A physical copy brings its own shelf location with it, so the
+surviving book can show a location it did not have before — that is the copy's
+location, not a change to the book's own details.
+
+**This is one-way, and the way back is a backup *and* the previous image.**
+There is no migration that turns books back into kids books, and restoring a
+backup through this version will simply convert it again — Settings → Restore
+re-runs the upgrade on whatever it restores. To get back to how things were
+you need both the backup you took before upgrading and the Shelf version you
+were on. **The portable archive is not a way back**: an archive that names
+`kids_book` imports as a book with the `Kids` tag, exactly like the upgrade.
+
+**One migration runs.** It adds a nullable `media_type` column to `tags`,
+which is an advisory scope for a later release; every existing tag comes out
+global, and nothing is scoped by this upgrade.
+
+**The CSV export has a new last column, `tags`.** Import reads it and is
+additive — it adds tags and never removes one — so a file from an older Shelf
+with no `tags` column imports exactly as it did before.
+
 ### After upgrading to 0.42.4
 
 **Two migrations run.** They add a `deleted_at` column to `items` and to

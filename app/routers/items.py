@@ -13,7 +13,7 @@ from app import nav
 from app.auth import require_role
 
 logger = logging.getLogger(__name__)
-from app.config import MEDIA_TYPES, HTTP_TIMEOUT, DEFAULT_PAGE_SIZE
+from app.config import MEDIA_TYPES, HTTP_TIMEOUT, DEFAULT_PAGE_SIZE, canonical_media_type
 from app.database import (get_db, get_setting, gc_orphaned_series_meta,
                           get_reading_history)
 from app.routers.series import MAX_SERIES_NAME
@@ -241,6 +241,7 @@ async def scan_isbn(
     """Scan a barcode: mode-aware dispatch for add, lend, return, move, inventory, lookup, quick_rate."""
     templates = request.app.state.templates
     raw = isbn.strip()
+    media_type = canonical_media_type(media_type)  # above every mode's guards
 
     # #90: a bare legacy UPC carries no title, so the card below asks for the
     # five digits printed beside it.  Typing them turns the scan into the
@@ -472,7 +473,7 @@ async def scan_isbn(
     # prefix is certain, so a stale "DVD" or "Video Game" in the picker is
     # overridden to Book here rather than filing a novel as a disc; the
     # book-family distinctions the barcode genuinely cannot make
-    # (kids_book / audiobook / ebook / comic) are left to the user.
+    # (audiobook / ebook / comic) are left to the user.
     #
     # There is no product record on this branch — an ISBN never reaches UPC
     # Item DB — so tiers 2 and 3 have nothing to read and tier 1 decides
@@ -637,7 +638,7 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
         )
 
     isbn = form.get("isbn", "").strip()
-    media_type = form.get("media_type", "book")
+    media_type = canonical_media_type(form.get("media_type", "book"))
     # Defaulted to "add" to match /api/scan's own Form("add") at :233 — the
     # value reaches scan_log.mode, so an absent field must log what the scan
     # route would log for the same submission.
@@ -1185,6 +1186,9 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
                 return _refused("invalid_upc")
             fields["upc"] = canonical_upc
 
+        if fields.get("media_type"):
+            fields["media_type"] = canonical_media_type(fields["media_type"])
+
         # Keep the same duplicate identity rule used by normal scan/add:
         # a retail barcode may repeat across media types, never within one.
         if fields.get("upc"):
@@ -1347,13 +1351,13 @@ async def fetch_synopsis(item_id: int, _=Depends(require_role("editor"))):
 @router.get("/synopses/backfill/stream")
 async def backfill_synopses_stream(request: Request, _=Depends(require_role("admin"))):
     """SSE endpoint: fetch descriptions for all book-family items missing one."""
-    placeholders = ",".join("?" * len(synopsis_svc.BOOK_MEDIA_TYPES))
+    placeholders = ",".join("?" * len(synopsis_svc.SYNOPSIS_MEDIA_TYPES))
     with get_db() as db:
         items = db.execute(
             f"SELECT id, isbn, title, authors FROM items_live "
             f"WHERE (description IS NULL OR description = '') "
             f"AND media_type IN ({placeholders}) ORDER BY id",
-            synopsis_svc.BOOK_MEDIA_TYPES,
+            synopsis_svc.SYNOPSIS_MEDIA_TYPES,
         ).fetchall()
         hc_token = get_setting(db, "hardcover_token")
         google_api_key = get_setting(db, "google_books_api_key")

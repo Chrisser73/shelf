@@ -17,6 +17,7 @@ import sqlite3
 import pytest
 
 from app.database import MIGRATION_TABLES, MIGRATIONS, get_db
+from tests.conftest import bootstrap_sql_before
 
 _ALTER = re.compile(r"ALTER TABLE (\w+) ADD COLUMN (\w+)", re.I)
 _CREATE = re.compile(r"CREATE TABLE IF NOT EXISTS (\w+)", re.I)
@@ -201,3 +202,82 @@ def test_every_migration_table_exists_on_a_fresh_database(db):
         f"Tables reachable only via MIGRATIONS are missing on a fresh "
         f"database: {sorted(missing)} (G1)."
     )
+
+
+class TestTagsScopeColumnOnAnUpgradedDatabase:
+    """Migration 39's own path — the one a fresh database never takes.
+
+    `test_fresh_database_has_every_migration_column` above already covers the
+    bootstrap route, so this class covers only the upgrade: a database built
+    from the bootstrap SQL **as it stood before 39** (G98 — running the
+    current `MIGRATION_TABLES` first would create `tags` with the column
+    already on it, and the test would pass with entry 39 deleted).
+    """
+
+    def _legacy_db(self, tmp_path):
+        """A database as an install predating migration 39 left it."""
+        from app.database import SCHEMA
+
+        conn = sqlite3.connect(str(tmp_path / "legacy.db"))
+        conn.row_factory = sqlite3.Row
+        conn.executescript(SCHEMA)
+        for version, description, sql in MIGRATIONS:
+            if version >= 39:
+                continue
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                # Tables MIGRATION_TABLES creates complete do not exist yet;
+                # those migrations are baked into their CREATE TABLE anyway.
+                pass
+            conn.execute(
+                "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+                (version, description),
+            )
+        conn.executescript(bootstrap_sql_before(38))
+        conn.commit()
+        return conn
+
+    def test_the_legacy_fixture_really_predates_the_column(self, tmp_path):
+        """Without this the three tests below prove nothing."""
+        conn = self._legacy_db(tmp_path)
+        assert "media_type" not in _columns(conn, "tags")
+
+    def test_upgrading_adds_the_column_and_leaves_existing_tags_global(
+        self, tmp_path
+    ):
+        from app.database import _run_migrations
+
+        conn = self._legacy_db(tmp_path)
+        conn.execute("INSERT INTO tags (name) VALUES ('Kids')")
+        conn.commit()
+
+        _run_migrations(conn)
+
+        assert "media_type" in _columns(conn, "tags")
+        row = conn.execute(
+            "SELECT name, media_type FROM tags WHERE name = 'Kids'"
+        ).fetchone()
+        assert row["name"] == "Kids"
+        assert row["media_type"] is None, (
+            "An existing tag must come out of the upgrade globally scoped — "
+            "the column is advisory and nothing has set it."
+        )
+
+    def test_the_upgrade_records_version_39(self, tmp_path):
+        from app.database import _run_migrations
+
+        conn = self._legacy_db(tmp_path)
+        _run_migrations(conn)
+        applied = {
+            r["version"]
+            for r in conn.execute("SELECT version FROM schema_version")
+        }
+        assert 39 in applied
+
+    def test_a_second_run_applies_nothing(self, tmp_path):
+        from app.database import _run_migrations
+
+        conn = self._legacy_db(tmp_path)
+        _run_migrations(conn)
+        assert _run_migrations(conn) == []

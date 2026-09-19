@@ -122,6 +122,16 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         # gc_orphaned_series_meta: a soft-deleted item keeps its series
         # alive so a restore finds it intact.
         "SELECT 1 FROM items WHERE series_name = ? COLLATE NOCASE": 1,
+        # _retire_kids_book's unlocked short-circuit and its re-read under
+        # the lock. A trashed kids_book row must be rewritten too: leaving
+        # one behind means a row whose media_type the write funnel refuses
+        # if it is ever restored.
+        "FROM items WHERE media_type = 'kids_book'": 2,
+        # _retire_kids_book's twin lookup. It exists to predict the
+        # UNIQUE(isbn, media_type) collision the rewrite would otherwise
+        # hand to the database, and a trashed row still holds its unique
+        # slot (G107).
+        "SELECT id FROM items WHERE media_type = 'book' AND": 1,
     },
     "app/routers/items.py": {
         # _find_item_by_barcode's existing-item scan modes must find a

@@ -1,7 +1,16 @@
 function shelfFillPage() {
     return {
         location: localStorage.getItem('shelf_fill_location') || '',
-        mediaType: localStorage.getItem('shelf_fill_media_type') || 'auto',
+        // `kids_book` no longer exists as an option; normalize a cached
+        // reading of it to `book` and correct the stored value.
+        mediaType: (function () {
+            var v = localStorage.getItem('shelf_fill_media_type') || 'auto';
+            if (v === 'kids_book') {
+                v = 'book';
+                localStorage.setItem('shelf_fill_media_type', v);
+            }
+            return v;
+        })(),
         platform: localStorage.getItem('shelf_fill_platform') || '',
         cameraActive: false,
         scanPaused: false,

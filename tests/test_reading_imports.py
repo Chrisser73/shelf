@@ -142,6 +142,36 @@ class TestNormalizeGenericWishlisted:
         assert normalize_generic({"title": "T"})["wishlisted"] is None
 
 
+class TestNormalizeGenericTags:
+    """normalize_generic's `tags` column, and the kids_book alias's Kids
+    tag (T8) — the parser alone; the importer's own additive-only /
+    length-check behavior is pinned in test_csv_roundtrip.py."""
+
+    def test_semicolon_list_parsed(self):
+        n = normalize_generic({"title": "T", "tags": "Signed; First Edition"})
+        assert n["tags"] == ["Signed", "First Edition"]
+
+    def test_absent_column_is_empty_list(self):
+        assert normalize_generic({"title": "T"})["tags"] == []
+
+    def test_blank_cell_is_empty_list(self):
+        assert normalize_generic({"title": "T", "tags": ""})["tags"] == []
+
+    def test_kids_book_media_type_earns_the_kids_tag(self):
+        n = normalize_generic({"title": "T", "media_type": "kids_book"})
+        assert n["media_type"] == "book"
+        assert n["tags"] == ["Kids"]
+
+    def test_plain_book_media_type_earns_no_tag(self):
+        n = normalize_generic({"title": "T", "media_type": "book"})
+        assert n["media_type"] == "book"
+        assert n["tags"] == []
+
+    def test_kids_book_does_not_duplicate_an_existing_kids_tag(self):
+        n = normalize_generic({"title": "T", "media_type": "kids_book", "tags": "kids"})
+        assert n["tags"] == ["kids"]  # NOCASE match on the row's own spelling wins
+
+
 class TestNormalizeGoodreads:
     def _row(self, **over):
         base = {

@@ -999,7 +999,7 @@ class TestTheBarcodeOutranksTheDropdown:
         assert row is not None, "the item must still be created"
         assert row["media_type"] == "book"
 
-    @pytest.mark.parametrize("hint", ["kids_book", "audiobook", "ebook", "comic"])
+    @pytest.mark.parametrize("hint", ["manga", "audiobook", "ebook", "comic"])
     def test_an_isbn_keeps_a_book_family_hint_the_barcode_cannot_contradict(
         self, admin_client, db, stub_book_lookup, hint
     ):
@@ -1135,3 +1135,78 @@ class TestMoveAndInventoryRefuseAStaleLocation:
         assert resp.status_code == 200
         assert "data-scan-error" in resp.text
         assert db.execute("SELECT location_id FROM items WHERE id = ?", (item_id,)).fetchone()["location_id"] == here
+
+
+class TestTheRetiredKidsBookAliasOnScan:
+    """`kids_book` is still accepted on input — a device whose cached form
+    still offers it, or a bookmarked POST, must keep working.
+
+    The canonicalisation sits at the top of the route rather than beside the
+    insert (G100). A guard that compared the raw value would miss a twin
+    already stored under `book`, and the duplicate card would never appear —
+    so the pin below seeds the row *first* and forbids the provider call.
+    """
+
+    ISBN = "9780306406157"
+
+    @pytest.fixture
+    def no_provider_call(self, monkeypatch):
+        from app.routers import items_common
+
+        async def _fail(*args, **kwargs):
+            raise AssertionError(
+                "the duplicate guard must answer before any provider call — "
+                "the row was seeded before the request"
+            )
+
+        monkeypatch.setattr(items_common, "_lookup_metadata", _fail)
+
+    def test_a_stale_kids_book_hint_stores_a_book(
+        self, admin_client, db, stub_book_lookup_alias
+    ):
+        resp = admin_client.post("/api/scan", data={
+            "isbn": self.ISBN, "media_type": "kids_book", "mode": "add",
+        })
+        assert resp.status_code == 200
+        row = db.execute(
+            "SELECT media_type FROM items WHERE isbn = ?", (self.ISBN,)
+        ).fetchone()
+        assert row is not None, "the item must still be created"
+        assert row["media_type"] == "book"
+
+    def test_a_pre_seeded_book_is_found_as_a_duplicate(
+        self, admin_client, db, no_provider_call
+    ):
+        """The G100 shape: the row exists before the request, so only the
+        early guard can answer.
+
+        Note on what this does and does not discriminate. On the ISBN path
+        the guard keys on `detect`'s *resolved* type, and an unrecognised
+        hint already resolves to `book` for an ISBN barcode — so this stays
+        green even with the alias removed. It is a regression pin on the
+        outcome, not the pin that proves the alias is wired. That one is
+        `tests/test_manual_add.py`, where the raw value reaches the
+        duplicate guard with no detection in between.
+        """
+        _insert_item(db, title="Already Here", isbn=self.ISBN, media_type="book")
+        db.commit()
+
+        resp = admin_client.post("/api/scan", data={
+            "isbn": self.ISBN, "media_type": "kids_book", "mode": "add",
+        })
+
+        assert resp.status_code == 200
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE isbn = ?", (self.ISBN,)
+        ).fetchone()["c"] == 1, "no second row may be created"
+
+
+@pytest.fixture
+def stub_book_lookup_alias(monkeypatch):
+    from app.routers import items_common
+
+    async def _lookup(isbn13, hc_token, client, *, google_api_key=None):
+        meta = {"title": "A Real Novel", "authors": "Someone"}
+        return (meta, "openlibrary", {}, provider_result.found("openlibrary", meta))
+
+    monkeypatch.setattr(items_common, "_lookup_metadata", _lookup)

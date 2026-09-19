@@ -17,7 +17,7 @@ its home.
 
   | Media type | What it searches | Tiles are labelled |
   |---|---|---|
-  | Books, ebooks, audiobooks, kids' books, comics | Google Books and Open Library | by source |
+  | Books, ebooks, audiobooks, comics | Google Books and Open Library | by source |
   | DVDs and Blu-rays | the film's poster set on TMDb | by language (`TMDb · EN`) — the same film's posters differ mostly by language |
   | Video games | IGDB cover art **and** key artwork, as separate tiles | by game and kind (`IGDB · Portal · cover`) |
 
@@ -45,7 +45,7 @@ its home.
   captured on add.
 - **Reading status** — Want to read / Reading / Read, with start and finish
   dates. Viewers can set this too; it's the one thing they can change. It
-  appears on books, kids' books, audiobooks, ebooks and comics — discs and
+  appears on books, audiobooks, ebooks and comics — discs and
   games don't carry one.
 - **Location**. Locations can be nested, and an item shows the full path —
   see [Locations](locations.md). Every location shown here is a link to
@@ -84,7 +84,10 @@ its home.
 
   Adding, editing and removing copies needs an editor or admin account.
   Viewers see the list and nothing else.
-- **Tags** — add or remove chips inline.
+- **Tags** — add or remove chips inline. Tags are how categories that are
+  not formats are recorded: a kids' book is a **book tagged `Kids`**, not a
+  media type of its own. The `Kids` tag is global, so it can sit on anything;
+  a later release lets you scope a tag to one media type if you want to.
 - **Loan state** — who has it and since when, with check-in right there.
 - **Value** — ISBNdb list price if valued, or a manual value you enter.
 - **Links** — jump to the item in Audiobookshelf or Hardcover when linked.

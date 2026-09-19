@@ -36,7 +36,8 @@ so an interrupted upgrade replays safely.
 Main tables: `items` (everything — books, discs, games; ~38 columns incl.
 `media_type`, `owned`, `reading_status`, `series_name`/`position`,
 `location_id`, value columns, language, external ids), `item_copies`,
-`locations`, `borrowers` + `checkouts`, `tags` + `item_tags`, `series_meta` (Hardcover
+`locations`, `borrowers` + `checkouts`, `tags` (`name` unique NOCASE, plus a
+nullable `media_type` **scope**) + `item_tags`, `series_meta` (Hardcover
 completeness), `reading_log`, `users`, `settings` (k/v, secrets encrypted),
 `share_links`, `scan_log`, `game_platforms`, `valuation_history`,
 `cover_queue`, `lists` (named lists — one seeded row, `wishlist`) +
@@ -47,6 +48,38 @@ and a 978/979 ISBN), `item_links`, and the per-family side tables described
 below — `music_releases` + `music_media` + `music_tracks` +
 `music_identifiers`, `periodical_publications` + `periodical_issues`,
 `romm_records` and `komga_records`.
+
+**`tags.media_type` is an advisory scope, not a constraint.** NULL means the
+tag is global. Nothing strips or refuses an association whose item is outside
+the scope — the column exists so a later release can offer a tag where it is
+relevant without a schema change, and enforcement can be layered on top if it
+is ever wanted. It is added in both places G1 requires: as `MIGRATIONS` entry
+39 *and* in `MIGRATION_TABLES`' `CREATE TABLE tags`. That is the opposite of
+the `deleted_at` columns below, and the difference is where the table is
+created — `tags` is created by `executescript(MIGRATION_TABLES)`, which runs
+*after* the migrations loop, so on a fresh database the ALTER is skipped as
+benign and only the CREATE can supply the column.
+
+**A boot-time step retires `kids_book`.** `_retire_kids_book(db)` runs beside
+`_seed_game_platforms` at the end of `_run_migrations` and rewrites every
+`kids_book` row to `book` carrying a `Kids` tag, merging into an existing
+`book` twin where one shares its ISBN or barcode. It is Python rather than a
+`MIGRATIONS` entry because a collision needs `item_merge.reparent_children`;
+splitting the operation across SQL and Python would let an `INSERT INTO
+item_tags` migration be benign-skipped while the row rewrite ran, leaving
+books with no tag. It short-circuits on zero matching rows before taking any
+lock, so a second boot does nothing. **It reads the physical `items` table**,
+allowlisted by path in `scripts/check_items_live.py`: a trashed row must be
+rewritten too, and the twin lookup predicts a `UNIQUE(isbn, media_type)`
+collision, which a view that hides trashed rows cannot do.
+
+**`kids_book` survives as an input alias.** `config.MEDIA_TYPE_ALIASES` maps
+it to `book` and `canonical_media_type()` resolves it, so an old CSV, an old
+archive or a device whose cached form still offers it keeps working. Routes
+canonicalise above their own duplicate guards — a guard comparing the raw
+value cannot match a twin stored under the canonical one — and
+`item_write.validate_item_fields` is the backstop that makes it impossible
+for a retired value to reach the table by any path.
 
 **`items` and `item_copies` each carry `deleted_at TEXT DEFAULT NULL`, and
 nothing sets it.** Deletion is still a `DELETE`: the column is the seam a later
@@ -179,8 +212,8 @@ the item for the same reason the table exists at all: two copies of one book are
 two objects, and they may sit apart.
 
 **Media families are declared in `app/config.py`, beside the types themselves.**
-`MEDIA_TYPES` is the flat list of thirteen; three frozensets name the families
-over it — `BOOK_MEDIA_TYPES` (book, kids book, audiobook, eBook, comic, manga),
+`MEDIA_TYPES` is the flat list of twelve; three frozensets name the families
+over it — `BOOK_MEDIA_TYPES` (book, audiobook, eBook, comic, manga),
 `PERIODICAL_MEDIA_TYPES` (magazine) and `MUSIC_MEDIA_TYPES` (vinyl, cassette,
 cd, digital music). `dvd` and `video_game` belong to no family, deliberately.
 Routes, templates and services share one membership test rather than each
@@ -344,8 +377,8 @@ provider answer to project, because no provider was asked.
 
 `detect_media_type(barcode_type, hint, title, category)` is pure and offline,
 and runs four tiers in confidence order: an ISBN prefix decides the
-book family outright (the dropdown only picks *among* book / kids book /
-audiobook / eBook / comic, which no barcode can distinguish); then platform,
+book family outright (the dropdown only picks *among* book / audiobook /
+eBook / comic, which no barcode can distinguish); then platform,
 format, medium and audio markers in the **raw** retail title, unless the title
 is hardware, in which case none of them run; then a category; then a fallback
 whose first arm is the hardware case above.
@@ -931,6 +964,15 @@ plain handlers taking everything but the database and the scan log as arguments;
 `services/item_merge.py` is the same shape for merge. Split on 2026-09-07, when
 two independent changes together pushed the module past the cap.
 
+`reparent_children` moves every child record of the merged-away row onto the
+kept one before the `DELETE`, because each child table is `ON DELETE CASCADE`.
+List membership moves through `lists.reparent`, which lives in the module that
+owns `list_items` rather than beside the other reparent helpers, and carries
+one rule the others do not: an **owned** keeper sheds the wishlist membership
+it just inherited, since owning a thing and wanting it cannot both be true.
+`romm_records`, `komga_records`, `periodical_issues` and the `music_*` tables
+are deliberately left to the cascade — each keys a single item by design.
+
 Each media family that needed its own page got its own router rather than more
 of `items.py`: `music.py`, `periodicals.py`, `shelf_fill.py`,
 `location_order.py`, and `romm.py` / `komga.py` for the two sync integrations.
@@ -982,6 +1024,14 @@ re-mirroring an unchanged `location_id`. `item_edit` in `app/routers/pages.py`
 computes the same two predicates so the form can mark a stored value it is
 letting through. The UPC check moved inside the DB block for this, making the
 route's order exemption → UPC check → conflict lookup → funnel.
+
+**Tag logic lives in `app/services/tags.py`**, with `routers/tags.py` as a thin
+HTTP wrapper over it. It holds name normalisation, get-or-create (an existing
+tag wins outright — its scope is never overwritten), attach/detach with orphan
+collection, a grouped `tags_for_items` for export paths, and the scoped
+suggestion list. Every function runs in the caller's transaction, opens no
+connection of its own and logs nothing, because callers may hold a write lock
+around it.
 
 **Wishlist membership is a list, not a column.** All three funnels accept a
 virtual `wishlisted: bool` field, popped before the name check so it never
@@ -1103,7 +1153,7 @@ Two details decide whether the guard actually guards:
 
 Some reads stay on the physical tables, each allowlisted by repository-relative
 path — never by basename — with its reason at the entry. On the **items** side,
-11 entries excusing 12 reads:
+13 entries excusing 15 reads:
 
 - the `items_live` CREATE in `get_db()` itself — the seam reads the physical
   table by definition, and so does the `copies_live` CREATE, which joins `items`;
@@ -1115,7 +1165,12 @@ path — never by basename — with its reason at the entry. On the **items** si
   rather than creating a duplicate;
 - the `series_meta` garbage collector in `database.py` — a soft-deleted item
   keeps its series alive, so restoring it finds the series intact;
-- `_barcode_conflict`'s join (`routers/item_copies.py`) — see the class below.
+- `_barcode_conflict`'s join (`routers/item_copies.py`) — see the class below;
+- `_retire_kids_book`'s two reads in `database.py` — its short-circuit and its
+  re-read under the write lock, because a trashed `kids_book` row must be
+  rewritten too, and its twin lookup, which predicts the
+  `UNIQUE(isbn, media_type)` collision the rewrite would otherwise hand to the
+  database.
 
 On the **copies** side, 8 entries excusing 8 reads, and they are all **one
 class: a read that exists to predict a UNIQUE violation reads the physical

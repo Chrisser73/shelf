@@ -76,3 +76,48 @@ class TestCreatorLabelMapIntegrity:
         type someone added to the map without changing its answer."""
         repeats = [k for k, v in CREATOR_LABELS.items() if v == DEFAULT_CREATOR_LABEL]
         assert not repeats, f"redundant CREATOR_LABELS entries: {sorted(repeats)}"
+
+
+class TestMediaTypeAliases:
+    """`MEDIA_TYPE_ALIASES` — retired physical types, mapped to what replaced
+    them. Input-only: nothing at rest keeps the old spelling."""
+
+    def test_no_alias_key_is_a_live_media_type(self):
+        """A key that is still a MEDIA_TYPES member would give the vocabulary
+        two spellings of one type, and every consumer would need both."""
+        from app.config import MEDIA_TYPE_ALIASES
+
+        live = sorted(set(MEDIA_TYPE_ALIASES) & set(MEDIA_TYPES))
+        assert not live, f"alias keys that are still live types: {live}"
+
+    def test_every_alias_target_is_a_live_media_type(self):
+        from app.config import MEDIA_TYPE_ALIASES
+
+        unknown = sorted(
+            v for v in MEDIA_TYPE_ALIASES.values() if v not in MEDIA_TYPES
+        )
+        assert not unknown, f"alias targets that are not live types: {unknown}"
+
+    def test_kids_book_canonicalises_to_book(self):
+        from app.config import canonical_media_type
+
+        assert canonical_media_type("kids_book") == "book"
+
+    def test_a_live_type_is_returned_unchanged(self):
+        from app.config import canonical_media_type
+
+        for name in MEDIA_TYPES:
+            assert canonical_media_type(name) == name
+
+    def test_it_does_not_decide_validity(self):
+        """An unknown value passes straight through — the caller's own
+        membership test is what refuses it, and it runs after."""
+        from app.config import canonical_media_type
+
+        assert canonical_media_type("nonsense") == "nonsense"
+        assert canonical_media_type("") == ""
+        assert canonical_media_type(None) is None
+
+    def test_kids_book_is_gone_from_the_live_vocabulary(self):
+        assert "kids_book" not in MEDIA_TYPES
+        assert "kids_book" not in BOOK_MEDIA_TYPES

@@ -846,3 +846,40 @@ class TestTheRejectedCopyNeverCreepsBackIntoTheRouter:
 
         router = Path(__file__).resolve().parents[1] / "app/routers/items_catalog.py"
         assert "IGDB rejected" not in router.read_text()
+
+
+class TestTheRetiredKidsBookAlias:
+    """`kids_book` left MEDIA_TYPES, so without the alias these routes'
+    `is_valid_media_type` guard refuses a stale client outright — the user
+    gets "Unrecognised media type" for a value the app itself served them
+    yesterday."""
+
+    def test_books_add_accepts_it_and_stores_a_book(self, admin_client, db, monkeypatch):
+        from app.routers import items_common
+
+        async def _lookup(isbn13, hc_token, client, *, google_api_key=None):
+            from app.services import provider_result
+
+            meta = {"title": "Goodnight Moon", "authors": "M. W. Brown"}
+            return (meta, "openlibrary", {}, provider_result.found("openlibrary", meta))
+
+        monkeypatch.setattr(items_common, "_lookup_metadata", _lookup)
+
+        resp = admin_client.post(
+            "/api/books/add",
+            data={"isbn": "9780306406157", "media_type": "kids_book"},
+        )
+
+        assert resp.status_code == 200
+        assert "Unrecognised media type" not in resp.text
+        row = db.execute(
+            "SELECT media_type FROM items WHERE isbn = ?", ("9780306406157",)
+        ).fetchone()
+        assert row is not None, "the item must still be created"
+        assert row["media_type"] == "book"
+
+    def test_title_search_does_not_refuse_it(self, admin_client):
+        resp = admin_client.get("/api/title-search", params={
+            "q": "moon", "media_type": "kids_book",
+        })
+        assert resp.status_code == 200

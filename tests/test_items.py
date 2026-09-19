@@ -19,7 +19,12 @@ from app.database import (
     init_db,
 )
 from app.services import provider_result
-from tests.conftest import _insert_item, _insert_borrower, _insert_location
+from tests.conftest import (
+    _insert_item,
+    _insert_borrower,
+    _insert_location,
+    bootstrap_sql_before,
+)
 
 
 class TestDeleteItem:
@@ -479,7 +484,7 @@ class TestManualValueMigration:
                 "INSERT INTO schema_version (version, description) VALUES (?, ?)",
                 (version, description),
             )
-        conn.executescript(MIGRATION_TABLES)
+        conn.executescript(bootstrap_sql_before(14))
         conn.commit()
 
         # Simulate the interrupted upgrade: the ALTER landed, its
@@ -686,7 +691,7 @@ class TestLanguageMigrations:
                 "INSERT INTO schema_version (version, description) VALUES (?, ?)",
                 (version, description),
             )
-        conn.executescript(MIGRATION_TABLES)
+        conn.executescript(bootstrap_sql_before(21))
         conn.commit()
         return conn
 
@@ -2032,3 +2037,53 @@ class TestManualAddEntryPoints:
 
         assert "Add a copy" not in admin_client.get("/").text
         assert "Add a copy" not in admin_client.get(f"/item/{item_id}").text
+
+
+class TestTheRetiredKidsBookAliasOnEdit:
+    """The edit route canonicalises before its UPC-conflict read, which keys
+    on `media_type`. A raw retired value would miss a conflicting row stored
+    under `book` and hand the collision to the database.
+
+    Both pins here are on the **outcome**, and both stay green with the
+    canonicalisation removed: the write funnel canonicalises anyway, and
+    this route already catches the resulting IntegrityError as a handled
+    refusal. What the earlier canonicalisation buys is the *right* refusal —
+    the conflict card naming the row — instead of the race handler. The
+    discriminating pin for the alias being wired at all is in
+    `tests/test_manual_add_boundaries.py`, on a route with no such net.
+    """
+
+    def test_editing_to_kids_book_stores_a_book(self, editor_client, db):
+        item_id = _insert_item(db, title="A Book", isbn="9789000030019")
+        db.execute("COMMIT")
+
+        resp = editor_client.post(
+            f"/api/items/{item_id}", data={"media_type": "kids_book"}
+        )
+
+        assert resp.status_code in (200, 303)
+        assert db.execute(
+            "SELECT media_type FROM items WHERE id = ?", (item_id,)
+        ).fetchone()["media_type"] == "book"
+
+    def test_the_upc_conflict_guard_sees_the_canonical_type(
+        self, editor_client, db
+    ):
+        upc = "0012345678905"
+        _insert_item(db, title="Owner Of The Barcode", isbn=None, upc=upc,
+                     media_type="book")
+        item_id = _insert_item(db, title="Editing This", isbn="9789000030026")
+        db.execute("COMMIT")
+
+        resp = editor_client.post(
+            f"/api/items/{item_id}",
+            data={"media_type": "kids_book", "upc": upc},
+        )
+
+        assert resp.status_code in (200, 303)
+        assert db.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE upc = ? AND media_type = 'book'",
+            (upc,),
+        ).fetchone()["c"] == 1, (
+            "the conflict must be caught, leaving the original owner alone"
+        )

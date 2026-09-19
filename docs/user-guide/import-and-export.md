@@ -15,11 +15,13 @@ All under Settings → Data. Four mechanisms, each for a different job.
 
 `title, authors, isbn, media_type, platform, publisher, publish_year,
 page_count, series_name, location, source, estimated_value, manual_value,
-owned, wishlisted`
+owned, wishlisted, tags`
 
 `owned` and `wishlisted` are each `1` or `0`, so the file records all three
 states: owned (`1`, `0`), on your wishlist (`0`, `1`) and neither (`0`, `0`).
 Re-importing the file into an empty library brings all three back.
+
+`tags` holds the item's tags, separated by `; `.
 
 ## CSV import
 
@@ -38,6 +40,16 @@ items that also lack one: it will not be folded into an edition you own that
 **ISBN form doesn't matter.** `0441172717`, `9780441172719` and
 `978-0-441-17271-9` are the same book, so a file carrying any of them matches
 the copy you already own — whichever form Shelf stored it under.
+
+**Tags.** Import is **additive**: a `tags` cell adds tags, and never removes
+one the item already has. A file with no `tags` column and a row with an
+empty `tags` cell are the same thing — both leave existing tags alone, so
+there is no way for a CSV row to clear an item's tags.
+
+**A row whose `media_type` is `kids_book`** — an export from Shelf 0.42.x or
+earlier — imports as a `book` **and gains the `Kids` tag**, matching what the
+upgrade did to rows already in your library. It also matches an existing
+`book` with the same ISBN rather than adding a second row.
 
 **Owned and wishlist columns.** A row's `owned` and `wishlisted` values
 (`1`/`0`, `true`/`false` or `yes`/`no`) are applied as given, in this order:
@@ -135,6 +147,19 @@ Three things to know about how copies come back:
 - **A copy barcode already in use is imported without the barcode**, and the
   import's errors list names both items so you can sort it out. Copy barcodes
   are unique across your whole collection.
+
+And two about tags:
+
+- **Each tag carries an optional media-type scope.** An archive written by an
+  older Shelf has no scope on its tags, and still imports — those tags arrive
+  global, which is what they were. A scope your library does not recognise is
+  imported as global rather than losing the tag. A tag you already have keeps
+  its own scope; the archive never overwrites it.
+- **An item whose `media_type` is `kids_book`** — from Shelf 0.42.x or earlier
+  — imports as a `book` carrying the `Kids` tag. If the same archive also holds
+  the real `book` for that ISBN or barcode, the two become one item once the
+  retired type is translated, so the kids-book record is refused and named in
+  the import's errors; the `book` imports normally.
 
 **Import** is a two-step: upload, then a **preview** shows how many items are
 new, how many you already have, and how each duplicate was matched

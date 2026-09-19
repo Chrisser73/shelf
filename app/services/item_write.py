@@ -75,7 +75,7 @@ follow-up writes (tags, scan log, cover path) to commit together, and
 
 from typing import Any, Iterable, Mapping
 
-from app.config import MEDIA_TYPES
+from app.config import MEDIA_TYPES, canonical_media_type
 from app.database import get_game_platforms
 from app.services import isbn as isbn_svc
 from app.services import item_copies
@@ -215,7 +215,13 @@ def validate_item_fields(db, fields: Mapping[str, Any]) -> dict[str, Any]:
             out["isbn"], out["isbn10"] = pair
 
     if "media_type" in out:
-        mt = out["media_type"]
+        # The backstop for every write path — insert, update and bulk update
+        # alike. Routes canonicalise earlier, above their own duplicate
+        # guards, because a guard that compares the raw value would miss a
+        # twin stored under the canonical one; this is what guarantees
+        # nothing retired can ever reach the table.
+        mt = canonical_media_type(out["media_type"])
+        out["media_type"] = mt
         if mt not in MEDIA_TYPES:
             raise UnknownMediaType(f"Unknown media type: {mt!r}", value=mt)
 

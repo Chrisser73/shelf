@@ -647,6 +647,29 @@ def test_a_stored_choice_is_never_migrated_to_auto(live_server, browser, setup_a
         ctx.close()
 
 
+def test_a_stale_kids_book_hint_is_normalized_to_book(live_server, browser, setup_admin):
+    """`kids_book` left the live vocabulary (T6); a device whose cache still
+    holds it from before the retirement must land on `book`, not on a
+    now-nonexistent `<option>` that leaves the select showing nothing.
+
+    Pins both halves: the rendered picker *and* that the stored value was
+    corrected, not merely reinterpreted for this one load (contrast
+    `test_a_stored_choice_is_never_migrated_to_auto`, where `book` is left
+    alone because it is still a live, deliberate choice).
+    """
+    ctx, pg = _scan_with_seeded_storage(
+        browser, live_server, setup_admin, {"shelf_media_type": "kids_book"}
+    )
+    try:
+        pg.goto(f"{live_server['url']}/scan")
+        pg.wait_for_load_state("networkidle")
+        expect(pg.locator("#media-type")).to_have_value("book")
+        assert pg.evaluate("localStorage.getItem('shelf_media_type')") == "book"
+        assert_page_clean(pg)
+    finally:
+        ctx.close()
+
+
 def test_the_platform_picker_is_visible_under_auto(live_server, browser, setup_admin):
     """A game can still be *detected* under Auto, and platform comes from here.
 

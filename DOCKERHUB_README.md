@@ -127,7 +127,7 @@ key material.
 | **Quick Rate** | Scan to mark items as read/completed |
 
 ### Media Types
-- Books, audiobooks, eBooks, magazines, DVDs, Blu-rays, vinyl, cassettes, CDs, digital music, comics, manga, kids' books, and video games
+- Books, audiobooks, eBooks, magazines, DVDs, Blu-rays, vinyl, cassettes, CDs, digital music, comics, manga, and video games
 - **Music by release, not by title** — search MusicBrainz by title, artist, barcode or catalogue number and catalogue the exact pressing: country, date, label, catalogue number, packaging, and real track lists across multiple discs. Two pressings of one album stay distinct and link to each other
 - **Periodicals as publication plus issue** — a magazine run is one publication with many issues; a 977 barcode resolves it from its ISSN
 - Link physical and digital formats together, and connect a novel to its audiobook or its film adaptation as a related-media group

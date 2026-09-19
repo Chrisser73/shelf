@@ -223,7 +223,7 @@ the retail title carries an audio tag (`… - CD`, `Audio CD`) or the category
 names music CDs, but when the record names **neither**, the dropdown is what
 says it — and the choice stands.
 
-Books further divide into book, kids book, audiobook, eBook, comic / graphic
+Books further divide into book, audiobook, eBook, comic / graphic
 novel and Manga — the barcode cannot tell those apart, so they stay yours to
 pick. Change the type on the item page or in bulk from Browse.
 

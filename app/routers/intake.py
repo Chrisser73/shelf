@@ -10,7 +10,13 @@ from fastapi import APIRouter, Depends, Request, UploadFile, File
 from pydantic import BaseModel, field_validator
 
 from app.auth import require_role
-from app.config import HTTP_TIMEOUT, LOW_RES_LONG_EDGE, MEDIA_TYPES, TILING_THRESHOLD
+from app.config import (
+    HTTP_TIMEOUT,
+    LOW_RES_LONG_EDGE,
+    MEDIA_TYPES,
+    TILING_THRESHOLD,
+    canonical_media_type,
+)
 from app.database import get_db, get_all_settings, get_setting
 from app.services import cover_queue, covers, openlibrary, tiling, title_lookup, vision
 from app.services import isbn as isbn_svc
@@ -124,6 +130,10 @@ class IntakeBook(BaseModel):
     @field_validator("media_type")
     @classmethod
     def _known_media_type(cls, v):
+        # Canonicalise before the membership test and return the canonical
+        # value, so a stale intake plan holding a retired type validates and
+        # every later step — the dupe guard included — sees one spelling.
+        v = canonical_media_type(v)
         if v not in MEDIA_TYPES:
             raise ValueError(f"Unknown media_type: {v!r}")
         return v

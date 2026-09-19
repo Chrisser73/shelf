@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse
 from app import browse_filters, nav
 from app.auth import require_role
 from app.config import MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES
+from app.services.synopsis import SYNOPSIS_MEDIA_TYPES
 from app.currency import get_currency
 from app.services import lists
 from app.services import isbn as isbn_svc
@@ -97,7 +98,7 @@ async def browse(
             "SELECT COUNT(DISTINCT item_id) as c FROM checkouts WHERE checked_in IS NULL"
         ).fetchone()["c"]
 
-        from app.routers.tags import get_all_tags
+        from app.services.tags import get_all_tags
         all_tags = get_all_tags(db)
 
         # Languages present in the library — the filter only renders/offers
@@ -309,7 +310,7 @@ async def item_detail(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
 
-        from app.routers.tags import get_item_tags, get_all_tags
+        from app.services.tags import get_item_tags, get_all_tags
         item_tags = get_item_tags(db, item_id)
         all_tags = get_all_tags(db)
 
@@ -355,6 +356,7 @@ async def item_detail(
             "all_tags": all_tags,
             "media_types": MEDIA_TYPES,
             "book_media_types": BOOK_MEDIA_TYPES,
+            "synopsis_media_types": SYNOPSIS_MEDIA_TYPES,
             "game_platforms": game_platforms,
             "has_hardcover": has_hardcover,
             "current_checkout": current_checkout,

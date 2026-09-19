@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.auth import require_role
-from app.config import BOOK_MEDIA_TYPES, HTTP_TIMEOUT, MEDIA_TYPES
+from app.config import BOOK_MEDIA_TYPES, HTTP_TIMEOUT, MEDIA_TYPES, canonical_media_type
 from app.database import get_db, get_game_platforms, get_setting
 from app.routers import items_common
 from app.services import covers, igdb, openlibrary, scan_outcome, tmdb
@@ -193,6 +193,7 @@ async def title_search(
     """Unified title search — routes to the right backend based on media type."""
     if not q.strip():
         return HTMLResponse("")
+    media_type = canonical_media_type(media_type)
     if media_type == "video_game":
         return await search_games(request, q=q, platform=platform, _=_)
     if media_type == "dvd":
@@ -217,6 +218,9 @@ async def search_books(
     templates = request.app.state.templates
     if not q.strip():
         return HTMLResponse("")
+    # The fragment renders this straight into the add form's hidden field,
+    # so a retired value would otherwise ride back out to the client.
+    media_type = canonical_media_type(media_type)
 
     with get_db() as db:
         search_lang = get_setting(db, "metadata_search_lang") or "en"
@@ -246,6 +250,7 @@ async def add_book_from_search(
 ):
     """Add a book to the collection from a title search result (by ISBN)."""
     templates = request.app.state.templates
+    media_type = canonical_media_type(media_type)
     # The `auto` guard, kept in front of the lookup below so a bad value never
     # costs a provider call; the funnel checks the value again on the save.
     if not items_common.is_valid_media_type(media_type):
