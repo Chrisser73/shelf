@@ -2,7 +2,7 @@
 first fragment.
 
 Both routes now derive their filter values, WHERE clause and dropdown counts
-from `app/browse_filters.py` and `items_common.filter_counts` (see that
+from `app/browse_filters.py` and `browse_counts.filter_counts` (see that
 module's docstring and G24 in GOTCHAS.md). These tests pin the contract: the
 same query string must produce the same dropdown options, the same result
 set, the same `q` truncation, and no duplicated filter markup on `/browse`'s

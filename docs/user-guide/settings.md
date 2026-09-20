@@ -2,7 +2,7 @@
 
 Open the menu under your username and choose **Settings**. Settings is available to administrators; account profile and password controls remain under **Account** in the same menu.
 
-The Settings page is organised into four sections:
+The Settings page is organised into four sections, listed in a sidebar on a wide screen and as a row of buttons above the content on a narrow one:
 
 - **Library** — collection display, lending, locations, game platforms and navigation preferences.
 - **Integrations** — Audiobookshelf, Hardcover, metadata providers, valuation and vision services.

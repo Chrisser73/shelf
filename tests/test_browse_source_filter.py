@@ -1,9 +1,7 @@
-from pathlib import Path
+import re
 
 from app import browse_filters as bf
-
-
-ITEM_GRID = Path(__file__).resolve().parents[1] / "app" / "templates" / "fragments" / "item_grid.html"
+from tests.conftest import _insert_item
 
 
 def test_source_filter_is_registered_as_a_narrowing_browse_filter():
@@ -29,20 +27,50 @@ def test_source_filter_participates_in_clear_and_chip_state():
     assert config["source_filter"]["inUrl"] is True
 
 
-def test_native_browse_fragment_renders_source_control():
-    src = ITEM_GRID.read_text()
-    assert 'name="source_filter"' in src
-    assert 'data-testid="source-filter"' in src
-    assert "filter_includes('source_filter')" in src
-
-    # The three synced-library integrations that motivated replacing the
-    # provider-specific RomM catalogue must all be directly discoverable.
-    for value in ("romm", "komga", "audiobookshelf"):
-        assert f'value="{value}"' in src
+def _source_options(html: str) -> dict[str, str]:
+    """value -> visible label for the first Source <select> in the markup."""
+    select = re.search(r'<select id="source-filter".*?</select>', html, re.S).group(0)
+    return {
+        value: " ".join(label.split())
+        for value, label in re.findall(r'<option value="([^"]*)"[^>]*>(.*?)</option>', select, re.S)
+    }
 
 
-def test_unknown_source_values_remain_representable():
+def test_source_dropdown_lives_in_the_filter_bar_and_counts_what_exists(viewer_client, db):
+    _insert_item(db, title="Chrono Trigger", isbn=None, source="romm")
+    _insert_item(db, title="Secret of Mana", isbn=None, source="romm")
+    _insert_item(db, title="Alien", isbn=None, source="tmdb")
+    db.commit()
+
+    html = viewer_client.get("/browse").text
+    assert html.count('<select id="source-filter"') == 1
+    options = _source_options(html)
+    assert options["romm"] == "RomM (2)"
+    # A source the static list never named is offered because an item has it.
+    assert options["tmdb"] == "TMDb (1)"
+    # ...and one no item carries is not offered at all.
+    assert "komga" not in options
+
+
+def test_source_counts_are_cross_filtered_and_refreshed_out_of_band(viewer_client, db):
+    _insert_item(db, title="Chrono Trigger", isbn=None, source="romm", media_type="video_game")
+    _insert_item(db, title="Dune", isbn=None, source="openlibrary", media_type="book")
+    db.commit()
+
+    fragment = viewer_client.get("/api/search?media_type_filter=book").text
+    assert '<select id="source-filter"' in fragment and "hx-swap-oob" in fragment
+    options = _source_options(fragment)
+    assert options == {"": "All Sources", "openlibrary": "Open Library (1)"}
+
+    # The Source group excludes its own filter, so choosing one source does not
+    # erase the others from the dropdown.
+    options = _source_options(viewer_client.get("/api/search?source_filter=romm").text)
+    assert set(options) == {"", "romm", "openlibrary"}
+
+
+def test_unknown_source_values_remain_representable(viewer_client, db):
     """A bookmarked/future source must not make the select lie about state."""
-    src = ITEM_GRID.read_text()
-    assert "current_source not in common_sources" in src
-    assert '<option value="{{ current_source }}" selected>' in src
+    _insert_item(db, title="Dune", isbn=None, source="openlibrary")
+    db.commit()
+    options = _source_options(viewer_client.get("/browse?source_filter=some_future_sync").text)
+    assert options["some_future_sync"] == "Some Future Sync (0)"

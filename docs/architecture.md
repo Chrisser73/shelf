@@ -884,7 +884,7 @@ Every dropdown's counts are **cross-filtered** — a dropdown's count group is
 the where-clause with its own filter removed, via
 `build_where(values, exclude=...)`, so the number beside an option says what
 selecting it would yield. Both routes get them from one helper,
-`items_common.filter_counts`, which is what stops the page load and the first
+`browse_counts.filter_counts`, which is what stops the page load and the first
 HTMX swap disagreeing (issue #37: `/browse` used to count globally, so the
 numbers changed the moment any filter was touched). Only `/api/search` sets
 `render_oob_counts`, so only its fragment emits the out-of-band copies of the

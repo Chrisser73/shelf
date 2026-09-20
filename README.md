@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-3646%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-3647%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![E2E tests](https://img.shields.io/badge/e2e%20tests-256%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
@@ -178,7 +178,7 @@ each option before anything is sent.
 
 ### Collection Management
 - **Home overview** — Shelf opens on a page that answers "what is happening in my library?": catalogue, owned and wishlist totals, what is lent out, missing covers, a media-type breakdown and recent additions. Browse stays the place for searching, filtering and bulk editing. See [Home](docs/user-guide/home.md)
-- **Filter and search** — by media type, location, reading status, ownership, lending status, and free text
+- **Filter and search** — by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), and free text
 - **Reading tracking** — want-to-read, reading, and read with start/finish dates
 - **Custom tags** — free-form tags (`signed`, `first-edition`, whatever you like) as chips on the item page, with a tag filter on Browse
 - **Synopses** — item descriptions fetched automatically on add, plus a one-click backfill for your existing catalog (Open Library, Google Books, Hardcover)

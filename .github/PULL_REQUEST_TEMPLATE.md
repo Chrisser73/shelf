@@ -23,6 +23,7 @@ invest time — see CONTRIBUTING.md.
 - [ ] `make checks` passes
 - [ ] No generated output in this PR — `static/css/app.css`, `static/sw.js`'s
       `SW_VERSION`, and README's test-count badges are regenerated on `main`
+      by CI
 
 ## Notes for review
 

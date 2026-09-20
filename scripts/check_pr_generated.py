@@ -4,7 +4,9 @@
 Three artefacts in this repo are generated, never hand-written: the Tailwind
 build `static/css/app.css`, the `SW_VERSION` value in `static/sw.js` (a digest
 over the precache set), and the two test-count badges in `README.md`. They are
-regenerated on `main` by the maintainer and must not travel in a pull request.
+regenerated on `main` by CI — the `restamp` job in
+`.github/workflows/test.yml`, on the push that merges a pull request — and
+must not travel in a pull request.
 
 The reason is collision, not tidiness. `app.css` is one minified line and
 `SW_VERSION` is one token, so any two PRs that touch a template regenerate the
@@ -232,11 +234,11 @@ def report(differences, base_sha):
     for difference in differences:
         print(difference.describe(base_sha), file=sys.stderr)
     print(
-        "\nThese files are generated on `main` by the maintainer after merging, so a\n"
-        "copy in a pull request cannot be merged cleanly — it only collides with\n"
-        "every other pull request that regenerated the same line from the same base.\n"
-        "Run `make css` locally as much as you like to see your work; just do not\n"
-        "commit the result.",
+        "\nThese files are regenerated on `main` by CI (the `restamp` job) after a\n"
+        "merge, so a copy in a pull request cannot be merged cleanly — it only\n"
+        "collides with every other pull request that regenerated the same line from\n"
+        "the same base. Run `make css` locally as much as you like to see your work;\n"
+        "just do not commit the result.",
         file=sys.stderr,
     )
     return 1

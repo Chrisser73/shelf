@@ -188,8 +188,9 @@ def main():
                   "satisfied here, because a PR that changes any precached "
                   "file moves the digest, and a PR that restamps SW_VERSION "
                   "to get green collides with every other PR restamping the "
-                  "same line. The maintainer runs `make css` once after "
-                  "merging. Enforced on push to main and locally.",
+                  "same line. CI runs `make css` once, automatically, in the "
+                  "`restamp` job on the push to main. Enforced on push to "
+                  "main and locally.",
                   file=sys.stderr)
             return 0
         return 1

@@ -8,6 +8,7 @@ from app.auth import require_role
 from app.config import MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES
 from app.services.synopsis import SYNOPSIS_MEDIA_TYPES
 from app.currency import get_currency
+from app.services import browse_counts
 from app.services import lists
 from app.services import isbn as isbn_svc
 from app.services import upc as upc_svc
@@ -50,7 +51,7 @@ async def browse(
     Filter values are read from the query string via the registry rather than
     declared as parameters here, exactly as `/api/search` does: a filter added
     to `app/browse_filters.py` needs no change in this signature. The dropdown
-    counts come from the same `items_common.filter_counts` helper `/api/search`
+    counts come from the same `browse_counts.filter_counts` helper `/api/search`
     uses, so the first paint and the first OOB swap cannot disagree.
     """
     values = browse_filters.values_from(request.query_params)
@@ -90,7 +91,7 @@ async def browse(
         # Cross-filter dropdown counts — `locations`, `type_counts`,
         # `location_counts`, `reading_status_counts`, `owned_count`,
         # `wishlist_count` and `filtered_total` all come from here.
-        counts = items_common.filter_counts(db, values, total_filtered)
+        counts = browse_counts.filter_counts(db, values, total_filtered)
 
         # Deliberately still global (design §5): none of these appears in
         # `fragments/filter_counts_oob.html`, so none can diverge.

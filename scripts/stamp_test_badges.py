@@ -118,9 +118,10 @@ def stamp(check_only=False):
                 # fails, because nobody learns it stopped watching.
                 print("\nADVISORY on a pull-request build: this cannot be "
                       "satisfied here, because a restamp in each PR would "
-                      "collide across the batch. The maintainer runs "
-                      "`make badges` once after merging. Enforced on push to "
-                      "main and locally.", file=sys.stderr)
+                      "collide across the batch. CI runs `make badges` once, "
+                      "automatically, in the `restamp` job on the push to "
+                      "main. Enforced on push to main and locally.",
+                      file=sys.stderr)
                 return 0
             print("\nRun `make badges` and commit README.md.", file=sys.stderr)
             return 1

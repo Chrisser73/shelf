@@ -6,6 +6,60 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-09-20
+
+A synced library and a hand-typed one look identical once they are in Shelf, and
+most of the time that is exactly right — an item is an item. But it leaves some
+questions with nowhere to go. Which of these games came from RomM? Did that CSV
+import actually land? What did Photo Intake add last night? Browse could not
+answer any of them, because nothing in it knew where a row had come from.
+
+Browse now has a **Source** filter, sitting in the filter bar beside the others
+and cross-filtered like the others, listing only the sources your library
+actually contains. RomM games get a little extra: a **RomM ↗** badge on the card
+that opens the game where it lives, without going through the item page first.
+
+The Source filter, the RomM badge, the Settings sidebar and the Komga series fix
+are all [@sudo-rpaisley](https://github.com/sudo-rpaisley)'s work.
+
+### Added
+
+- **A Source filter in Browse.** Narrow the catalog by how an item arrived — a
+  RomM, Komga or Audiobookshelf sync, a metadata provider, a CSV import, Photo
+  Intake, or by hand. The dropdown lists only the sources your library contains,
+  with cross-filtered counts like every other filter, and the choice is carried
+  in the URL and the filter chips. Contributed by [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#131](https://github.com/dgahagan/shelf/pull/131).
+- **Open in RomM from a Browse card.** A RomM-backed game shows a small
+  **RomM ↗** badge that opens it in RomM, using the Browser URL when one is
+  configured. Nothing is looked up until it is clicked. Contributed by [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#131](https://github.com/dgahagan/shelf/pull/131).
+
+### Changed
+
+- **Settings sections move to a sidebar.** The four launcher cards become a rail
+  beside the content on a wide screen and a compact row above it on a narrow
+  one. Sections, forms and stored values are unchanged. Contributed by [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#129](https://github.com/dgahagan/shelf/pull/129).
+
+- **Generated build output is restamped by CI, not by hand.** Since 0.44.0 a
+  pull request leaves `static/css/app.css`, the `SW_VERSION` value in
+  `static/sw.js` and README's test-count badges out of its diff — but somebody
+  then had to remember to regenerate them on `main` after merging. A push to
+  `main` now does it itself, in one bot commit touching only the generated paths
+  that actually changed, and the test, CSS and E2E jobs run against that commit
+  rather than the one that arrived. Nothing about what a release contains
+  changes; this closes the window in which `main` could carry a stylesheet that
+  did not match its own templates.
+
+### Fixed
+
+- **A Komga series no longer splits into one series per volume.** When Komga
+  appends the volume to the series title, `One Piece (21)` is filed under
+  **One Piece**; a four-digit year such as `Batman (2016)` is kept, because it
+  names a distinct run. The next Komga sync repairs rows already split.
+  Contributed by [@sudo-rpaisley](https://github.com/sudo-rpaisley) in [#133](https://github.com/dgahagan/shelf/pull/133).
+
 ## [0.44.0] - 2026-09-20
 
 A novel, its audiobook and the film made from it are three different things, and
@@ -3856,6 +3910,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.45.0]: https://github.com/dgahagan/shelf/releases/tag/v0.45.0
 [0.44.0]: https://github.com/dgahagan/shelf/releases/tag/v0.44.0
 [0.43.0]: https://github.com/dgahagan/shelf/releases/tag/v0.43.0
 [0.42.5]: https://github.com/dgahagan/shelf/releases/tag/v0.42.5

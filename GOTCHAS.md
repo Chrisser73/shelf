@@ -3642,6 +3642,18 @@ grep -rniE 'no metadata|title-only|books-only' README.md DOCKERHUB_README.md doc
   adding a qualification to one paragraph should check whether the paragraph
   before it needs the same one — a behaviour change that splits a rule in two
   rarely leaves the surrounding prose whole.
+- **The fourth half: a number you just corrected is read by the clause after
+  it.** 2026-09-20, plan `ci-restamp-on-main` T2 (`84031a2`). The task added a
+  fifth CI job and correctly changed `docs/development.md`'s "**CI runs four
+  jobs**" to "five" — and left the rest of that same sentence reading "and
+  **two** of them behave differently on a pull request than on a push to
+  `main`". Three do now; the new job is push-only. This is not an adjacent
+  *copy* of the claim, which is what the halves above train you to hunt, so
+  hunting for copies does not find it: it is a **second number derived from the
+  first**, inside the sentence already being edited, and the edit's own success
+  is what makes it easy to walk past. **When you change a count, re-read the
+  whole sentence and the paragraph under it for anything computed from it** —
+  totals, "two of them", "either", "both", "all three", "the latter".
 - **Status:** documented. Not a lint candidate — no checker can tell a stale
   claim from a correctly scoped one. The countermeasure is the survey-then-
   decide split in `/release` step 4b: one pass reports what every page says,
@@ -4989,6 +5001,48 @@ grep -rn "ci_context" scripts/ tests/ .github/workflows/
   The countermeasure is procedural: `/run-plan`'s diff review reads the prose,
   and a subagent brief that asks for a *why* docstring should say that every
   cross-reference in it must be one the author verified.
+
+## G111 — When automation takes over a hand step, its warning is not moot until the automation is *ahead* of the risk
+
+- **Rule:** moving a manual step into CI does not license deleting the warning
+  about what the manual step protected against. Ask **when** the automation
+  acts relative to the risk. CI that reacts to a push lands *after* that push,
+  so anything reading the tree in between still sees the unprotected state.
+  Keep the warning and re-attribute it — say what now closes the window, and
+  what is still exposed inside it — rather than dropping it.
+- **Why:** a hand step and a CI job that run "the same command" are not
+  interchangeable. The hand step runs *before* the thing it protects; the CI
+  job runs *after* the thing that triggers it. Everything that reads the tree
+  during that gap — a tag, a release build, a clone, a branch cut — sees the
+  state the warning described. The deletion looks obviously correct while you
+  are holding the new mechanism in your head, which is exactly when the docs
+  task runs.
+- **Evidence:** 2026-09-20, plan `ci-restamp-on-main` T2. The `restamp` job
+  now rebuilds and commits `static/css/app.css`, `SW_VERSION` and the README
+  badges on every push to `main`. The docs task dropped
+  `docs/development.md`'s clause "a release that skips `make css` ships a page
+  with missing styles and an unstamped `SW_VERSION`", reporting it as made
+  moot by the new job — a judgement it flagged in its own report, so it was
+  reasoned about rather than missed. It is not moot: `restamp` commits after
+  the push, so a `v*` tag placed on `main` before the restamp lands still
+  builds the Docker image from the stale stylesheet. That exact gap is why the
+  same plan's T3 added a tip check to release step 6 — the mitigation lives in
+  the unpublished repo-root `CLAUDE.md`, which no reader of the public page
+  can see. Restored with the attribution corrected, in `84031a2`.
+- **The general shape, worth checking for directly:** automation that is
+  *eventually* consistent replaces a guarantee with a window. Name the window.
+  "CI keeps `main` current" is true and is not the same claim as "`main` is
+  always current".
+- **Verify:** for each warning a docs task proposes to delete because new
+  automation covers it, answer in one sentence: *what reads this state between
+  the trigger and the automation's write?* If the answer is "nothing", delete
+  it. If the answer names anything — a tag, a build, a clone — keep it.
+- **Status:** documented. Not a lint candidate — the deleted sentence is
+  correct prose either way, and no checker knows what a warning was protecting.
+  Closest sibling is `G79` (a docs task's blind spots) and `G110` (a delegated
+  task's prose asserting more than it checked); this one is neither a missed
+  copy nor an invented fact but a **defensible-looking deletion**, which is why
+  it gets its own trigger.
 
 ## Graveyard
 

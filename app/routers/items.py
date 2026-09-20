@@ -21,6 +21,7 @@ from app.routers import items_common
 from app.routers import items_scan_modes
 from app.routers.items_common import SORT_OPTIONS  # re-exported for pages.py
 from app.services import isbn as isbn_svc
+from app.services import browse_counts
 from app.services import lists
 from app.services.item_write import (ItemValueError, insert_item, update_item_fields,
                                      update_items_fields, validate_item_fields,
@@ -909,7 +910,7 @@ async def search_items(
         # same where-clause with its own filter excluded, so the number beside
         # an option says what selecting it would yield. Shared with /browse so
         # the two routes cannot disagree.
-        counts = items_common.filter_counts(db, values, total) if page <= 1 else None
+        counts = browse_counts.filter_counts(db, values, total) if page <= 1 else None
 
     has_more = (offset + per_page) < total
 

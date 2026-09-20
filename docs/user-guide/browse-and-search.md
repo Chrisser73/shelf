@@ -64,6 +64,7 @@ Filter chips along the top, all combinable:
 | **Lent out** | Items currently checked out |
 | **Tag** | Any custom tag |
 | **Language** | Edition language (captured on lookup) |
+| **Source** | How the item arrived — a sync (RomM, Komga, Audiobookshelf), a metadata provider, a CSV import, Photo Intake, or Manual. Only sources your library actually contains are listed |
 
 Counts next to each value update as you narrow down, and they tell you what
 you would get if you picked that value — counted against your other active

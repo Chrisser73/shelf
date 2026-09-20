@@ -108,8 +108,9 @@ Notes:
   them:** `static/css/app.css` (the Tailwind build), the `SW_VERSION` constant
   in `static/sw.js`, and the two test-count badges in `README.md`. Run
   `make css` and `make badges` as much as you like to see your work — just
-  leave the result out of the commit. The maintainer regenerates all three on
-  `main` after merging.
+  leave the result out of the commit. CI regenerates all three automatically,
+  on the push to `main` that merges your PR — no maintainer step runs by hand
+  in between.
 
   This is not tidiness. `app.css` is one minified line and `SW_VERSION` is one
   token, so any two pull requests that touch a template regenerate the same

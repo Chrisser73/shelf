@@ -39,3 +39,5 @@ If an imported game has no local cover, Shelf may fetch RomM-provided artwork. C
 ## Open in RomM
 
 Items backed by RomM get a compact **Open in RomM** action on the main item card. The action uses the optional Browser URL when configured, keeping Docker-internal addresses out of browser links.
+
+The same action appears on a RomM game's card in **Browse** as a small **RomM ↗** badge, so a game can be launched without opening its item page first. To see only what came from RomM, set Browse's **Source** filter to RomM — the games keep bulk select, list view, column choices and sorting, because they are ordinary Browse results.

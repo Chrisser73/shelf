@@ -42,3 +42,7 @@ If an imported item has no cover, Shelf requests the book thumbnail from the con
 ## Open in Komga
 
 Items with a Komga holding get a compact **Open in Komga** action on the main item card. The action uses the optional Browser URL when configured, so Docker-internal addresses do not leak into browser links.
+
+## Series names
+
+Komga can report a series as `Name (N)` — one series per volume — when its *append volume to series title* option is on. Shelf groups by series name, so it strips a trailing volume number on sync and files `One Piece (21)` under **One Piece**. A four-digit year is kept, because `Batman (2016)` names a distinct run. Rows that were already split are repaired by the next Komga sync; a series name you edited by hand on a non-Komga item is never touched.
