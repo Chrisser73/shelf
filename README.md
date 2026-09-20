@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-3593%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-3634%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![E2E tests](https://img.shields.io/badge/e2e%20tests-256%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
@@ -187,7 +187,7 @@ each option before anything is sent.
 - **Shelf Fill** — pick a room, bookcase or shelf and it stays selected while you scan item after item onto it. Items already catalogued move without a fresh metadata lookup; unrecognised barcodes fall through to the normal Add pipeline. See [Shelf Fill](docs/user-guide/shelf-fill.md)
 - **Physical copies** — own two of something and track them apart: add a copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes. Removing the copy marked primary promotes the next one and the item's location follows it
 - **Arrange a shelf** — any location gets an Arrange page where you drag the physical copies into the order they actually sit in, or order them automatically by title, creator, series, release or issue. The order belongs to the copy, so duplicates stay distinct and can sit side by side
-- **Related media groups** — connect the different forms of one work (a novel, its audiobook, its film adaptation) as `format`, `related` or `adaptation`. A group is the connected set of links, so linking A to B and B to C presents all three. Matching is manual by design
+- **Related media groups** — connect the different forms of one work (a novel, its audiobook, its film adaptation) as `format`, `related` or `adaptation`. Every item shows its whole group in a panel on the item page, with direct links marked apart from the ones reached through a third item; editors search the catalogue to add a relationship, viewers see the group read-only. A group is the connected set of links, so linking A to B and B to C presents all three. Matching is manual by design. See [Related Media](docs/related-media.md)
 - **Game platforms** — customizable list of platforms, add your own for niche or retro systems
 - **Checkout system** — lend to borrowers with the Lend scan mode, filter by "Lent Out" in browse
 - **Loan reminders** — overdue loans get a red badge, and an optional daily digest (ntfy or webhook) nags you about them; configure under Settings → Library → Lending

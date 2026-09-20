@@ -247,11 +247,21 @@ The table is a pair of `items` ids with a `link_type` — `format`, `related` or
 `adaptation` — `UNIQUE(item_a_id, item_b_id)`, cascading from both sides.
 `services/media_groups.py` treats a group as the *connected component* reachable
 from a row, so linking A–B and B–C presents all three together and unlinking
-splits the set without rewriting a group id anywhere. **The item page's "Also
-available as:" block reads `link_type = 'format'` only.** That block asserts the
-same content in another format, which `related` and `adaptation` are not; the
-filter is deliberate, and the other two types need wording of their own before
-they get a surface.
+splits the set without rewriting a group id anywhere.
+
+The item page carries **two** surfaces over that one table, and the split is
+deliberate. The older "Also available as:" block reads `link_type = 'format'`
+only, because it asserts the same content in another format — which `related`
+and `adaptation` are not. The **Related Media panel** (`routers/related_media.py`,
+lazy-loaded into `item_detail.html` below the tags) shows the whole connected
+group across all three types, labelling a direct link apart from a member
+reached only through a third item. Its four endpoints sit under
+`/api/related-media/` — panel, catalogue search, link, unlink — and the search
+excludes every item already in the component, so a redundant edge cannot be
+added merely to make a transitive member direct. Adding and removing need
+editor or admin; the panel itself is readable by a viewer. Reads go through
+`items_live`, so a trashed item leaves every panel, search and link target.
+Nothing infers a link: a relationship exists because someone made it.
 
 Secrets in `settings` are encrypted with a key kept *outside* the database
 (`data/encryption.key` or `SHELF_ENCRYPTION_KEY`), so a DB backup contains

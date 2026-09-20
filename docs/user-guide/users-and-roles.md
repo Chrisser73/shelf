@@ -26,7 +26,10 @@ and initial password; change a role; reset a password; delete a user.
 Deleting a user doesn't touch the catalog — items are shared, not owned.
 
 Every user changes their **own** display name and password from the account
-menu in the nav.
+menu in the nav. The menu's trigger shows your name and your role, and the
+panel opens with both, so it is always clear which account you are signed in
+as. Its entries fall into three groups — **Account** (profile and password),
+**Administration** (Settings and Logs, shown to admins only) and **Sign out**.
 
 ## Sessions
 

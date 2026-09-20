@@ -58,6 +58,7 @@ New here? Start with **[Installation](installation.md)**, then
 | [Development](development.md) | Running from source, tests, lints, the Makefile, project layout |
 | [Architecture](architecture.md) | Request path, middleware, data model, metadata pipeline, background jobs |
 | [Physical copies](item-copies.md) | The `item_copies` model, and how the item's own location field still drives the primary copy |
+| [Related Media](related-media.md) | Linking a work to its other formats, related items and adaptations; how a group is derived rather than stored |
 | [Contributing](../CONTRIBUTING.md) | How to report bugs and send changes |
 | [Security policy](../SECURITY.md) | Reporting vulnerabilities; hardening posture |
 | [Roadmap](roadmap.md) | Where Shelf is likely to go next, by theme — direction, not a schedule |

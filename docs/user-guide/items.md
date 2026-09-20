@@ -88,6 +88,12 @@ its home.
   not formats are recorded: a kids' book is a **book tagged `Kids`**, not a
   media type of its own. The `Kids` tag is global, so it can sit on anything;
   a later release lets you scope a tag to one media type if you want to.
+- **Related Media** — the other items this one belongs with: another format of
+  the same work, an adaptation of it, or something simply related. The panel
+  shows the whole connected group, so an item reached only through a third item
+  still appears, marked apart from a direct link. Editors and admins search the
+  catalogue here to add a relationship; viewers see the group and nothing else.
+  Nothing is linked automatically — see [Related Media](../related-media.md).
 - **Loan state** — who has it and since when, with check-in right there.
 - **Value** — ISBNdb list price if valued, or a manual value you enter.
 - **Links** — jump to the item in Audiobookshelf or Hardcover when linked.

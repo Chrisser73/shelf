@@ -30,6 +30,12 @@
             </button>
         </div>
 
+        {# Tabs the registry routes here rather than to the tab row — see
+           app/nav.py NAV_TABS `menu`. Role gating, `requires` and manual
+           hiding have already been applied by `visible_tabs`.
+           The "Administration" heading below holds only while every such
+           tab is admin-only, which is true of the two that exist (settings,
+           logs). Route a non-admin tab here and the heading must change. #}
         {% set account_tabs = nav_tabs | selectattr('menu', 'equalto', 'account') | list %}
         {% if account_tabs %}
         <div class="py-1 border-t border-shelf-border">

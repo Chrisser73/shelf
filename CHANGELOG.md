@@ -6,6 +6,59 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-09-20
+
+A novel, its audiobook and the film made from it are three different things, and
+Shelf has always insisted on that — three records, three covers, three scan
+histories. It was right to. But it left you with no way to say they belong
+together, so the connection lived only in your head, and the item page gave no
+hint that the other two were even in the collection.
+
+Related Media is that connection, made explicit and made by hand. Link an item
+to another as a **Format**, a **Related** item or an **Adaptation**, and every
+item in the group shows the whole group — including the ones it reaches only
+through a third item. Shelf does not guess: nothing is linked because two titles
+look alike.
+
+Much of this release is [@sudo-rpaisley](https://github.com/sudo-rpaisley)'s
+work — both the Related Media item page and the account menu refresh below.
+
+### Added
+
+- **Related Media on the item page.** A panel below an item's tags shows every
+  item connected to it, with direct links distinguished from the ones reached
+  through the wider group. Editors and administrators can search the catalogue
+  and add a **Format** (another edition or format of substantially the same
+  work), **Related** (a deliberately broad "these belong together") or
+  **Adaptation** (a work carried into another medium) relationship; viewers see
+  the group read-only. Removing a direct link can split a group, and leaves the
+  other links intact. The search will not offer an item already in the group, so
+  you cannot add a redundant edge just to make a transitive member direct.
+  Relationships are manual only — Shelf infers nothing from similar titles.
+  Contributed by [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#130](https://github.com/dgahagan/shelf/pull/130)
+
+### Changed
+
+- **A pull request no longer carries generated build output.** `static/css/app.css`,
+  the `SW_VERSION` value in `static/sw.js` and README's two test-count badges are
+  regenerated on `main` after merging, so contributors leave them out. Run `make css`
+  and `make badges` to see your work — just not in the commit. This removes a class of
+  merge conflict nobody wrote: both files are single lines, so any two pull requests
+  that touched a template used to collide on them regardless of what each one actually
+  changed. A new `generated-output` check refuses a pull request that includes them and
+  says how to back each one out; the staleness checks report instead of failing there,
+  and still fail on `main` and locally. E2E now rebuilds the stylesheet first, so a pull
+  request is tested against the CSS its own templates ask for.
+
+- **The account menu says who you are and groups what it holds.** The trigger
+  shows your name and role, the panel opens with both, and its entries fall into
+  three groups — Account (profile and password), Administration (Settings and
+  Logs, for admins only) and Sign out. The menu and its items now carry proper
+  menu roles and labels for a screen reader. Nothing about sign-in or who can
+  reach what has changed. Contributed by [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#128](https://github.com/dgahagan/shelf/pull/128)
+
 ## [0.43.0] - 2026-09-19
 
 Shelf has always had a separate media type for children's books. It never earned
@@ -3803,6 +3856,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.44.0]: https://github.com/dgahagan/shelf/releases/tag/v0.44.0
 [0.43.0]: https://github.com/dgahagan/shelf/releases/tag/v0.43.0
 [0.42.5]: https://github.com/dgahagan/shelf/releases/tag/v0.42.5
 [0.42.4]: https://github.com/dgahagan/shelf/releases/tag/v0.42.4
