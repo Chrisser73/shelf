@@ -273,6 +273,11 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
         SELECT 'feature.price_alerts', '0'
         WHERE EXISTS (SELECT 1 FROM settings
                       WHERE key = 'feature.valuation' AND value = '0')"""),
+    (40, "Add game platform logo mappings",
+     """CREATE TABLE IF NOT EXISTS game_platform_logos (
+            platform_slug TEXT PRIMARY KEY REFERENCES game_platforms(slug) ON DELETE CASCADE,
+            svg_path TEXT NOT NULL
+        )"""),
 )
 
 MIGRATION_TABLES = """

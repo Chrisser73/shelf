@@ -135,6 +135,11 @@ def _author(value):
     )
 
 
+def _platform(value):
+    """Match games on their stored platform, never unrelated media rows."""
+    return "i.platform = ? AND i.media_type = 'video_game'", [value]
+
+
 @dataclass(frozen=True)
 class BrowseFilter:
     """One Browse filter, in every form the app needs it.
@@ -197,6 +202,7 @@ FILTERS: tuple[BrowseFilter, ...] = (
     BrowseFilter("reading_status", prefix="Status", condition=_column("i.reading_status")),
     BrowseFilter("owned", condition=_owned),
     BrowseFilter("lent_out", condition=_lent_out),
+    BrowseFilter("platform_filter", prefix="Platform", condition=_platform),
     BrowseFilter("tag", prefix="Tag", condition=_tag, quote_in_qs=True),
     # Set from an item page's author link; a hidden control, since hundreds
     # of authors make no usable dropdown. The chip shows the author's name
