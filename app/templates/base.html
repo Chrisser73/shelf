@@ -49,12 +49,10 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-14">
                 <div class="flex items-center gap-1">
-                    <a href="/" class="text-lg font-bold text-shelf-accent2 tracking-tight mr-6">Shelf</a>
-
                     <!-- Disclosure menu: below lg the full tab row overflows
                          the bar, so it collapses to this. Settings lives under
                          the signed-in account menu instead of in this row. -->
-                    <div class="relative lg:hidden" x-data="navMenu"
+                    <div class="relative lg:hidden mr-6" x-data="navMenu"
                          @click.outside="close()" @keydown.escape.window="close()">
                         <button type="button" @click="toggle()" data-testid="nav-menu-button"
                                 aria-label="Main menu" :aria-expanded="open"
@@ -72,6 +70,7 @@
                             {% endfor %}
                         </div>
                     </div>
+                    <a href="/" class="text-lg font-bold text-shelf-accent2 tracking-tight mr-6">Shelf</a>
 
                     <div class="hidden lg:flex items-center gap-1">
                         {% for tab in nav_tabs %}
