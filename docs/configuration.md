@@ -115,10 +115,10 @@ the account menu — not from Settings.
 ## Where things are *not* configurable
 
 - Metadata source order (a national bibliography where one covers the ISBN —
-  DNB for German ISBNs, SBN for Italian ones → Open Library → Hardcover →
-  Google Books) is fixed; see [Architecture](architecture.md). National
+  DNB for German ISBNs, SBN for Italian ones, KB for Dutch ones → Open Library →
+  Hardcover → Google Books) is fixed; see [Architecture](architecture.md). National
   routing follows the ISBN's registration group and has no on/off switch, for
-  SBN or for DNB.
+  SBN, DNB or KB.
 - Outbound API pacing per host is fixed to each provider's published limit.
 - Media types are a fixed list: book, audiobook, eBook, magazine,
   DVD / Blu-ray, vinyl, cassette, CD, digital music, comic / graphic novel,

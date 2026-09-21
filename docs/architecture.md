@@ -301,12 +301,14 @@ at most four extra paced requests (~1.4 s) on an interactive scan.
 The national leg is a registry, `services/national.py`: unhyphenated ISBN-13
 registration-group prefixes mapped to provider modules, resolved by
 **longest** prefix match, so a narrow key can coexist with a broader one. It
-currently serves two groups — **DNB** (`services/dnb.py`, MARC21 over SRU) for
-978-3, and **SBN** (`services/sbn.py`, flat JSON over ICCU's OPAC endpoint) for
-the Italian 978-88 and 979-12. Keys are as wide as the group: `97888` and
-`97912` at five digits, because a 4-digit `9788` would also capture Spain,
-Brazil and the Czech/Slovak group. Both providers build every stored string
-through `services/bib_normalize.py`, so text from either is NFC and comparable.
+currently serves three providers — **DNB** (`services/dnb.py`, MARC21 over SRU)
+for 978-3, **SBN** (`services/sbn.py`, flat JSON over ICCU's OPAC endpoint) for
+the Italian 978-88 and 979-12, and **KB** (`services/kb.py`, SPARQL over the
+Nederlandse Bibliografie Totaal) for the Dutch 978-90 and 978-94 groups. Keys
+are as wide as the group: the Italian `97888` and `97912` and Dutch `97890` and
+`97894` use five digits so neighbouring registration groups are not captured.
+All providers build stored bibliographic strings through
+`services/bib_normalize.py`, so text is NFC and comparable.
 An ISBN in no registered group skips the leg entirely and costs no request.
 Adding a provider is a module plus a registry entry — no call-site change.
 **The covers cascade below is unchanged by this**: SBN contributes no cover
