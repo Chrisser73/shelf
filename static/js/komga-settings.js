@@ -145,7 +145,7 @@
                 } else if (data.type === 'done') {
                     progressBar.style.width = '100%';
                     progress.textContent = 'Sync complete';
-                    result.textContent = 'Created: ' + data.created + ', adopted: ' + data.adopted + ', updated: ' + data.updated + ', skipped: ' + data.skipped + ', errors: ' + data.errors;
+                    result.textContent = 'Created: ' + data.created + ', adopted: ' + data.adopted + ', updated: ' + data.updated + ', skipped: ' + data.skipped + (data.in_trash ? ', in Trash: ' + data.in_trash : '') + ', errors: ' + data.errors;
                     stream.close();
                 } else if (data.type === 'error') {
                     progress.textContent = '';

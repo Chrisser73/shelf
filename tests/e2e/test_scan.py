@@ -1399,6 +1399,7 @@ _TOAST = "(html) => { const d = document.createElement('div'); d.innerHTML = htm
 # the design plan's own evidence for this table.
 _STATUS_CASES = {
     "added": dict(title="Dune", authors="Frank Herbert", item_id=7, source="openlibrary"),
+    "restored": dict(title="Dune", authors="Frank Herbert", item_id=7, source="openlibrary"),
     "wishlisted": dict(title="Dune", authors="Frank Herbert", item_id=7, source="openlibrary"),
     "duplicate": dict(title="Dune", item_id=7),
     "promoted": dict(title="Dune", item_id=7),
@@ -1428,7 +1429,7 @@ _STATUS_CASES = {
 # Per app.js's SCAN_OK_STATUSES.
 _OK_STATUSES = {
     "added", "wishlisted", "returned", "confirmed", "marked_read",
-    "checked_out", "moved", "found", "relocated", "promoted",
+    "checked_out", "moved", "found", "relocated", "promoted", "restored",
 }
 
 # Per app.js's SCAN_INFO_STATUSES — the scan worked and the answer is a
@@ -1454,6 +1455,7 @@ _INFO_STATUSES = {"elsewhere"}
 # ship silently.
 _TOAST_MUST_CONTAIN = {
     "added": "Dune",
+    "restored": "Restored from Trash",
     "wishlisted": "Dune",
     "duplicate": "Dune",
     "promoted": "Dune",

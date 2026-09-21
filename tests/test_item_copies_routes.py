@@ -19,7 +19,8 @@ from tests.conftest import _insert_item, _insert_location
 
 
 def _copy(db, copy_id):
-    return db.execute("SELECT * FROM item_copies WHERE id = ?", (copy_id,)).fetchone()
+    """One copy row, or None once it is gone from the live view."""
+    return db.execute("SELECT * FROM copies_live WHERE id = ?", (copy_id,)).fetchone()
 
 
 def _seam(db, item_id):

@@ -190,6 +190,9 @@
                                 </template>
                                 Imported: <span x-text="importResult.imported" class="text-shelf-success"></span>,
                                 Skipped: <span x-text="importResult.skipped"></span>
+                                <template x-if="importResult.restored > 0">
+                                    <span>, Restored: <span x-text="importResult.restored"></span></span>
+                                </template>
                                 <template x-if="importResult.covers_queued > 0">
                                     <span> · Fetching <span x-text="importResult.covers_queued"></span> covers in background</span>
                                 </template>

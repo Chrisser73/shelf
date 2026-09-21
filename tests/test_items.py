@@ -34,7 +34,7 @@ class TestDeleteItem:
         resp = admin_client.delete(f"/api/items/{item_id}")
         assert resp.status_code == 200
         with get_db() as check_db:
-            row = check_db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+            row = check_db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
         assert row is None
 
     def test_editor_can_delete(self, editor_client, db):
@@ -43,7 +43,7 @@ class TestDeleteItem:
         resp = editor_client.delete(f"/api/items/{item_id}")
         assert resp.status_code == 200
         with get_db() as check_db:
-            row = check_db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+            row = check_db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
         assert row is None
 
     def test_viewer_cannot_delete(self, client, viewer_user):
@@ -69,7 +69,7 @@ class TestDeleteItem:
 
         # Verify item is gone but scan_log entry remains with null item_id
         with get_db() as check_db:
-            item = check_db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+            item = check_db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
             assert item is None
             log = check_db.execute("SELECT item_id FROM scan_log WHERE isbn = '9780000002037'").fetchone()
             assert log is not None

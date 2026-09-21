@@ -95,8 +95,15 @@ def _reparent_copies(db, keep_id: int, other_id: int) -> None:
         "SELECT COALESCE(MAX(copy_number), 0) AS n FROM item_copies WHERE item_id = ?",
         (keep_id,),
     ).fetchone()["n"]
+    # Physical, deliberately, and NOT the predict-a-UNIQUE-violation class
+    # most of this module's exemptions are: reading copies_live here would
+    # make a trashed copy of the losing item invisible, so it would stay
+    # parented to `other_id` and be destroyed by the caller's cascading
+    # DELETE two lines later — a restorable row lost for good. `deleted_at`
+    # and `is_primary` are carried through untouched below; this read only
+    # changes which rows are found, not what is done with them.
     rows = db.execute(
-        "SELECT id FROM copies_live WHERE item_id = ? ORDER BY copy_number, id",
+        "SELECT id FROM item_copies WHERE item_id = ? ORDER BY copy_number, id",
         (other_id,),
     ).fetchall()
 
@@ -104,7 +111,10 @@ def _reparent_copies(db, keep_id: int, other_id: int) -> None:
     # collides and the kept row's own copies keep the numbers the user knows.
     # The merged row has at most one primary (its own partial unique index
     # guarantees that), so demoting every moved copy when the kept row already
-    # has one leaves exactly one primary either way.
+    # has one leaves exactly one primary either way. A trashed copy always
+    # carries is_primary = 0 by trash_copy's own demote contract (it demotes
+    # in the same statement that stamps deleted_at), so moving one along with
+    # the rest can never mint a second primary.
     for offset, row in enumerate(rows, start=1):
         fields = {"item_id": keep_id, "copy_number": highest + offset}
         if keep_has_primary:
@@ -123,7 +133,10 @@ def reparent_children(db, keep_id: int, other_id: int) -> None:
     key a single item by design — a row there describes *this* item's
     external record or its track list, not a fact about the work that should
     survive onto another row. They are left to the cascade. Everything whose
-    loss the user would notice, and could not reconstruct, is moved here.
+    loss the user would notice, and could not reconstruct, is moved here — a
+    trashed copy is restorable, so its loss is exactly what that sentence
+    forbids, and ``_reparent_copies`` selects from the physical table for
+    that reason.
     """
     db.execute("UPDATE scan_log SET item_id = ? WHERE item_id = ?", (keep_id, other_id))
     db.execute("UPDATE reading_log SET item_id = ? WHERE item_id = ?", (keep_id, other_id))

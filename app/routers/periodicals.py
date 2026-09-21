@@ -10,6 +10,7 @@ from app.auth import require_role
 from app.config import HTTP_TIMEOUT
 from app.database import get_db
 from app.services import periodical_records, periodical_scan, periodicals
+from app.services import item_write
 from app.services.item_write import ItemValueError, insert_item
 
 router = APIRouter()
@@ -156,6 +157,15 @@ async def confirm_periodical_issue(
                 barcode_supplement=serial.supplement,
             )
             if existing_id:
+                # The same shape as music's earliest guard (G100): this read
+                # goes through `periodical_issues` with no items join, so a
+                # trashed issue would redirect to a page that bounces to
+                # Browse — before the funnel is reached. And the funnel
+                # cannot rescue it: this insert carries no isbn and no upc
+                # (claude-R5), so the earliest guard is the ONLY periodical
+                # restore. Silent: `/item/<id>` is pages.py's and has no arm
+                # for a flag, so adding one would be an unreachable pin.
+                item_write.restore_item(db, existing_id)
                 return RedirectResponse(f"/item/{existing_id}", status_code=303)
 
             item_id = insert_item(

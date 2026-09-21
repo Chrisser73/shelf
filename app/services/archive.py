@@ -39,7 +39,8 @@ from app.services import isbn as isbn_svc
 from app.services import item_copies
 from app.services import lists
 from app.services.covers import MAX_COVER_SIZE, MIN_COVER_SIZE, _looks_like_image
-from app.services.item_write import insert_item, update_item_fields
+from app.services import item_write
+from app.services.item_write import insert_item, update_item_fields, was_restored
 
 logger = logging.getLogger(__name__)
 
@@ -839,6 +840,17 @@ def _apply_item_update(db, item_id: int, item: dict, loc_name: str | None,
         if _present(val):
             updates[col] = val
 
+    # The collision-with-Trash preflight, HERE rather than inside
+    # update_item_fields below. The location block that follows can create a
+    # location (`get_location_id` is get-or-create), and apply_plan runs the
+    # whole import in one transaction under a broad per-item except — so a
+    # refusal raised by the update would land after that location was
+    # written, committed beside a report that says this record failed (G85).
+    # Checked while `updates` still holds every identifier this record can
+    # move (isbn, upc, media_type), so the answer is the same one the update
+    # funnel would give.
+    item_write.refuse_trash_collision(db, "id = ?", [item_id], updates)
+
     if (loc_name or "").strip():
         current = db.execute(
             "SELECT location_id FROM items_live WHERE id = ?", (item_id,)
@@ -1581,7 +1593,17 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
                 # that property, which a helper taking its own connection
                 # would not.
                 real_id = insert_item(db, fields)
-                if archive_id is not None:
+                # Read the restore flag BEFORE real_id goes anywhere that
+                # could normalise it — `ItemId` loses the flag through int().
+                restored = was_restored(real_id)
+                # A restored row is treated as the `update` verdict treats an
+                # existing row, minus the field overwrite: it is NOT newly
+                # created, so it must not enter id_map. The history loops
+                # below attach the archive's reading_log and checkouts to
+                # "newly created items only", and a restored row kept its own
+                # through the trash — mapping it would double an open loan,
+                # which T13's lent-out badge would then count (claude-R6).
+                if archive_id is not None and not restored:
                     id_map[int(archive_id)] = real_id
 
                 # item_tag_names is already NOCASE-deduped, so two archive
@@ -1598,13 +1620,32 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
                 # it did then: one primary copy from `location`, created by
                 # insert_item. The branch is reached by absence, never by an
                 # empty list.
-                _import_copies(db, real_id, planned_copies, get_location_id,
-                               errors, archive_id, title)
+                # Skipped on a restored row. Its copies came back with it —
+                # trashing an item writes nothing to them — so `_import_copies`
+                # would either collide reconciling into a primary the row
+                # already has, or, on an archive whose record carries
+                # `copies: []`, run `delete_copies_for_item` and destroy them.
+                if not restored:
+                    _import_copies(db, real_id, planned_copies, get_location_id,
+                                   errors, archive_id, title)
+                # The summary keys are unchanged: a restored row counts as
+                # imported. Counting it separately is plan 5's archive work.
                 imported += 1
 
                 if has_cover_entry:
                     if not sel["covers"]:
                         deselected["covers"] += 1
+                    elif restored and db.execute(
+                        "SELECT cover_path FROM items_live WHERE id = ?",
+                        (real_id,),
+                    ).fetchone()["cover_path"]:
+                        # The user's own cover survives the re-import. Read
+                        # on `db`, NOT through restore_report.keeps_stored_cover:
+                        # that opens its own connection, and apply_plan runs
+                        # the whole import as one transaction here — a second
+                        # connection cannot see this restore yet, would read
+                        # the row as still trashed, and would answer False.
+                        pass
                     elif _install_cover(reader, real_id, cover_arcname):
                         db.execute(
                             "UPDATE items SET cover_path = ? WHERE id = ?",

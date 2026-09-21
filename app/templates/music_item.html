@@ -5,6 +5,12 @@
     <div class="mb-4">
         <a href="/music" class="text-sm text-shelf-muted hover:text-shelf-text">&larr; Back to music</a>
     </div>
+    {# The router sends a boolean; the sentence lives here (G58). #}
+    {% if restored %}
+    <div data-testid="music-restored" role="status" class="mb-4 rounded-lg border border-shelf-success/40 bg-shelf-success/10 px-4 py-3 text-sm text-shelf-success">
+        Restored from Trash &mdash; this release was in Trash and has been brought back.
+    </div>
+    {% endif %}
 
     <div class="bg-shelf-card border border-shelf-border rounded-xl p-6">
         <div class="flex items-start justify-between gap-4 mb-4">

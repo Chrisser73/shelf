@@ -162,7 +162,7 @@
     <img src="/{{ cover_path }}" class="w-12 h-16 object-cover rounded" alt="" data-scan-cover>
     {% else %}
     <div class="w-12 h-16 bg-shelf-hover rounded flex items-center justify-center text-shelf-muted text-xs">
-        {% if status == 'added' or status == 'wishlisted' or status == 'promoted' %}+
+        {% if status == 'added' or status == 'wishlisted' or status == 'promoted' or status == 'restored' %}+
         {% elif status == 'duplicate' %}=
         {% elif status in ('checked_out', 'returned', 'moved', 'confirmed', 'relocated', 'found', 'marked_read', 'elsewhere') %}&check;
         {% else %}!{% endif %}
@@ -171,7 +171,7 @@
 
     <div class="flex-1 min-w-0">
         {# Statuses with a title link #}
-        {% if status in ('added', 'wishlisted', 'duplicate', 'checked_out', 'returned', 'moved', 'confirmed', 'relocated', 'found', 'marked_read', 'already_checked_out', 'not_checked_out', 'elsewhere', 'promoted') %}
+        {% if status in ('added', 'wishlisted', 'duplicate', 'checked_out', 'returned', 'moved', 'confirmed', 'relocated', 'found', 'marked_read', 'already_checked_out', 'not_checked_out', 'elsewhere', 'promoted', 'restored') %}
         <p class="font-medium truncate" data-scan-title>
             {% if item_id %}<a href="/item/{{ item_id }}" class="hover:text-shelf-accent2">{{ title }}</a>
             {% else %}{{ title }}{% endif %}
@@ -180,7 +180,9 @@
         {% endif %}
 
         {# Status-specific detail line #}
-        {% if status == 'added' %}
+        {% if status == 'restored' %}
+        <span data-scan-detail>Restored from Trash</span>
+        {% elif status == 'added' %}
         <p class="text-xs text-shelf-muted">{{ media_type_label }} via {{ source }}</p>
         {% elif status == 'wishlisted' %}
         <p class="text-xs text-shelf-muted">Added to wishlist &middot; {{ media_type_label }} via {{ source }}</p>
@@ -264,13 +266,14 @@
     </div>
 
     <span data-scan-badge class="text-xs px-2 py-1 rounded-full shrink-0
-        {% if status in ('added', 'returned', 'confirmed', 'marked_read', 'promoted') %}bg-shelf-success/20 text-shelf-success
+        {% if status in ('added', 'returned', 'confirmed', 'marked_read', 'promoted', 'restored') %}bg-shelf-success/20 text-shelf-success
         {% elif status == 'wishlisted' %}bg-purple-500/20 text-purple-400
         {% elif status in ('duplicate', 'already_checked_out', 'not_checked_out') %}bg-shelf-warning/20 text-shelf-warning
         {% elif status == 'checked_out' %}bg-orange-500/20 text-orange-400
         {% elif status in ('moved', 'found', 'relocated', 'elsewhere') %}bg-blue-500/20 text-blue-400
         {% else %}bg-shelf-error/20 text-shelf-error{% endif %}">
-        {% if status == 'wishlisted' %}wishlisted
+        {% if status == 'restored' %}restored
+        {% elif status == 'wishlisted' %}wishlisted
         {% elif status == 'promoted' %}owned
         {% elif status == 'checked_out' %}lent
         {% elif status == 'returned' %}returned

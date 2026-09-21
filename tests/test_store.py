@@ -426,3 +426,113 @@ class TestStoreQueue:
         client.cookies.set("access_token", token)
         resp = client.post("/api/store/queue", json={"isbns": ["9780441013593"]})
         assert resp.status_code == 403
+
+
+class TestStoreModeRestores:
+    """Sites 12-14 of the plan's call-site table.
+
+    G73 is the constraint that shapes this: `store.js` drops every returned
+    entry from the offline queue regardless of status, and only *indexes* the
+    statuses it lists. A status the server can return but the client does not
+    index is a book the next scan cannot match — so the two vocabularies must
+    agree, and the grep-level pin below is what keeps them agreeing.
+    """
+
+    ISBN = "9780441013593"
+
+    def test_the_unreadable_path_cannot_restore(self, admin_client, db):
+        """Site 12 — the insert carries no identifier at all, so the funnel's
+        lookup never runs. Pinned so nobody writes a restore pin here that
+        could never go red."""
+        from app.services import item_write
+
+        original = item_write.insert_item(
+            db, title="Unreadable barcode — xyz", media_type="book",
+            owned=0, wishlisted=True, source="store_queue")
+        item_write.trash_item(db, original)
+        db.commit()
+
+        resp = admin_client.post("/api/store/queue", json={"isbns": ["xyz"]})
+
+        result = resp.json()["results"][0]
+        assert result["status"] == "unreadable"
+        assert result["item_id"] != original
+
+    def test_a_restored_entry_carries_the_rows_real_ownership(
+        self, admin_client, db
+    ):
+        """Site 13. The queue is wishlist mode, but a restored row can be
+        owned — and store.js indexes the `owned` it is told (G73), so a
+        wrong value makes the next offline scan answer wrongly."""
+        from app.services import item_write
+
+        item_id = item_write.insert_item(
+            db, title="My Dune", isbn=self.ISBN, media_type="book", owned=1)
+        item_write.trash_item(db, item_id)
+        db.commit()
+
+        with patch("app.routers.items_common._lookup_metadata",
+                   new=AsyncMock(return_value=(
+                       {"title": "Dune (provider)", "authors": "FH"},
+                       "openlibrary", {}, False))), \
+             patch("app.routers.store.covers.download_cover",
+                   new=AsyncMock(return_value=None)):
+            resp = admin_client.post("/api/store/queue",
+                                     json={"isbns": [self.ISBN]})
+
+        result = resp.json()["results"][0]
+        assert result["status"] == "restored"
+        assert result["item_id"] == item_id
+        assert result["title"] == "My Dune"
+        assert result["owned"] is True
+
+    def test_the_bare_fallback_reports_its_restore(self, admin_client, db):
+        """Site 14 — metadata lookup down, so the bare insert is what meets
+        the trashed row. Reported as `added_bare`, the client would index a
+        wishlisted book over a restored one."""
+        from app.services import item_write
+
+        item_id = item_write.insert_item(
+            db, title="My Dune", isbn=self.ISBN, media_type="book",
+            owned=0, wishlisted=True)
+        item_write.trash_item(db, item_id)
+        db.commit()
+
+        with patch("app.routers.items_common._lookup_metadata",
+                   new=AsyncMock(side_effect=Exception("down"))):
+            resp = admin_client.post("/api/store/queue",
+                                     json={"isbns": [self.ISBN]})
+
+        result = resp.json()["results"][0]
+        assert result["status"] == "restored"
+        assert result["item_id"] == item_id
+        assert result["title"] == "My Dune"
+        assert result["owned"] is False
+
+    def test_store_js_indexes_every_status_the_server_can_return(self):
+        """The G73 pin, beside the existing `unreadable` reasoning.
+
+        Both halves are read from source rather than asserted by hand, so a
+        status added on either side without the other goes red here.
+        """
+        import re
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        server = set(re.findall(
+            r'"status": "([a-z_]+)"', (root / "app" / "routers" / "store.py").read_text()))
+        client_src = (root / "static" / "js" / "store.js").read_text()
+        # Only the condition guarding the index write. A wider slice picks
+        # the status names up from the display counters above it
+        # (`restored++`, `unreadable++`), so dropping one from this `if`
+        # stayed green (`codex-M2`).
+        write = client_src.index("index[normalizeCode(res.isbn)] =")
+        block = client_src[client_src.rindex("if (", 0, write):write]
+        indexed = set(re.findall(r"res\.status === '([a-z_]+)'", block))
+
+        missing = server - indexed
+        assert not missing, (
+            "store.js indexes no branch for these statuses store.py can "
+            f"return, so a re-scan cannot match them: {sorted(missing)}"
+        )
+        assert "restored" in indexed

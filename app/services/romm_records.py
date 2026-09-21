@@ -43,9 +43,19 @@ def ensure_platform(db, slug: str, name: str | None = None) -> str:
 
 
 def _existing_record(db, romm_id: str):
+    """The record for `romm_id`, whether or not its item is in Trash.
+
+    Same reasoning as `komga_records._existing_record`: joining `items_live`
+    would hide a trashed item's record, `romm_id` is the PRIMARY KEY of
+    `romm_records`, and this module has **no** IntegrityError handler at all
+    — so the hidden record meant a fresh insert, a PK violation on the record
+    row, and the whole block rolled back. Physical, carrying `deleted_at`.
+
+    A primary key means at most one record, so no live-first ordering.
+    """
     return db.execute(
-        "SELECT rr.*, i.source FROM romm_records rr "
-        "JOIN items_live i ON i.id = rr.item_id WHERE rr.romm_id = ?",
+        "SELECT rr.*, i.source, i.deleted_at FROM romm_records rr "
+        "JOIN items i ON i.id = rr.item_id WHERE rr.romm_id = ?",
         (romm_id,),
     ).fetchone()
 
@@ -91,6 +101,12 @@ def persist_candidate(db, candidate: dict[str, Any]) -> dict[str, Any]:
     fields = _fields(candidate, platform)
 
     existing = _existing_record(db, romm_id)
+    if existing is not None and existing["deleted_at"] is not None:
+        # Skipped before any write. RomM rows carry no ISBN or UPC, so the
+        # funnel could never refuse one — this matcher skip IS the fix. The
+        # item_id is in the return because the sync loop reads it after
+        # counting the action (claude-R3).
+        return {"item_id": existing["item_id"], "action": "in_trash"}
     if existing is not None:
         if existing["source"] != "romm":
             raise RomMPersistenceError(
@@ -105,6 +121,9 @@ def persist_candidate(db, candidate: dict[str, Any]) -> dict[str, Any]:
         )
         return {"item_id": existing["item_id"], "action": "updated"}
 
+    # restore_trashed=False for class consistency with the other sync
+    # adapters. It cannot fire here — RomM rows carry no ISBN or UPC, so the
+    # funnel never looks — but a machine must never be the one to restore.
     item_id = insert_item(
         db,
         {
@@ -112,6 +131,7 @@ def persist_candidate(db, candidate: dict[str, Any]) -> dict[str, Any]:
             "source": "romm",
             "owned": 1,
         },
+        restore_trashed=False,
     )
     db.execute(
         "INSERT INTO romm_records (romm_id, item_id, platform_id) VALUES (?, ?, ?)",

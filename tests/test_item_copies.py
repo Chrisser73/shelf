@@ -24,9 +24,9 @@ def _item(db, title="Copy Test", *, owned=1, location_id=None, media_type="book"
 
 
 def _copy(db, copy_id):
-    """One copy row, or None once it is gone."""
+    """One copy row, or None once it is gone from the live view."""
     return db.execute(
-        "SELECT * FROM item_copies WHERE id = ?", (copy_id,)
+        "SELECT * FROM copies_live WHERE id = ?", (copy_id,)
     ).fetchone()
 
 
@@ -232,6 +232,22 @@ class TestCopyWriteFunnel:
             item_copies.update_copy(db, copy_id, {"id": 99})
         with pytest.raises(ValueError, match="created_at"):
             item_copies.update_copy(db, copy_id, {"created_at": "2020-01-01"})
+
+    def test_both_functions_refuse_deleted_at(self, db):
+        """`trash_copy` / `restore_copy` own the column. Both funnels build
+        their column list from caller-supplied names, so refusing the name
+        here is what stops `update_copy(db, id, {"deleted_at": ...})` from
+        putting a copy in Trash without the demote that `add_copy`'s primary
+        census depends on."""
+        item_id = _item(db)
+        with pytest.raises(ValueError, match="deleted_at"):
+            item_copies.insert_copy(
+                db,
+                {"item_id": item_id, "copy_number": 1, "deleted_at": "2020-01-01"},
+            )
+        copy_id = item_copies.insert_copy(db, {"item_id": item_id, "copy_number": 1})
+        with pytest.raises(ValueError, match="deleted_at"):
+            item_copies.update_copy(db, copy_id, {"deleted_at": "2020-01-01"})
 
     def test_insert_requires_item_id_and_copy_number(self, db):
         item_id = _item(db)
@@ -563,7 +579,7 @@ class TestDeleteCopy:
         item_copies.delete_copy(db, only)
 
         assert db.execute(
-            "SELECT COUNT(*) AS n FROM item_copies WHERE item_id = ?", (item_id,)
+            "SELECT COUNT(*) AS n FROM copies_live WHERE item_id = ?", (item_id,)
         ).fetchone()["n"] == 0
 
     def test_an_unknown_copy_id_returns_none(self, db):

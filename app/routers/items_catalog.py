@@ -17,7 +17,7 @@ from app.auth import require_role
 from app.config import BOOK_MEDIA_TYPES, HTTP_TIMEOUT, MEDIA_TYPES, canonical_media_type
 from app.database import get_db, get_game_platforms, get_setting
 from app.routers import items_common
-from app.services import covers, igdb, openlibrary, scan_outcome, tmdb
+from app.services import covers, igdb, openlibrary, restore_report, scan_outcome, tmdb
 from app.services import isbn as isbn_svc
 from app.services import upc as upc_svc
 from app.services.item_write import ItemValueError, insert_item, validated_location_id
@@ -312,24 +312,32 @@ async def add_book_from_search(
 
         item_id = items_common._save_item(metadata, isbn13, media_type, location_id, source, hc_ids)
 
-        hc_cover = metadata.get("cover_url") if source == "hardcover" else hc_ids.get("cover_url")
-        cover_path = await covers.download_cover(
-            item_id, isbn13,
-            metadata.get("cover_url") if source != "hardcover" else None,
-            metadata.get("cover_id"), client,
-            hardcover_cover_url=hc_cover,
-        )
-        if cover_path:
-            with get_db() as db:
-                db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
+        # Cover kept: skip the download entirely on a restored row that
+        # already has one — a skipped download is also a skipped outbound
+        # call for a cover we would then discard (claude-R8).
+        cover_path = None
+        if not restore_report.keeps_stored_cover(item_id):
+            hc_cover = metadata.get("cover_url") if source == "hardcover" else hc_ids.get("cover_url")
+            cover_path = await covers.download_cover(
+                item_id, isbn13,
+                metadata.get("cover_url") if source != "hardcover" else None,
+                metadata.get("cover_id"), client,
+                hardcover_cover_url=hc_cover,
+            )
+            if cover_path:
+                with get_db() as db:
+                    db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
 
-    items_common._log_scan(isbn13, media_type, "added", item_id)
+    status = restore_report.restored_status(item_id, "added")
+    items_common._log_scan(isbn13, media_type, status, item_id)
 
     resp = templates.TemplateResponse(
         request, "fragments/scan_result.html",
         {
-            "status": "added", "isbn": isbn13, "title": metadata["title"],
-            "authors": metadata.get("authors"), "cover_path": cover_path,
+            "status": status, "isbn": isbn13,
+            **({"title": metadata["title"], "authors": metadata.get("authors"),
+                "cover_path": cover_path}
+               if status != "restored" else restore_report.restored_card(item_id)),
             "item_id": item_id, "source": source,
             "media_type_label": MEDIA_TYPES.get(media_type, media_type),
         },

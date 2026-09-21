@@ -11,9 +11,11 @@ from starlette.responses import StreamingResponse
 from app.auth import require_role
 from app.config import HTTP_TIMEOUT
 from app.database import get_db, get_setting
-from app.services import hardcover, covers, lists
+from app.services import hardcover, covers, lists, restore_report
 from app.services import isbn as isbn_svc
-from app.services.item_write import ItemValueError, insert_item, update_item_fields
+from app.services import item_write
+from app.services.item_write import (IdentifierInTrash, ItemValueError,
+                                     insert_item, update_item_fields)
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +148,21 @@ async def add_hardcover_to_shelf(request: Request, _=Depends(require_role("edito
                 f"SELECT id, owned, {lists.WISHLISTED_SQL} AS wishlisted FROM items_live i "
                 "WHERE isbn = ?", (isbn,)
             ).fetchone()
-        if existing is None:
+        # Both live guards missed. The funnel keys on isbn/upc only, and the
+        # series "missing books" button sends a hardcover_book_id and no
+        # isbn — so a trashed book is found by its Hardcover id here, or it
+        # would be filed a second time beside the trashed one.
+        trashed_id = (
+            _trashed_by_hardcover_id(db, hc_book_id)
+            if existing is None and hc_book_id else None
+        )
+        if trashed_id is not None and item_write.restore_item(db, trashed_id):
+            # The wishlist intent, moving toward owned only (G100).
+            if not db.execute("SELECT owned FROM items_live WHERE id = ?",
+                              (trashed_id,)).fetchone()["owned"]:
+                update_item_fields(db, trashed_id, {"wishlisted": True})
+            item_id = item_write.ItemId(trashed_id, restored=True)
+        elif existing is None:
             try:
                 item_id = insert_item(
                     db,
@@ -184,15 +200,20 @@ async def add_hardcover_to_shelf(request: Request, _=Depends(require_role("edito
     if value_error:
         return {"ok": False, "message": value_error}
 
-    # Download cover
-    if cover_url:
+    # Download cover — skipped entirely on a restored row that already has
+    # one, so the user's own cover survives the re-add (and no outbound call
+    # is made for a cover we would then discard, claude-R8).
+    if cover_url and not restore_report.keeps_stored_cover(item_id):
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
             cover_path = await covers.download_cover(item_id, isbn, None, None, client, hardcover_cover_url=cover_url)
         if cover_path:
             with get_db() as db:
                 db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
 
-    return {"ok": True, "item_id": item_id, "title": title}
+    return {
+        "ok": True, "item_id": item_id, "title": title,
+        "restored": item_write.was_restored(item_id),
+    }
 
 
 @router.post("/schedule")
@@ -344,7 +365,8 @@ async def import_hardcover_stream(request: Request, _=Depends(require_role("edit
     queue: asyncio.Queue = asyncio.Queue()
 
     async def run_import():
-        stats = {"added": 0, "updated": 0, "skipped": 0, "errors": 0, "total": 0}
+        stats = {"added": 0, "updated": 0, "skipped": 0, "in_trash": 0,
+                 "errors": 0, "total": 0}
         try:
             # Get user ID
             user_id = await hardcover.get_user_id(token)
@@ -467,6 +489,22 @@ async def _download_cover_with_fallback(job: dict, client: httpx.AsyncClient) ->
     return cover_path
 
 
+def _trashed_by_hardcover_id(db, hc_book_id) -> int | None:
+    """The id of a trashed item carrying this Hardcover book id, or None.
+
+    Called only after every live strategy has missed — that ordering is the
+    whole of the live-wins rule for a non-unique key. Physical by definition:
+    it exists to find the row `items_live` hides. The sync skips on a hit;
+    add-to-shelf restores it.
+    """
+    row = db.execute(
+        "SELECT id FROM items WHERE hardcover_book_id = ? "
+        "AND deleted_at IS NOT NULL LIMIT 1",
+        (hc_book_id,),
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def _find_existing_item(db, book: dict, title_index: dict):
     """Find an existing item matching a Hardcover book. Returns sqlite3.Row or None."""
     hc_book_id = book.get("hardcover_book_id")
@@ -529,6 +567,15 @@ def _import_single_book_metadata(book: dict, overwrite: bool, title_index: dict)
     with get_db() as db:
         existing = _find_existing_item(db, book, title_index)
 
+        # Live wins (claude-R4 / codex-R1). `hardcover_book_id` is a plain
+        # index, not unique, so a trashed row must never beat a live one:
+        # every live strategy above runs first, and only when all of them
+        # miss does a trashed row sharing the Hardcover id count. A machine
+        # re-syncing leaves it alone — skipped before any write.
+        if existing is None and book.get("hardcover_book_id"):
+            if _trashed_by_hardcover_id(db, book["hardcover_book_id"]):
+                return ("in_trash", None)
+
         if existing:
             if not overwrite:
                 updates = _build_hc_id_updates(book)
@@ -564,27 +611,34 @@ def _import_single_book_metadata(book: dict, overwrite: bool, title_index: dict)
 
         is_owned = 0 if book.get("reading_status") == "want_to_read" else 1
 
-        item_id = insert_item(
-            db,
-            title=book["title"],
-            subtitle=book.get("subtitle"),
-            authors=book.get("authors"),
-            isbn=isbn,
-            isbn10=isbn10,
-            media_type="book",
-            publisher=book.get("publisher"),
-            publish_year=book.get("publish_year"),
-            page_count=book.get("page_count"),
-            description=book.get("description"),
-            series_name=book.get("series_name"),
-            series_position=book.get("series_position"),
-            reading_status=book.get("reading_status"),
-            source="hardcover",
-            owned=is_owned,
-            wishlisted=(is_owned == 0),
-            hardcover_book_id=book.get("hardcover_book_id"),
-            hardcover_edition_id=book.get("hardcover_edition_id"),
-            hardcover_user_book_id=book.get("hardcover_user_book_id"),
-        )
+        try:
+            item_id = insert_item(
+                db,
+                title=book["title"],
+                subtitle=book.get("subtitle"),
+                authors=book.get("authors"),
+                isbn=isbn,
+                isbn10=isbn10,
+                media_type="book",
+                publisher=book.get("publisher"),
+                publish_year=book.get("publish_year"),
+                page_count=book.get("page_count"),
+                description=book.get("description"),
+                series_name=book.get("series_name"),
+                series_position=book.get("series_position"),
+                reading_status=book.get("reading_status"),
+                source="hardcover",
+                owned=is_owned,
+                wishlisted=(is_owned == 0),
+                hardcover_book_id=book.get("hardcover_book_id"),
+                hardcover_edition_id=book.get("hardcover_edition_id"),
+                hardcover_user_book_id=book.get("hardcover_user_book_id"),
+                restore_trashed=False,
+            )
+        except IdentifierInTrash:
+            # A trashed ISBN twin. Counted as its own outcome and refused
+            # before any write — this arm must sit ahead of the caller's
+            # broad `except Exception`, which would count it an error.
+            return ("in_trash", None)
 
     return ("added", _cover_job(item_id, book))

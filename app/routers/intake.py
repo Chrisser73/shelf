@@ -18,12 +18,13 @@ from app.config import (
     canonical_media_type,
 )
 from app.database import get_db, get_all_settings, get_setting
-from app.services import cover_queue, covers, openlibrary, tiling, title_lookup, vision
+from app.services import cover_queue, covers, openlibrary, restore_report, tiling, title_lookup, vision
 from app.services import isbn as isbn_svc
 from app.services import authors as authors_svc
 from app.services import national
+from app.services import item_write
 from app.services.title_match import titles_agree, titles_match_exactly
-from app.services.item_write import ItemValueError, insert_item, update_item_fields
+from app.services.item_write import ItemValueError, insert_item
 from app.services.write_targets import UnknownLocationError, validated_location_id
 
 logger = logging.getLogger(__name__)
@@ -233,7 +234,8 @@ async def _confirm_one(
             if titles_agree(title, metadata.get("title")):
                 try:
                     item_id = items_common._save_item(metadata, printed_isbn13, media_type,
-                                         location_id, "photo_intake", hc_ids)
+                                         location_id, "photo_intake", hc_ids,
+                                         owned=bool(owned))
                 except sqlite3.IntegrityError:
                     # A location deleted after the boundary check can still
                     # raise the same FK exception; classify ISBN races before
@@ -242,13 +244,16 @@ async def _confirm_one(
                         return "skipped", {
                             "title": title, "reason": "ISBN already in library"}, None
                     raise
-                if not owned:
-                    with get_db() as db:
-                        update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
+                # Read the restore flag before item_id is used for anything
+                # else. No cover guard needed here: this row's cover, if any,
+                # comes off the cover queue below (confirm_books ->
+                # _enrich_import_covers), and resolve_missing_cover already
+                # skips a row that has one.
+                restored = item_write.was_restored(item_id)
                 # The catalogue's title is the record; the row's was the query.
                 return "added", {
                     "title": metadata["title"], "id": item_id, "matched": True,
-                    "lookup": "matched"}, item_id
+                    "lookup": "matched", "restored": restored}, item_id
 
             # 6b. The cascade resolved the identifier and it names a different
             # book, so the identifier is known untrusted. Clear it rather than
@@ -435,13 +440,19 @@ async def _confirm_one(
             raise
         # insert_item() reads lastrowid inside the connection's scope (G16).
 
+    # Read the restore flag before item_id is used for anything else.
+    restored = item_write.was_restored(item_id)
+
     # 5b. A disc/game hit's cover downloads directly, on the batch's own
     # client (G29 — this stays off the book cover-queue hand-off; a book's
     # `meta` may also carry a cover_url, but `cover_url` above is only ever
     # set on the UPC_METADATA_PROVIDERS branch). None is a normal outcome —
     # allowlist reject or failed fetch — and changes nothing else about the
     # row (G11: covers._download_to_item re-validates the post-redirect URL).
-    if cover_url:
+    # Cover kept: skip the download entirely on a restored row that already
+    # has one — a skipped download is also a skipped outbound call for a
+    # cover we would then discard (claude-R8).
+    if cover_url and not restore_report.keeps_stored_cover(item_id):
         cover_path = await covers._download_to_item(item_id, cover_url, client)
         if cover_path:
             with get_db() as db:
@@ -451,7 +462,8 @@ async def _confirm_one(
     if meta:
         lookup = "matched"
     return "added", {
-        "title": title, "id": item_id, "matched": bool(meta), "lookup": lookup}, item_id
+        "title": title, "id": item_id, "matched": bool(meta), "lookup": lookup,
+        "restored": restored}, item_id
 
 
 @router.post("/confirm")

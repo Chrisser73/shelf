@@ -35,6 +35,7 @@ from app.services import upc as upc_svc
 from app.services import isbn as isbn_svc
 from app.services.item_write import ItemValueError, insert_item, update_item_fields
 from app.services import item_write  # promote_wishlisted (scan) — call through the module (patchable)
+from app.services import restore_report
 
 logger = logging.getLogger(__name__)
 
@@ -127,12 +128,22 @@ async def _lookup_metadata(isbn13: str, hc_token: str | None, client: httpx.Asyn
     return metadata, source, hc_ids, provider_result.combine(legs, provider="isbn-cascade")
 
 def _save_item(metadata: dict, isbn13: str, media_type: str, location_id: int | None,
-               source: str, hc_ids: dict) -> int:
+               source: str, hc_ids: dict, *, owned: bool = True) -> int:
     """Insert from scan metadata; `isbn13` is boundary-validated by every
-    caller, and the funnel derives `isbn10`. Returns the new item ID."""
+    caller, and the funnel derives `isbn10`. Returns the new item ID.
+
+    `owned=False` is wishlist mode, and it rides the **insert** rather than a
+    second transaction that demotes afterwards. A restoring funnel has to be
+    told the caller's ownership intent: it applies that intent to the row it
+    brings back, and a post-hoc demote would restore an owned item and then
+    demote it. It also closes the window where a crash between the two
+    transactions left an owned row behind.
+    """
+    extra = {} if owned else {"owned": 0, "wishlisted": True}
     with get_db() as db:
         return insert_item(
             db,
+            **extra,
             title=metadata["title"],
             subtitle=metadata.get("subtitle"),
             authors=metadata.get("authors"),
@@ -242,11 +253,25 @@ async def resolve_missing_cover(
                 logger.info("Recovered ISBN %r for item %s is not a valid ISBN — not stored",
                             found_isbn, item_id)
             else:
+                skipped_in_trash = False
                 with get_db() as db:
                     taken = db.execute("SELECT id FROM items_live WHERE isbn = ? AND id != ?",
                                        (pair[0], item_id)).fetchone()
                     if not taken:
-                        update_item_fields(db, item_id, {"isbn": pair[0]})
+                        try:
+                            update_item_fields(db, item_id, {"isbn": pair[0]})
+                        except item_write.IdentifierInTrash:
+                            # A trashed row holds the slot. Same outcome as
+                            # `taken` above: skip the rewrite and carry on
+                            # with the cover work, which is what this
+                            # function is actually for.
+                            skipped_in_trash = True
+                if skipped_in_trash:
+                    # Logged outside the `with` block — a log handler opening
+                    # its own connection would wait on the write lock (G3).
+                    logger.info(
+                        "Recovered ISBN %r for item %s is held by an item in "
+                        "Trash — not stored", pair[0], item_id)
         if cover_url:
             cover_path = await covers.download_cover(
                 item_id, None, cover_url, None, client)
@@ -601,23 +626,28 @@ async def _scan_upc(request: Request, templates, upc_code: str, media_type: str,
              "item_id": existing["id"]},
         )
 
-    # Download cover
+    # Download cover — skipped entirely on a restored row that already has
+    # one, so the user's own cover survives the re-add (and no outbound call
+    # is made for a cover we would then discard).
     cover_path = None
-    if metadata.get("cover_url"):
+    if metadata.get("cover_url") and not restore_report.keeps_stored_cover(item_id):
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
             cover_path = await covers._download_to_item(item_id, metadata["cover_url"], client)
         if cover_path:
             with get_db() as db:
                 db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
 
-    status = "wishlisted" if mode == "wishlist" else "added"
+    status = restore_report.restored_status(item_id, "wishlisted" if mode == "wishlist" else "added")
     _log_scan(upc_norm, media_type, status, item_id, mode)
 
     resp = templates.TemplateResponse(
         request, "fragments/scan_result.html",
         {
-            "status": status, "isbn": upc_norm, "title": metadata["title"],
-            "authors": None, "cover_path": cover_path, "item_id": item_id,
+            "status": status, "isbn": upc_norm,
+            **({"title": metadata["title"], "authors": None,
+                "cover_path": cover_path}
+               if status != "restored" else restore_report.restored_card(item_id)),
+            "item_id": item_id,
             "source": source, "media_type_label": MEDIA_TYPES.get(media_type, media_type),
             # T5 renders these; T4 only has to carry them.
             "detect_reason": detect_reason, "detect_overrode": detect_overrode,
@@ -778,25 +808,29 @@ async def _scan_upc_game(request: Request, templates, upc_norm: str, product: di
              "item_id": existing["id"]},
         )
 
-    # Download cover
+    # Download cover — skipped on a restored row that already has one, the
+    # same rule as the film branch above.
     cover_path = None
     cover_url = metadata.get("cover_url") if metadata else None
-    if cover_url:
+    if cover_url and not restore_report.keeps_stored_cover(item_id):
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
             cover_path = await covers._download_to_item(item_id, cover_url, client)
         if cover_path:
             with get_db() as db:
                 db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
 
-    status = "wishlisted" if mode == "wishlist" else "added"
+    status = restore_report.restored_status(item_id, "wishlisted" if mode == "wishlist" else "added")
     _log_scan(upc_norm, "video_game", status, item_id, mode)
 
     resp = templates.TemplateResponse(
         request, "fragments/scan_result.html",
         {
-            "status": status, "isbn": upc_norm, "title": game_title,
-            "authors": metadata.get("developer") if metadata else None,
-            "cover_path": cover_path, "item_id": item_id,
+            "status": status, "isbn": upc_norm,
+            **({"title": game_title,
+                "authors": metadata.get("developer") if metadata else None,
+                "cover_path": cover_path}
+               if status != "restored" else restore_report.restored_card(item_id)),
+            "item_id": item_id,
             "source": source, "media_type_label": "Video Game",
             # T5 renders these; T4 only has to carry them.
             "detect_reason": detect_reason, "detect_overrode": detect_overrode,

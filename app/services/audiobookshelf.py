@@ -6,7 +6,7 @@ import httpx
 
 from app.database import get_db
 from app.services import covers
-from app.services.item_write import insert_item
+from app.services.item_write import IdentifierInTrash, insert_item
 from app.services.item_write import ItemValueError, update_item_fields
 from app.services import isbn as isbn_svc
 
@@ -60,6 +60,12 @@ async def sync(abs_url: str, abs_token: str, on_progress=None) -> dict:
 
     on_progress: optional async callback(current, total, title, status) for progress updates.
     """
+    # `in_trash` is counted lazily, deliberately not seeded here. This loop
+    # increments by literal name — it has no "is this action known" check the
+    # way the Komga and RomM loops do — so a lazy key is safe, and it keeps
+    # the stats shape byte-identical until something is actually in Trash,
+    # which is every sync until the delete sites are flipped. The template
+    # renders the count only when it is non-zero.
     stats = {"added": 0, "updated": 0, "unchanged": 0, "skipped": 0, "errors": 0}
 
     headers = {"Authorization": f"Bearer {abs_token}"}
@@ -181,13 +187,29 @@ async def sync(abs_url: str, abs_token: str, on_progress=None) -> dict:
                 duration_mins = int(duration_secs / 60) if duration_secs else None
 
                 with get_db() as db:
+                    # Physical, and LIVE FIRST (claude-R4 / codex-R1). A
+                    # trashed row must be seen here — the view would hide it,
+                    # the ISBN-less item would miss, and the next sync would
+                    # insert a duplicate. But `abs_id` is a plain index, not
+                    # unique, so a trashed row must never win over a live one
+                    # sharing the id: order live rows first.
                     existing = db.execute(
                         """SELECT id, title, authors, narrator, isbn, series_name,
                                   publisher, publish_year, description, duration_mins,
-                                  media_type, abs_id, abs_library_id, cover_path
-                           FROM items_live WHERE abs_id = ?""",
+                                  media_type, abs_id, abs_library_id, cover_path,
+                                  deleted_at
+                           FROM items WHERE abs_id = ?
+                           ORDER BY deleted_at IS NOT NULL, id LIMIT 1""",
                         (abs_id,),
                     ).fetchone()
+                    if existing is not None and existing["deleted_at"] is not None:
+                        # A machine re-syncing does not resurrect what a
+                        # person deleted. Skipped BEFORE any write (G85), and
+                        # counted — never a swallowed exception (G47).
+                        stats["in_trash"] = stats.get("in_trash", 0) + 1
+                        if on_progress:
+                            await on_progress(current, total, title, "in_trash")
+                        continue
 
                     # Shelf permits the same ISBN across formats, but not twice
                     # within one media type. ABS IDs alone are therefore not
@@ -267,6 +289,14 @@ async def sync(abs_url: str, abs_token: str, on_progress=None) -> dict:
                             else:
                                 stats["unchanged"] += 1
                                 status = "unchanged"
+                        except IdentifierInTrash:
+                            # The update funnel refuses an ISBN a trashed row
+                            # holds — counted as the insert arm counts it, not
+                            # as an error on every sync until Trash is emptied.
+                            stats["in_trash"] = stats.get("in_trash", 0) + 1
+                            if on_progress:
+                                await on_progress(current, total, title, "in_trash")
+                            continue
                         except ItemValueError as e:
                             stats["errors"] += 1
                             if on_progress:
@@ -294,7 +324,16 @@ async def sync(abs_url: str, abs_token: str, on_progress=None) -> dict:
                                 abs_id=abs_id,
                                 abs_library_id=lib_id,
                                 source="audiobookshelf",
+                                restore_trashed=False,
                             )
+                        except IdentifierInTrash:
+                            # A trashed ISBN twin with a different abs_id.
+                            # Must precede the ItemValueError arm below — it
+                            # is a subclass, and that arm counts an error.
+                            stats["in_trash"] = stats.get("in_trash", 0) + 1
+                            if on_progress:
+                                await on_progress(current, total, title, "in_trash")
+                            continue
                         except ItemValueError as e:
                             stats["errors"] += 1
                             if on_progress:

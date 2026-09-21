@@ -327,9 +327,10 @@ async def remove_copy(
     """Remove one copy, permanently. Its condition, acquisition detail and
     provenance go with it — the row is deleted rather than marked, which is
     why the control is guarded by an `hx-confirm` naming what is lost.
-    `item_copies` now carries a `deleted_at` column, and every read here
-    goes through the `copies_live` view that filters on it — but nothing
-    writes the column yet, so this is still a `DELETE`.
+    `item_copies` carries a `deleted_at` column and every read here goes
+    through the `copies_live` view that filters on it, and the service now
+    holds `trash_copy` / `restore_copy` — but **no route calls them**, this
+    one included, so removal here is still a `DELETE`.
 
     Removing the primary promotes the lowest-numbered survivor and re-points
     the seam; removing the last copy nulls the seam and leaves the item

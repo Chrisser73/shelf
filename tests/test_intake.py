@@ -964,7 +964,7 @@ class TestConfirmWithIsbn:
         data = resp.json()
         assert data["added"] == [{
             "title": "Dune", "id": data["added"][0]["id"],
-            "matched": True, "lookup": "matched"}]
+            "matched": True, "lookup": "matched", "restored": False}]
         row = db.execute("SELECT * FROM items WHERE isbn = ?", (ISBN13,)).fetchone()
         assert row["title"] == "Dune"                 # catalogue's, not the row's
         assert row["subtitle"] == "A Novel"

@@ -240,7 +240,8 @@ it posted from.
   `JOIN copies_live`, never the bare tables; `make check-deleted` enforces both
   and matches `JOIN` as well as `FROM`, because several files reach a table
   through a join alone. Writes stay on the physical tables, as do the reads
-  that exist to predict a UNIQUE violation (`GOTCHAS.md` G107).
+  that exist to predict a UNIQUE violation and the few that must *find* a row
+  the view hides — each allowlist entry states which (`GOTCHAS.md` G107).
 - **A route that decides on a `SELECT` guards and writes in one
   transaction.** `db.execute("BEGIN IMMEDIATE")` goes first in the block,
   above the guard query — a bare `SELECT` opens no transaction, so guarding in

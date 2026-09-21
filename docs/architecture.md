@@ -992,9 +992,9 @@ else**, never at package import time.
 ### Writing items
 
 Every path that creates an item — scan, manual add, CSV import, photo intake,
-Hardcover sync and discover, Audiobookshelf sync, the store's offline queue,
-the game/DVD/book adds, archive import — goes through
-`insert_item()` in `app/services/item_write.py`. It reads the column set from
+Hardcover sync and discover, Audiobookshelf, Komga and RomM sync, the store's
+offline queue, music and periodical adds, the game/DVD/book adds, archive
+import — goes through `insert_item()` in `app/services/item_write.py`. It reads the column set from
 the live table rather than carrying its own copy, raises on an unknown field
 instead of dropping it, and leaves unset columns to their `SCHEMA` defaults.
 Callers pass their own connection so the insert and any follow-up writes share
@@ -1102,7 +1102,7 @@ A failed rule raises a typed subclass of `ItemValueError` (a `ValueError`,
 defined in `services/write_targets.py` so the pre-existing
 `UnknownLocationError` can sit under it): `InvalidIsbn`, `UnknownMediaType`,
 `UnknownLocationError`, `UnknownPlatform`, `InvalidReadingStatus`,
-`InvalidOwned`. Each carries a stable `code` and the `field` it belongs to;
+`InvalidOwned`, `IdentifierInTrash`. Each carries a stable `code` and the `field` it belongs to;
 the message is the sentence a user reads. Routes reduce to one
 `except ItemValueError` and render it on their own surface — the scan card's
 error arm, the edit form's `?error=<code>` banner (copy lives in the
@@ -1123,6 +1123,61 @@ the log (and, for an archive, a line in the import's error report), because a
 sync or a restore that refuses a whole row over a bad ISBN loses data. The
 visible consequence: Audiobookshelf ASINs are no longer stored in `isbn`, and
 a row that carried one from an earlier sync is cleared on the next.
+
+**The two funnels own the collision-with-Trash rule.** A trashed row keeps its
+`UNIQUE(isbn, media_type)` and `UNIQUE(upc, media_type)` slots — the
+constraints see it — so a write that claims one of those slots is not an
+ordinary duplicate. It is resolved in one place per direction, rather than at
+each of the ~20 duplicate guards, which stay on `items_live` and correctly miss
+a trashed row:
+
+- **`insert_item` restores or refuses.** Before its `INSERT`, a write carrying
+  an `isbn` or a `upc` looks for a trashed row holding the slot it is about to
+  claim. By default — a **person** re-adding something — it restores that row
+  and returns its id, leaving every stored field alone and applying the
+  caller's ownership intent only toward owned. With `restore_trashed=False` —
+  a **machine** re-syncing — it raises `IdentifierInTrash` and writes nothing,
+  so a background sync never resurrects what a person deleted. The return is
+  an `ItemId`, an `int` subclass carrying `.restored`, read through
+  `was_restored()` *before* the id is transformed (arithmetic returns a plain
+  `int`). A write with neither identifier looks nothing up and cannot restore.
+- **The update funnel refuses.** `_execute_update` calls
+  `refuse_trash_collision()` before its statement: an edit that would move a
+  live row onto a trashed row's slot raises `IdentifierInTrash`, naming the
+  trashed title and both ways out. It cannot restore — the user is editing a
+  *different* item. It fires on a `media_type`-only change too, since the slot
+  is `(isbn, media_type)`, and checks every target of a bulk update before
+  writing, so a mixed selection refuses whole.
+
+The `sqlite3.IntegrityError` handlers at the add routes therefore mean what
+their comments say again — a lost race, not a trashed twin.
+
+Three places cannot reach the funnel's rule and carry it themselves. Music's
+and periodicals' earliest duplicate guards read a child table with no items
+join, so they restore at that guard, before a redirect to a page that would
+bounce to Browse. CSV import's dedup reads find an existing row directly — no
+`INSERT` to fold into — and restore it there. And the external-id matchers of
+the four syncs (Audiobookshelf's `abs_id`, Komga's and RomM's record tables,
+Hardcover's `hardcover_book_id`) read the physical relation so a trashed twin
+is *seen* and skipped, counted as `in_trash`: through the view, an ISBN-less
+item would miss and be duplicated, and a Komga or RomM record would be hidden,
+tripping its table's primary key on the re-insert and rolling the whole sync
+block back.
+
+**Live wins wherever the key is not unique.** The funnel's own lookups need no
+ordering — a trashed row holding a unique slot means there is no live holder.
+But CSV's title/author fallback, `find_duplicate_issue`, `abs_id` and
+`hardcover_book_id` are covered by no unique index, so each lets a live row win
+and acts on a trashed hit only when no live row matches. Without that, deleting
+one of two equal matches and re-importing resurrects the deleted one.
+
+**`deleted_at` is written by exactly four functions** — `item_write.trash_item`
+/ `restore_item` and `item_copies.trash_copy` / `restore_copy` — and both
+funnels refuse it as a caller-supplied field name, so it cannot be reached
+through `update_item_fields` either. A source pin in `tests/test_item_write.py`
+holds the four-function claim by enclosing function, not by file. **No route
+puts a row into Trash yet**: the delete sites still `DELETE`, so every rule
+above is installed and proven before it can be reached.
 
 The rule is pinned structurally. `tests/test_item_write.py` requires that
 `INSERT INTO items` exists only in `item_write.py`, and that every raw
@@ -1163,7 +1218,7 @@ Two details decide whether the guard actually guards:
 
 Some reads stay on the physical tables, each allowlisted by repository-relative
 path — never by basename — with its reason at the entry. On the **items** side,
-13 entries excusing 15 reads:
+22 entries excusing 24 reads:
 
 - the `items_live` CREATE in `get_db()` itself — the seam reads the physical
   table by definition, and so does the `copies_live` CREATE, which joins `items`;
@@ -1171,8 +1226,9 @@ path — never by basename — with its reason at the entry. On the **items** si
   ran against the table at a past schema version;
 - `_find_item_by_barcode`'s two lookups (`routers/items.py`) and the CSV dedup
   pair (`routers/items_csv.py`) — the existing-item scan and import paths must
-  still *see* a soft-deleted row, so that a later restore can match on it
-  rather than creating a duplicate;
+  still *see* a soft-deleted row, so that a restore can match on it rather
+  than creating a duplicate. CSV import now restores through it, ordering live
+  rows first;
 - the `series_meta` garbage collector in `database.py` — a soft-deleted item
   keeps its series alive, so restoring it finds the series intact;
 - `_barcode_conflict`'s join (`routers/item_copies.py`) — see the class below;
@@ -1180,14 +1236,22 @@ path — never by basename — with its reason at the entry. On the **items** si
   re-read under the write lock, because a trashed `kids_book` row must be
   rewritten too, and its twin lookup, which predicts the
   `UNIQUE(isbn, media_type)` collision the rewrite would otherwise hand to the
-  database.
+  database;
+- the collision-with-Trash lookups in `services/item_write.py` — the insert
+  funnel's two slot lookups, the update funnel's two, and `trashed_title`,
+  which names the blocking row on the edit page. They read the physical table
+  because the constraints do;
+- the four sync external-id matchers — `services/audiobookshelf.py`,
+  `services/komga_records.py`, `services/romm_records.py`,
+  `routers/hardcover.py` — which must *see* a trashed twin in order to leave
+  it alone (see *Writing items* above).
 
-On the **copies** side, 8 entries excusing 8 reads, and they are all **one
-class: a read that exists to predict a UNIQUE violation reads the physical
-table, because the constraint does.** A trashed row still occupies its unique
-slot, so a guard asking "will this insert collide?" must see trashed rows or it
-predicts *no collision* and hands the collision to SQLite. `item_copies` carries
-three such rules, and each has its mirroring reads:
+On the **copies** side, 10 entries excusing 10 reads. **Eight are one class: a
+read that exists to predict a UNIQUE violation reads the physical table,
+because the constraint does.** A trashed row still occupies its unique slot, so
+a guard asking "will this insert collide?" must see trashed rows or it predicts
+*no collision* and hands the collision to SQLite. `item_copies` carries three
+such rules, and each has its mirroring reads:
 
 | rule | reads that stay physical |
 |---|---|
@@ -1203,9 +1267,23 @@ classes** — `add_copy` reads the highest `copy_number` (predicts the constrain
 and whether the item has any copy at all (an ordinary read) and is therefore
 split in two, the `MAX` on `item_copies` and the `COUNT(*)` on `copies_live`.
 
-The partial unique index `idx_item_copies_one_primary` needs no exemption, on
-the stated contract that trashing a copy also demotes it. The three
-primary-lookup reads that go through the view depend on that contract holding.
+**The other two are a different class, and say so at their entries**, because
+a reader who generalises the rule above would "fix" them by repointing them at
+the view. Both read the physical table to find a row the view deliberately
+hides, and neither predicts a constraint: `restore_copy`
+(`services/item_copies.py`), which has to start from the trashed copy it is
+bringing back, and `_reparent_copies`' row-selection read
+(`services/item_merge.py`), which moves a merged item's trashed copies onto the
+keeper — through the view they would stay parented to the husk and be destroyed
+by its `ON DELETE CASCADE`, losing a restorable row for good.
+
+The partial unique index `idx_item_copies_one_primary` needs no exemption,
+because `trash_copy` demotes a copy in the same statement that stamps it
+(`tests/test_trash_funnel.py::TestTheGeminiN1Contract` pins it). That is what
+lets `add_copy` decide primary from a `copies_live` census unchanged: without
+the demote, trashing an item's only primary copy and adding another would
+collide with the trashed row still holding the slot. The three primary-lookup
+reads that go through the view depend on the same contract.
 
 A stale allowlist entry fails the suite, exactly as the write funnel's does, and
 so does one whose declared hit count drifts from what the code produces.

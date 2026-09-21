@@ -15,6 +15,15 @@ row reaches or changes in this table, and ``delete_copy`` /
 ``item_write.insert_item`` is for ``items``. ``add_copy`` is the funnel's
 front door for the item page: it owns numbering and the primary decision, so
 no caller has to reproduce either.
+
+**Trash is a third arm, and no route reaches it yet.** ``trash_copy`` and
+``restore_copy`` are the only writers of ``deleted_at`` here — the twin of
+``item_write.trash_item`` / ``restore_item`` for ``items`` — and both funnels
+refuse the column as a caller-supplied field name, so it cannot be reached
+through ``insert_copy`` or ``update_copy`` either. Nothing in ``app/`` calls
+the two functions in this release: removal in the UI is still a ``DELETE``.
+They exist so that the collision rules around a trashed row can be installed
+and proven before the delete sites are flipped.
 Column names are validated against ``PRAGMA table_info(item_copies)``, so an
 unknown column raises instead of being silently dropped, and unset columns are
 left out of the statement so the ``SCHEMA`` defaults apply. Two set-based
@@ -31,8 +40,10 @@ every copy of an item whose ``deleted_at`` is set (``app/database.py``,
 each one exists to predict a UNIQUE violation and the constraint sees trashed
 rows: ``backfill_legacy_locations`` (its ``NOT EXISTS`` guard against the
 literal copy number 1), ``sync_primary_location`` (numbering the new primary)
-and ``add_copy``'s numbering read. Nothing here writes ``deleted_at`` yet, so
-none of this changes an answer today.
+and ``add_copy``'s numbering read. ``restore_copy`` reads the physical table
+for a different reason — it must find the row the view is hiding — and is
+allowlisted with that reason stated, because a reader who assumes the
+UNIQUE-prediction rule would draw the wrong conclusion from it.
 
 **The position-clearing rule is the funnel's, for every copy.** A location
 change clears the copy's location-scoped ``position_order``, because a shelf
@@ -48,9 +59,13 @@ from collections.abc import Mapping
 from typing import Any
 
 #: Columns a caller may never set on insert — the database owns them.
-_MANAGED = frozenset({"id"})
+#: `deleted_at` is owned by `trash_copy` / `restore_copy` below and by nothing
+#: else. `update_copy` builds its `SET` clause from caller-supplied field
+#: names, so refusing the name here is what makes that ownership true of
+#: behaviour rather than only of the spelling a source pin can grep for.
+_MANAGED = frozenset({"id", "deleted_at"})
 #: On update, `created_at` joins the list: it is set once, by SQLite.
-_MANAGED_ON_UPDATE = frozenset({"id", "created_at"})
+_MANAGED_ON_UPDATE = frozenset({"id", "created_at", "deleted_at"})
 
 # Cached column set for the `item_copies` table. Read from the live schema
 # rather than hardcoded, so this cannot drift from SCHEMA/MIGRATIONS the way a
@@ -397,10 +412,9 @@ def delete_copy(db, copy_id: int) -> dict[str, Any] | None:
       **not** deleted: a located item with no copies is a legitimate state
       (G86), and so is an unlocated one.
 
-    Removal is permanent — condition, acquisition detail and provenance go
-    with the row. `item_copies` now carries a `deleted_at` column, and every
-    read in this module goes through the `copies_live` view that filters on
-    it — but nothing writes the column yet, so this is still a `DELETE`.
+    Removal through the UI is permanent — condition, acquisition detail and
+    provenance go with the row. `trash_copy` below is the reversible path, and
+    **no route calls it in this release**, so this is still a `DELETE`.
 
     Caller must hold the write lock. The read that chooses the survivor and
     the writes that promote it are one serialized unit, and the copy row is
@@ -418,7 +432,22 @@ def delete_copy(db, copy_id: int) -> dict[str, Any] | None:
     item_id = copy["item_id"]
     was_primary = bool(copy["is_primary"])
     db.execute("DELETE FROM item_copies WHERE id = ?", (copy_id,))
+    return _settle_after_removal(db, item_id, was_primary)
 
+
+def _settle_after_removal(db, item_id: int, was_primary: bool) -> dict[str, Any]:
+    """Promote a survivor and re-point the seam, after a copy has gone.
+
+    Shared by `delete_copy` and `trash_copy`, which differ only in *how* the
+    copy leaves — one removes the row, the other stamps it out of
+    `copies_live`. Everything after that is the same decision, and the two
+    writes below are order-dependent (G96), so they are written once rather
+    than copied.
+
+    Caller must already have removed the copy and must hold the write lock.
+    `was_primary` is read from the copy **before** it goes, because neither
+    caller can ask afterwards.
+    """
     survivor = _lowest_numbered_copy(db, item_id)
     promoted_copy_id = None
     seam: int | None = None
@@ -446,5 +475,123 @@ def delete_copy(db, copy_id: int) -> dict[str, Any] | None:
         "item_id": item_id,
         "was_primary": was_primary,
         "promoted_copy_id": promoted_copy_id,
+        "remaining": remaining,
+    }
+
+
+def trash_copy(db, copy_id: int) -> dict[str, Any] | None:
+    """Move one physical copy to Trash, promoting a survivor as a delete would.
+
+    Returns `None` when the copy is not live, and otherwise the same dict
+    `delete_copy` returns: `item_id`, `was_primary`, `promoted_copy_id` and
+    `remaining`. The three outcomes `delete_copy` documents hold here too,
+    because both share `_settle_after_removal`.
+
+    **The copy is demoted in the same statement that stamps it**, and that is
+    load-bearing rather than tidy. `add_copy` decides primary from a
+    `copies_live` census while `idx_item_copies_one_primary` is a partial
+    unique index over the **physical** table which does not exclude trashed
+    rows. Trash an item's only copy while it is primary, add another, and a
+    census of zero would make the new copy primary — colliding with the
+    trashed row still holding the slot. Demoting here is what lets `add_copy`
+    stay exactly as it is.
+
+    A trashed copy keeps its `copy_number` and its `copy_barcode`, because the
+    UNIQUE constraints still see it. That is why `restore_copy` cannot
+    collide either.
+
+    **No route calls this in this release.** Same lock and logging rules as
+    `delete_copy`.
+    """
+    copy = db.execute(
+        "SELECT id, item_id, is_primary FROM copies_live WHERE id = ?",
+        (copy_id,),
+    ).fetchone()
+    if copy is None:
+        return None
+
+    item_id = copy["item_id"]
+    was_primary = bool(copy["is_primary"])
+    db.execute(
+        "UPDATE item_copies SET deleted_at = datetime('now'), is_primary = 0, "
+        "updated_at = datetime('now') WHERE id = ?",
+        (copy_id,),
+    )
+    return _settle_after_removal(db, item_id, was_primary)
+
+
+def restore_copy(db, copy_id: int) -> dict[str, Any] | None:
+    """Bring one trashed copy back, and say what it came back as.
+
+    Returns `None` — writing nothing — when the copy is not trashed, does not
+    exist, or **belongs to an item that is itself trashed**. That last case is
+    a refusal rather than a restore: the copy is already invisible through
+    `copies_live` by way of its item, so bringing back its own column would
+    change nothing a reader can see, and the honest way to get it back is to
+    restore the item.
+
+    The copy returns as a **secondary**, mirroring `add_copy`'s rule that
+    primary is decided by what the item already has. When the item has no live
+    primary the restored copy becomes one, and the `items.location_id` seam
+    follows it — but only when its location is non-null, since clearing a
+    location never invents a seam write (`sync_primary_location`).
+
+    Order matters, as it does in `_settle_after_removal` (G96): promote first,
+    write the seam second. The seam write re-enters `sync_primary_location`,
+    which mints a fresh primary when it finds none.
+
+    **It cannot collide.** A trashed copy never gave up its
+    `UNIQUE(item_id, copy_number)` or `UNIQUE(copy_barcode)` slot.
+
+    **No route calls this in this release.** Same lock and logging rules as
+    `delete_copy`.
+    """
+    # The physical table, deliberately: this read exists to find the row the
+    # view hides. Unlike every other exemption in this module it is *not*
+    # predicting a UNIQUE violation — allowlisted with that reason.
+    copy = db.execute(
+        "SELECT id, item_id, location_id FROM item_copies "
+        "WHERE id = ? AND deleted_at IS NOT NULL",
+        (copy_id,),
+    ).fetchone()
+    if copy is None:
+        return None
+
+    item_id = copy["item_id"]
+    # `items_live` answers "is the item itself trashed?" without a second
+    # physical read: a trashed item is simply absent from the view.
+    if not db.execute(
+        "SELECT 1 FROM items_live WHERE id = ?", (item_id,)
+    ).fetchone():
+        return None
+
+    db.execute(
+        "UPDATE item_copies SET deleted_at = NULL, "
+        "updated_at = datetime('now') WHERE id = ?",
+        (copy_id,),
+    )
+
+    has_primary = db.execute(
+        "SELECT 1 FROM copies_live WHERE item_id = ? AND is_primary = 1",
+        (item_id,),
+    ).fetchone()
+    is_primary = False
+    if not has_primary:
+        update_copy(db, copy_id, {"is_primary": 1})
+        is_primary = True
+        if copy["location_id"] is not None:
+            from app.services import item_write
+
+            item_write.update_item_fields(
+                db, item_id, {"location_id": copy["location_id"]}
+            )
+
+    remaining = db.execute(
+        "SELECT COUNT(*) AS n FROM copies_live WHERE item_id = ?", (item_id,)
+    ).fetchone()["n"]
+    return {
+        "item_id": item_id,
+        "copy_id": copy_id,
+        "is_primary": is_primary,
         "remaining": remaining,
     }

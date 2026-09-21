@@ -36,21 +36,23 @@ def get_item_tags(db, item_id: int) -> list:
 def get_all_tags(db, media_type=None) -> list:
     """All tags with usage counts, for the Browse filter and suggestions.
 
-    `media_type=None` emits exactly today's statement — no join to the
-    items relation, and its count currently includes a trashed item's
-    tags; correcting that is the Trash plan's job, not this one. Passing a
-    `media_type` narrows to tags that are global or scoped to it, still
-    with no items join.
+    Both statements join `items_live`, so a trashed item's tag association
+    counts toward neither statement's `count` — a tag whose only item is
+    trashed still lists, with `count` 0. `media_type=None` emits the
+    unscoped statement; passing a `media_type` narrows to tags that are
+    global or scoped to it, same join.
     """
     if media_type is None:
         return db.execute(
-            "SELECT t.id, t.name, COUNT(it.item_id) AS count FROM tags t "
+            "SELECT t.id, t.name, COUNT(il.id) AS count FROM tags t "
             "LEFT JOIN item_tags it ON it.tag_id = t.id "
+            "LEFT JOIN items_live il ON il.id = it.item_id "
             "GROUP BY t.id ORDER BY t.name COLLATE NOCASE"
         ).fetchall()
     return db.execute(
-        "SELECT t.id, t.name, t.media_type, COUNT(it.item_id) AS count FROM tags t "
+        "SELECT t.id, t.name, t.media_type, COUNT(il.id) AS count FROM tags t "
         "LEFT JOIN item_tags it ON it.tag_id = t.id "
+        "LEFT JOIN items_live il ON il.id = it.item_id "
         "WHERE t.media_type IS NULL OR t.media_type = ? "
         "GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
         (media_type,),

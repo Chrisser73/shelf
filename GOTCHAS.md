@@ -4080,10 +4080,24 @@ python -m pytest tests/test_archive.py -q -k "no_copies_key or explicit_empty or
 python -m pytest tests/test_item_write.py -q -k "basename or adjacent_string"
 ```
 
+- **A finer bypass than M1's: a split *inside an identifier*.** The shared
+  normaliser joins physical lines with a **space**, which is right for a
+  statement split across adjacent literals (`"INSERT INTO " "item_copies …"` —
+  SQL tokens are space-separated anyway) and wrong for a name split mid-token:
+  Python concatenates `"deleted" "_at = …"` into `deleted_at = …`, but the
+  buffer holds `deleted _at = …` and a `deleted_at` needle misses it. Found on
+  `feat/soft-delete-collisions` (`c5a86db`, 2026-09-21) by the bypass pin the
+  plan required for the new `deleted_at` guard — which is the argument for
+  writing one for every new guard. That guard's pattern tolerates whitespace
+  around the underscore (`DELETED_AT_ASSIGNMENT`); a split at any other
+  character is stated in its comment as undefended rather than pretended away.
 - **Status:** documented. **Sibling defect still open:** the `items` guards at
   `tests/test_item_write.py:156`, `:195` and `:214` use the same basename
   exemption for `item_write.py` and have not been converted — M1 was scoped to
   `item_copies`. Fix them together with the next change that touches either.
+  The **`deleted_at` guard** added by `feat/soft-delete-collisions` is
+  path-exempt from the start, and carries its own basename and
+  adjacent-literal bypass pins; the three old guards still do not.
 
 
 ## G89 — When adding a NOT NULL column to `items`
@@ -4480,6 +4494,23 @@ python -m pytest tests/test_scan_upc_enrichment.py -k "PromotesTheWishlist" -q
   When adding a guard-side behaviour elsewhere, read the route from input
   normalisation through every `duplicate` return, and test a pre-seeded row
   with the providers mocked to fail if called.
+- **The earliest guard can read a child table with no items join — and then it
+  bounces.** Music (`music_releases`) and periodicals (`periodical_issues`)
+  each check for a duplicate in their own table and redirect to the item,
+  before the insert funnel is ever reached. With a trashed item that redirect
+  lands on a page reading `items_live`, which bounces to Browse: the user
+  re-adds something and is sent somewhere unrelated. So the restore goes at
+  that guard. For periodicals it is the **only** restore — the insert carries
+  no ISBN or UPC, so the funnel cannot see the collision at all. Two instances
+  found on `feat/soft-delete-collisions` (`5cb6d7a`, 2026-09-21); any new
+  media type with its own record table repeats the shape.
+- **An ownership transition cannot be applied to intent a caller never states.**
+  Four add paths inserted owned and then demoted to the wishlist in a *second*
+  transaction. Against a funnel that restores, that is wrong twice — a
+  wishlist-mode re-add of a trashed owned row restores it and then demotes
+  something the user owns. The intent has to ride the insert
+  (`_save_item(..., owned=False)`, `fd856e4`); a two-step writer added later
+  reintroduces the bug with nothing to flag it.
 - **Status:** documented. Not a lint candidate — which guards are related is
   route-specific.
 
@@ -4731,6 +4762,17 @@ EOF
   it safe and also why it proved nothing about the exemptions — `9a85469` added
   `tests/test_copies_live_contract.py` for that.
 - **Verify:** `make check-deleted`
+- **A new statement can ride along inside an OLD entry's text — and the fix is
+  never to bump the count.** On `feat/soft-delete-collisions` (`98d071d`,
+  2026-09-21) the update funnel's two new lookups were textual *supersets* of
+  the insert funnel's (`… deleted_at IS NOT NULL` + `AND id != ?`), so the two
+  existing entries silently began spanning 2 reads each and the lint reported
+  it. Raising their counts to 2 would have been exactly the over-permissiveness
+  the count exists to stop. Make the statements textually distinct instead —
+  the insert lookups gained `LIMIT 1`, with a comment saying the clause is
+  load-bearing for the lint, not only for SQLite. And take counts for any prose
+  from `scripts/check_items_live.py`, never from a plan: this branch moved them
+  from 13/15 to 22/24 on items and 8/8 to 10/10 on copies.
 - **Status:** `linted: make check-deleted` (also inside `make test`, via
   `tests/test_items_live_lint.py`).
 
@@ -4839,10 +4881,23 @@ EOF
   partial unique index `idx_item_copies_one_primary` needs **no** exemption, and
   the three primary-lookup reads that moved to the view
   (`item_copies.py` `sync_primary_location`, `item_merge.py` `_reparent_copies`,
-  `archive.py` `_import_copies`) are correct **only because the Trash plan
-  demotes a copy when it trashes it**. The day a copy can be trashed while still
-  holding `is_primary = 1`, those three reads are wrong and this row joins the
-  table above.
+  `archive.py` `_import_copies`) are correct **only because
+  `item_copies.trash_copy` demotes a copy in the same statement that stamps
+  it** — honoured since `c5a86db`, and pinned by
+  `tests/test_trash_funnel.py::TestTheGeminiN1Contract`, which reds on
+  `UNIQUE constraint failed: item_copies.item_id` with the demote removed. Any
+  other writer of `deleted_at` on a copy must demote too; the source pin in
+  `tests/test_item_write.py` keeps that writer set at four functions.
+- **There is now a second class, and it must say so at its entry.** Four
+  physical reads exist not to predict a constraint but to **find the row the
+  view hides**: `restore_copy` (it has to start from the trashed copy),
+  `_reparent_copies`' row-selection read (through the view a husk's trashed
+  copy stayed parented to it and died in the merge's `ON DELETE CASCADE`), and
+  the sync external-id matchers (a trashed twin has to be *seen* to be left
+  alone). Each entry's comment says it is **not** the UNIQUE-prediction class,
+  because the list reads as uniform and a reader generalising from its
+  neighbours would "fix" one by repointing it at the view.
+  (`feat/soft-delete-collisions`, 2026-09-21.)
 - **Why:** the failure is a 500 on a path that has a designed, friendly refusal
   a few lines away, and it cannot happen until something starts writing
   `deleted_at` — so it ships green and surfaces in the plan *after* the one that
@@ -4907,6 +4962,34 @@ python -m pytest tests/test_copies_live_contract.py -q
   malformed `NULLIF` mutation).
 - **Verify:** judgement. When a mutation comes back green, ask which of the
   three shapes above it is before writing anything down.
+- **A later fix can disarm an earlier pin, so re-run its mutation after.** On
+  `feat/soft-delete-collisions` (`16c0fc7`, 2026-09-21), `claude-R3` made a
+  sync result's `item_id` load-bearing: the loop read it after counting, so a
+  missing key would error every trashed item. A *later* fix in the same task —
+  skip the cover ingest for an `in_trash` result — removed that read, and the
+  loop-level pin went vacuous: dropping the key left it green. The mutation
+  caught it only because it was run after both changes, not when the pin was
+  written. The shape was still held at the persist level; the loop pin's
+  docstring had been claiming a guarantee it no longer gave.
+- **Five more vacuous shapes, all from that branch**, each caught by a mutation
+  that stayed green:
+  - *A seed helper that silently produces nothing.* `insert_item` mints a
+    primary copy only when the item has a location, so an unlocated seed has no
+    copies, `_primary_id` returns `None`, and the most important pin in the
+    file passed while trashing copy `None`. Assert the seed exists.
+  - *An absence check after a cascade.* "No row still references the husk" is
+    true whether the row was **moved** or **destroyed** by `ON DELETE CASCADE`.
+    Pair it with a row-count conservation check.
+  - *A counter added beside existing ones.* Two modes counted a restored row
+    differently (disjoint in one, doubled in the other) and each mode's own
+    pins passed. Pin that the counts **partition** the input, per mode.
+  - *An unordered `LIMIT 1` that happens to be right.* A live-wins pin passes
+    against a missing `ORDER BY` if the live row has the lower rowid. Seed the
+    losing row first.
+  - *A mock whose premise is wrong.* A "provider must not be called" stub on a
+    re-add path failed loudly because the guards correctly miss a trashed row
+    and the lookup does run; stub it with a *different* value instead, so
+    "shows the stored row" is an assertion and not a tautology.
 - **Status:** documented. Not a lint candidate — whether a mutation aimed at
   the right line is a judgement about intent.
 
@@ -5043,6 +5126,65 @@ grep -rn "ci_context" scripts/ tests/ .github/workflows/
   task's prose asserting more than it checked); this one is neither a missed
   copy nor an invented fact but a **defensible-looking deletion**, which is why
   it gets its own trigger.
+
+## G112 — When calling a helper that opens its own `get_db()` connection
+
+- **Rule:** before calling it, ask **whose transaction holds the rows it
+  reads**. A helper that opens a second connection sees only what has been
+  *committed*. It is correct after the caller's `with get_db()` block has
+  closed, and silently wrong inside it — it reads the pre-transaction state,
+  answers from that, and nothing raises. If the caller is mid-transaction, read
+  on the caller's connection instead.
+- **Why:** the helper's signature does not say which it needs, and the same
+  helper is right at one call site and wrong at the next.
+  `restore_report.keeps_stored_cover(item_id)` asks "was this row restored,
+  and does it already have a cover?" on its own connection. Every scan, intake
+  and Hardcover caller was safe, because each ran it after the insert funnel's
+  block had committed. `archive.apply_plan` runs a **whole import as one
+  transaction** — so from a second connection the just-restored row still reads
+  as trashed, the helper answers False, and the archive's cover overwrites the
+  user's. A mutation would not catch it: the helper "works". It is also the
+  mirror of **G3**, which is the same second connection *blocking* on a write
+  lock rather than reading around it.
+- **Evidence:** `feat/soft-delete-collisions`, 2026-09-21 (`080db1e`) — caught
+  in orchestrator review before the first run, not by a test; the archive reads
+  `cover_path` on `db` with a comment saying why.
+- **Verify:** for a helper under `app/services/` that opens `get_db()`, grep
+  its callers for ones inside a `with get_db() as db:` block —
+
+```bash
+grep -rn "keeps_stored_cover\|restored_card" app/ | grep -v "def "
+```
+
+- **Status:** documented. Lint candidate in principle — a call to a known
+  self-connecting helper lexically inside a `with get_db()` block is
+  mechanically findable — but the helper list would have to be maintained.
+
+## G113 — When a plan, a review or a sweep hands you an enumeration
+
+- **Rule:** treat the list as a **floor, not an inventory**. Before relying on
+  it, read the code around each named site for its siblings, and for a
+  *function* named as a sweep trigger, open that function's callers directly
+  rather than trusting a pattern grep to find them.
+- **Why:** measured on one plan (`feat/soft-delete-collisions`, 2026-09-20/21),
+  every enumeration that was checked turned out short:
+  - T1 named **2** hard-delete absence assertions to re-aim; the sweep found
+    **7**, including a second `_copy` helper in a different file.
+  - Plan-review `claude-R8` named **2** add paths that would overwrite a
+    restored row's cover; there were **5** — two on paths the same review
+    listed as already correct.
+  - The plan's own sweep grep, `FROM items WHERE`, could not match
+    `cleanup_excluded_libraries`' pin at all: its `SELECT` carries no `WHERE`.
+    The function was named as a trigger; the grep was written for SQL shape.
+  - A review said an update path "can carry all three" identifiers; reading
+    `_dedupe_lookup` showed only one of the three could ever reach it.
+  None of these was a careless review. An enumeration is written from the
+  sites someone looked at, and the misses are the ones nobody opened.
+- **Evidence:** the tracker NOTEs on T1 (`0d67f62`), T7 (`e858c8c`), T8
+  (`792f33d`) and T12 (`080db1e`).
+- **Verify:** judgement. When you tick off a named list, write down how many
+  sites you found beside how many were named.
+- **Status:** documented. Not a lint candidate.
 
 ## Graveyard
 

@@ -81,6 +81,7 @@ from app.services import isbn as isbn_svc
 from app.services import item_copies
 from app.services import lists
 from app.services.write_targets import (  # noqa: F401 — re-exported
+    IdentifierInTrash,
     ItemValueError,
     UnknownLocationError,
     validated_location_id,
@@ -122,9 +123,15 @@ class InvalidWishlisted(ItemValueError):
 
 
 #: Columns a caller may never set on insert — the database owns them.
-_MANAGED = frozenset({"id"})
+#: `deleted_at` is owned by `trash_item` / `restore_item` below and by nothing
+#: else. Both funnels build their `SET` clause from caller-supplied field
+#: names, so refusing the name here is what makes "exactly four writers" true
+#: of behaviour rather than only of the spelling a source pin can grep for:
+#: without it, `update_item_fields(db, id, {"deleted_at": ...})` would reach
+#: the column through the ordinary update path.
+_MANAGED = frozenset({"id", "deleted_at"})
 #: On update, `created_at` joins the list: it is set once, by SQLite.
-_MANAGED_ON_UPDATE = frozenset({"id", "created_at"})
+_MANAGED_ON_UPDATE = frozenset({"id", "created_at", "deleted_at"})
 
 # Cached column set for the `items` table. Read from the live schema rather
 # than hardcoded, so this cannot drift from SCHEMA/MIGRATIONS the way a
@@ -361,7 +368,128 @@ def _apply_membership(db, item_ids: Iterable[int], wishlisted: bool | None,
         lists.set_membership(db, lists.WISHLIST, ids, False)
 
 
-def insert_item(db, fields: Mapping[str, Any] | None = None, **kwargs) -> int:
+class ItemId(int):
+    """An item id that also says whether the insert funnel *restored* it.
+
+    An `int` subclass rather than a tuple or a dataclass, because
+    `insert_item` has 18 call sites and every one of them — plus every test
+    double that returns a bare `int` — would otherwise have to change in one
+    commit, with a missed one becoming a runtime `TypeError` on a path no E2E
+    covers (Komga sync, RomM).
+
+    **Probed 2026-09-20, and these are the limits:** it binds as a sqlite3
+    parameter, `json.dumps` renders it as a bare number, and it formats in an
+    f-string — so every existing caller keeps working untouched. But
+    **arithmetic or `int()` returns a plain `int`**, which silently drops the
+    flag. Read `was_restored` *before* the id is transformed or stored
+    anywhere that normalises it.
+    """
+
+    restored: bool
+
+    def __new__(cls, value, *, restored: bool = False):
+        obj = super().__new__(cls, value)
+        obj.restored = restored
+        return obj
+
+
+def was_restored(item_id) -> bool:
+    """Whether `insert_item` restored this id rather than creating it.
+
+    Takes any int. A plain `int` — from a test double, or from an id that has
+    been through arithmetic — answers `False`, which is the safe default: a
+    caller that has lost the flag reports "added", never a restore that did
+    not happen.
+    """
+    return isinstance(item_id, ItemId) and item_id.restored
+
+
+def _trashed_twin(db, values: Mapping[str, Any]):
+    """The trashed row holding a slot this insert is about to claim, or None.
+
+    Returns `(row, field)` where `field` is `"isbn"` or `"upc"`. **ISBN wins**
+    when the two identifiers hit different rows — it is the more specific
+    claim, and the one a person scanning a book is acting on.
+
+    Reads the **physical** table on purpose, because the constraints do: a
+    trashed row never gave up its `UNIQUE(isbn, media_type)` or
+    `UNIQUE(upc, media_type)` slot (G107). This lookup needs **no live-first
+    ordering**, unlike the four non-unique reads elsewhere in this program: a
+    trashed row holding a unique slot means there *is* no live holder.
+
+    Ownership is judged on the *effective* row (G85) — an absent `media_type`
+    is the `SCHEMA` default `'book'`, so a caller who omits it is matched
+    against the slot the insert would actually claim, not against NULL.
+
+    `upc` is tested `is not None` rather than for truthiness: the UPC index is
+    partial (`WHERE upc IS NOT NULL`), so an empty string claims a real slot
+    while NULL claims none.
+
+    No identifier in the write means no lookup and no cost.
+    """
+    media_type = values.get("media_type") or "book"
+
+    isbn = values.get("isbn")
+    if isbn:
+        row = db.execute(
+            "SELECT id, title FROM items "
+            "WHERE isbn = ? AND media_type = ? AND deleted_at IS NOT NULL "
+            "LIMIT 1",
+            (isbn, media_type),
+        ).fetchone()
+        if row is not None:
+            return row, "isbn"
+
+    upc = values.get("upc")
+    if upc is not None:
+        row = db.execute(
+            "SELECT id, title FROM items "
+            "WHERE upc = ? AND media_type = ? AND deleted_at IS NOT NULL "
+            "LIMIT 1",
+            (upc, media_type),
+        ).fetchone()
+        if row is not None:
+            return row, "upc"
+
+    return None
+
+
+def _apply_restored_ownership(db, item_id: int, values: Mapping[str, Any],
+                              wishlisted: bool | None) -> None:
+    """Carry the caller's ownership intent onto a row just restored.
+
+    **Ownership only ever moves toward owned**, which is the rule the existing
+    duplicate guards already follow (G100): an add-mode re-add of a trashed
+    *wishlist* row yields an owned item, and a wishlist-mode re-add of a
+    trashed *owned* row leaves it owned rather than demoting something the
+    user already has.
+
+    Effective, not submitted: an absent `owned` on an insert is the `SCHEMA`
+    default of 1, so a plain `insert_item(db, title=...)` states the intent
+    "owned" even though it names no ownership at all.
+
+    A `wishlisted=True` intent is **skipped, not refused**, when the stored row
+    is owned — refusing would turn an ordinary wishlist-mode scan into an
+    error about a row the user cannot see.
+    """
+    incoming_owned = _coerce_owned(values["owned"]) if "owned" in values else 1
+    stored = db.execute(
+        "SELECT owned FROM items_live WHERE id = ?", (item_id,)
+    ).fetchone()
+    if stored is None:  # pragma: no cover — restored one statement ago
+        return
+
+    if incoming_owned == 1:
+        if not stored["owned"]:
+            update_item_fields(db, item_id, {"owned": 1})
+        return
+
+    if wishlisted and not stored["owned"]:
+        update_item_fields(db, item_id, {"wishlisted": True})
+
+
+def insert_item(db, fields: Mapping[str, Any] | None = None, *,
+                restore_trashed: bool = True, **kwargs) -> int:
     """Insert one row into `items` and return its id.
 
     Accepts a dict, keyword arguments, or both. Fields whose value is not
@@ -378,8 +506,28 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, **kwargs) -> int:
     `UnknownMediaType`, `UnknownLocationError`, `UnknownPlatform`,
     `InvalidReadingStatus`, `InvalidOwned` — when a value fails its
     invariant; see `validate_item_fields`. `sqlite3.IntegrityError` still
-    reaches the caller (a `UNIQUE(isbn, media_type)` collision is the
-    duplicate card, not a value error).
+    reaches the caller — which now means a **lost race**, exactly as the
+    handlers' comments say, rather than an ordinary duplicate: a live twin is
+    still caught by the callers' own guards, and a trashed twin is resolved
+    here.
+
+    **A third outcome: the slot is held by an item in Trash.** Before the
+    `INSERT`, a write carrying an `isbn` or a `upc` looks for a trashed row
+    holding the slot it is about to claim, and then:
+
+    - **restores it** (the default), returning that row's id with
+      `was_restored` true and **no other stored field changed** — not the
+      title, not `location_id`, not `source`. A person re-adding something
+      they deleted gets it back as they left it, not overwritten by whatever
+      the provider says today. The caller's ownership intent is applied, and
+      only ever toward owned (see `_apply_restored_ownership`).
+    - **refuses**, with `restore_trashed=False`, raising `IdentifierInTrash`
+      and writing nothing. That is the machine path: a background sync must
+      not resurrect what a person deleted.
+
+    The return is an `ItemId` — an `int` subclass every existing caller can
+    keep treating as an `int`. Read the flag with `was_restored(item_id)`
+    **before** the id is transformed (see `ItemId`).
     """
     values: dict[str, Any] = dict(fields or {})
     values.update(kwargs)
@@ -395,17 +543,130 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, **kwargs) -> int:
     values = validate_item_fields(db, values)
     _refuse_owned_wishlist(db, wishlisted, values)
 
+    # The collision-with-Trash rule. It runs after validation — so the slot is
+    # looked up with the canonical ISBN, not the caller's spelling — and
+    # **before the first write**, so a refusal leaves nothing behind (G85).
+    hit = _trashed_twin(db, values)
+    if hit is not None:
+        row, field = hit
+        if not restore_trashed:
+            raise IdentifierInTrash(
+                f"“{row['title']}” is in Trash and already uses this "
+                f"{field.upper()}. Restore it from Trash, or delete it "
+                "permanently, before adding this item.",
+                value=values.get(field),
+                field=field,
+                item_id=row["id"],
+                title=row["title"],
+            )
+        if restore_item(db, row["id"]):
+            _apply_restored_ownership(db, row["id"], values, wishlisted)
+            return ItemId(row["id"], restored=True)
+        # The row stopped being trashed between the lookup and the write —
+        # most add routes hold no `BEGIN IMMEDIATE` around their insert, so
+        # this is reachable (G18). Fall through to the INSERT and let the
+        # constraint answer, rather than returning an id we did not restore.
+
     names = list(values)
     placeholders = ", ".join("?" for _ in names)
     cursor = db.execute(
         f"INSERT INTO items ({', '.join(names)}) VALUES ({placeholders})",
         [values[n] for n in names],
     )
-    item_id = cursor.lastrowid
+    item_id = ItemId(cursor.lastrowid)
     if "location_id" in values:
         item_copies.sync_primary_location(db, item_id, values["location_id"])
     _apply_membership(db, [item_id], wishlisted, values)
     return item_id
+
+
+def trashed_title(db, item_id: int) -> str | None:
+    """The title of `item_id` **if it is in Trash**, else None.
+
+    One physical read, for a surface that must name the row blocking an edit.
+    The router sends the id and the code; the sentence and the escaping live
+    in the template (G58).
+    """
+    row = db.execute(
+        "SELECT title FROM items WHERE id = ? AND deleted_at IS NOT NULL",
+        (item_id,),
+    ).fetchone()
+    return row["title"] if row else None
+
+
+def refuse_trash_collision(db, where: str, where_params: list[Any],
+                           values: Mapping[str, Any]) -> None:
+    """Refuse an update that would move a live row onto a trashed row's slot.
+
+    The mirror of `insert_item`'s rule, and deliberately **not** symmetric
+    with it: this one cannot restore, because the user is editing a
+    *different* item and resurrecting someone else's row is the wrong repair.
+    It refuses, naming the trashed title and both ways out.
+
+    **It fires on a `media_type`-only change too**, not only on an identifier.
+    The slot is `(isbn, media_type)`, so `bulk_update` and Komga's
+    `_reclassify_owned_record` can both move a live row onto a trashed row's
+    slot without touching an identifier at all — which is how this would
+    otherwise reach the database as an `IntegrityError`.
+
+    Skipped entirely unless `values` carries one of the three: a location
+    move, a reading-status change and the wishlist writes stay free of any
+    lookup at all.
+
+    **Every target is checked before the `UPDATE` runs** (G85), so a bulk
+    update over a mixed selection refuses whole and moves nothing — a partial
+    application would be the worse outcome, since the user cannot see which
+    half landed.
+
+    The trashed lookups read the physical table because the constraints do
+    (G107); the target read goes through `items_live`, since a trashed row is
+    not something an edit is acting on.
+    """
+    if not {"isbn", "upc", "media_type"} & set(values):
+        return
+
+    targets = db.execute(
+        f"SELECT id, isbn, upc, media_type FROM items_live WHERE {where}",
+        where_params,
+    ).fetchall()
+
+    for row in targets:
+        # Effective values: what the row will hold once this update lands.
+        isbn = values["isbn"] if "isbn" in values else row["isbn"]
+        upc = values["upc"] if "upc" in values else row["upc"]
+        media_type = (
+            values["media_type"] if "media_type" in values else row["media_type"]
+        ) or "book"
+
+        if isbn:
+            hit = db.execute(
+                "SELECT id, title FROM items WHERE isbn = ? AND media_type = ? "
+                "AND deleted_at IS NOT NULL AND id != ?",
+                (isbn, media_type, row["id"]),
+            ).fetchone()
+            if hit is not None:
+                raise IdentifierInTrash(
+                    f"“{hit['title']}” is in Trash and already uses this ISBN. "
+                    "Restore it from Trash, or delete it permanently, before "
+                    "using this ISBN here.",
+                    value=isbn, field="isbn",
+                    item_id=hit["id"], title=hit["title"],
+                )
+
+        if upc is not None:
+            hit = db.execute(
+                "SELECT id, title FROM items WHERE upc = ? AND media_type = ? "
+                "AND deleted_at IS NOT NULL AND id != ?",
+                (upc, media_type, row["id"]),
+            ).fetchone()
+            if hit is not None:
+                raise IdentifierInTrash(
+                    f"“{hit['title']}” is in Trash and already uses this UPC. "
+                    "Restore it from Trash, or delete it permanently, before "
+                    "using this UPC here.",
+                    value=upc, field="upc",
+                    item_id=hit["id"], title=hit["title"],
+                )
 
 
 def _execute_update(db, fields: Mapping[str, Any], where: str,
@@ -415,11 +676,15 @@ def _execute_update(db, fields: Mapping[str, Any], where: str,
     `updated_at` is always stamped, so an empty `fields` is a bare touch.
     Returns the normalised values so compatibility projections can use exactly
     what was written rather than re-parsing the caller's raw input.
+
+    Raises `IdentifierInTrash` before the statement when the update would
+    claim a slot a trashed row holds — see `refuse_trash_collision`.
     """
     values = dict(fields)
     values.pop("updated_at", None)
     _validated_names(db, values, _MANAGED_ON_UPDATE, who)
     values = validate_item_fields(db, values)
+    refuse_trash_collision(db, where, where_params, values)
     assignments = [f"{n} = ?" for n in values]
     assignments.append("updated_at = datetime('now')")
     db.execute(
@@ -493,3 +758,62 @@ def promote_wishlisted(db, item_id: int) -> bool:
         return False
     update_item_fields(db, item_id, {"owned": 1})
     return True
+
+
+def trash_item(db, item_id: int) -> bool:
+    """Move one item to Trash, and return whether this call moved it.
+
+    Stamps `deleted_at`, which hides the row from `items_live` and — because
+    `copies_live` joins the items relation — every one of its copies, with no
+    write to `item_copies` at all. `scan_log`, loans and wishlist membership
+    are left exactly as they are, so a restore finds the item as the user left
+    it.
+
+    Guarded on the current state, so a second call on an already-trashed row
+    writes nothing and returns `False`. That is what lets a caller treat the
+    return as "I am the one who trashed it" rather than re-reading the row.
+
+    **No route calls this in this release.** It exists so the collision rules
+    in `insert_item` and the update funnel can be installed and proven before
+    any trashed row can exist; the delete sites still `DELETE`.
+
+    Caller must hold the write lock. The row is not re-read first — the guard
+    is in the statement, which is one serialized unit, rather than in a bare
+    `SELECT` that would take no lock under sqlite3's deferred isolation (G18).
+    It never logs: a log handler opening its own connection would wait on that
+    same lock (G3).
+    """
+    cursor = db.execute(
+        "UPDATE items SET deleted_at = datetime('now'), "
+        "updated_at = datetime('now') "
+        "WHERE id = ? AND deleted_at IS NULL",
+        (item_id,),
+    )
+    return cursor.rowcount > 0
+
+
+def restore_item(db, item_id: int) -> bool:
+    """Bring one item back from Trash, and return whether this call moved it.
+
+    The mirror of `trash_item`, guarded the same way: a row that is not
+    trashed is left alone and `False` comes back. **A restore cannot collide** —
+    a trashed row never gave up its `UNIQUE(isbn, media_type)` or
+    `UNIQUE(upc, media_type)` slot, so nothing else can have taken it
+    meanwhile.
+
+    The `False` return is load-bearing for `insert_item`'s restore path: most
+    add routes hold no `BEGIN IMMEDIATE` around their insert, so the row can
+    stop being trashed between that path's lookup and this write. Falling
+    through to the ordinary `INSERT` on `False` is what keeps the funnel from
+    returning an id it did not restore (G18).
+
+    Restoring an item does not touch its copies: their own `deleted_at` was
+    never written, so they return with it. Same lock and logging rules as
+    `trash_item`.
+    """
+    cursor = db.execute(
+        "UPDATE items SET deleted_at = NULL, updated_at = datetime('now') "
+        "WHERE id = ? AND deleted_at IS NOT NULL",
+        (item_id,),
+    )
+    return cursor.rowcount > 0

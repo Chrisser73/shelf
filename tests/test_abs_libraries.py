@@ -108,7 +108,7 @@ class TestLibraryEndpoints:
 
         data = admin_client.post("/api/sync/audiobookshelf/libraries/cleanup").json()
         assert data == {"ok": True, "deleted": 2}
-        remaining = [r["id"] for r in db.execute("SELECT id FROM items").fetchall()]
+        remaining = [r["id"] for r in db.execute("SELECT id FROM items_live").fetchall()]
         assert remaining == [keep]
 
     def test_cleanup_noop_without_exclusions(self, admin_client, db):

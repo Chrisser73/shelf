@@ -22,7 +22,8 @@ def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
         f"SELECT COUNT(*) AS c FROM items_live i WHERE {lists.WISHLISTED_SQL}"
     ).fetchone()["c"]
     lent_out = db.execute(
-        "SELECT COUNT(DISTINCT item_id) AS c FROM checkouts WHERE checked_in IS NULL"
+        "SELECT COUNT(DISTINCT c.item_id) AS c FROM checkouts c "
+        "JOIN items_live i ON i.id = c.item_id WHERE c.checked_in IS NULL"
     ).fetchone()["c"]
     # Excludes items dismissed in the cover review queue, so this tile and
     # Settings' "N items without a cover" are the same number. Before the queue

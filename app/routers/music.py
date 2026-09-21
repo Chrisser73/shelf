@@ -13,6 +13,7 @@ from app.config import HTTP_TIMEOUT, MEDIA_TYPES, MUSIC_MEDIA_TYPES
 from app.database import get_db
 from app.services import covers, music_catalog, musicbrainz
 from app.services import upc as upc_svc
+from app.services import item_write
 from app.services.item_write import insert_item, update_item_fields
 from app.services.write_targets import UnknownLocationError, validated_location_id
 
@@ -181,13 +182,21 @@ async def add_music_release(
     if not release_id:
         return RedirectResponse("/music", status_code=303)
 
+    # The earliest guard that can return the row, and it reads
+    # `music_releases` with no items join — so with a trashed item this used
+    # to redirect to a page that bounces to Browse, before the funnel was
+    # ever reached. The restore goes here, at the earliest guard (G100), and
+    # again in the IntegrityError catch below.
     with get_db() as db:
         existing = db.execute(
             "SELECT item_id FROM music_releases WHERE musicbrainz_release_id = ?",
             (release_id,),
         ).fetchone()
+        restored = bool(existing) and item_write.restore_item(db, existing["item_id"])
     if existing:
-        return RedirectResponse(f"/music/item/{existing['item_id']}", status_code=303)
+        flag = "?restored=1" if restored else ""
+        return RedirectResponse(
+            f"/music/item/{existing['item_id']}{flag}", status_code=303)
 
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         result = await musicbrainz.lookup_release(release_id, client)
@@ -221,7 +230,13 @@ async def add_music_release(
                 wishlisted=not owned,
                 source="musicbrainz",
             )
-            music_catalog.save_release(db, item_id, release)
+            # A restore through the barcode keeps its stored release record,
+            # as a live twin would (it writes nothing). One that has none —
+            # added by UPC scan, then trashed — still gets this release.
+            if not (item_write.was_restored(item_id) and db.execute(
+                "SELECT 1 FROM music_releases WHERE item_id = ?", (item_id,)
+            ).fetchone()):
+                music_catalog.save_release(db, item_id, release)
     except UnknownLocationError:
         return HTMLResponse("Selected location no longer exists", status_code=400)
     except sqlite3.IntegrityError:
@@ -236,19 +251,28 @@ async def add_music_release(
                     (provider_barcode, media_type),
                 ).fetchone()
         if existing:
+            with get_db() as db:
+                restored = item_write.restore_item(db, existing["item_id"])
+            flag = "?restored=1" if restored else ""
             return RedirectResponse(
-                f"/music/item/{existing['item_id']}", status_code=303
+                f"/music/item/{existing['item_id']}{flag}", status_code=303
             )
         raise
 
+    restored = item_write.was_restored(item_id)
+    # Artwork runs either way: `_apply_release_artwork` already refuses to
+    # overwrite an existing cover, so a restored row keeps the user's and a
+    # restored row that never had one still gets artwork.
     await _apply_release_artwork(item_id, release_id)
-    return RedirectResponse(f"/music/item/{item_id}", status_code=303)
+    flag = "?restored=1" if restored else ""
+    return RedirectResponse(f"/music/item/{item_id}{flag}", status_code=303)
 
 
 @router.get("/music/item/{item_id}")
 async def music_item_page(
     request: Request,
     item_id: int,
+    restored: int = 0,
     _=Depends(require_role("viewer")),
 ):
     with get_db() as db:
@@ -262,7 +286,9 @@ async def music_item_page(
     return request.app.state.templates.TemplateResponse(
         request,
         "music_item.html",
-        {"item": item, "release": release, "media_types": MEDIA_TYPES},
+        {"item": item, "release": release, "media_types": MEDIA_TYPES,
+         # A boolean flag selects a template arm; nothing is echoed (G58).
+         "restored": bool(restored)},
     )
 
 

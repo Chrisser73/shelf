@@ -6,6 +6,66 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-09-21
+
+A Trash you can restore from has a problem that the Trash page does not show.
+A trashed item still owns its ISBN or UPC, because the database's uniqueness
+rules can still see the row. So when you scan that book again, or a sync finds
+it again, Shelf has to choose: bring the old row back, leave it alone, or refuse.
+Before this release nothing made that choice. The write went straight into the
+uniqueness rule and failed, or went past it and made a second copy of the book.
+Shelf has about twenty separate duplicate checks, and all of them would have
+needed the same fix.
+
+This release makes that choice in one place for each kind of write, before
+anything can be trashed. Nothing you can see changes. No part of Shelf puts an
+item in Trash yet, so every rule below exists and is tested, but you cannot
+reach it. The Trash itself follows in a later release.
+
+### Internal
+
+Not user-visible, but it is what the release is made of:
+
+- **Re-adding a trashed item brings it back.** Scanning it, adding it from a
+  catalogue search, Photo Intake, Store Mode, a manual add, a music, periodical
+  or Hardcover add, a CSV import and an archive import all restore the trashed
+  row and do not make a second one. The restored row keeps everything stored on
+  it: its cover, notes, copies and, for a CD, its release details. The only
+  change is to ownership, and only toward owned: re-adding a wishlisted book as
+  owned makes it owned. The scan and add screens say **restored**, not
+  **added**. A periodical re-add opens the restored issue and shows no message.
+- **A sync never brings back what you deleted.** Audiobookshelf, Komga, RomM and
+  Hardcover skip a trashed item and count it as **In Trash** in their summary.
+  They do not count it as an error, and they do not add it again. You deleted
+  it on purpose, and a background job should not undo that.
+- **An edit that would clash with a trashed item is refused.** For example,
+  changing an ISBN to one that a trashed item holds is refused. The message
+  names the trashed item and tells you the two ways out. A bulk edit checks
+  every selected item first, so a mixed selection is refused as a whole and
+  nothing is half-changed.
+- **Where two live rows could match, the live one wins.** A title match in a
+  CSV import is one example. A trashed row is restored only when no live row
+  matches. Otherwise, if you deleted one of two equal rows and imported again,
+  the deleted one would come back.
+- **Merging two items keeps the trashed copies of the item that goes away.**
+  They move to the item you keep, so you can still restore them. Before, they
+  were deleted with the merged item.
+- **Trashing a copy also removes its primary flag.** 0.42.5 listed this as a
+  known rough edge. Trashing an item's only primary copy and then adding another
+  copy no longer hits the one-primary-per-item rule. A restored copy comes back
+  as a secondary copy, or as the primary when the item has none.
+- **Tag counts and the lent-out badges ignore trashed items**, the same as the
+  rest of Browse already does.
+
+Deliberately unchanged, and worth knowing:
+
+- **Nothing is hidden from you, and nothing is recoverable yet.** Deleting an
+  item in 0.45.1 still deletes it permanently, exactly as before.
+- **A catalogue re-add of a video game or a DVD does not restore.** These
+  searches match on title, not on an identifier, so they cannot be sure which
+  row you mean. They add a new row. Whether they should restore is a decision
+  for the Trash release, made before you can reach it.
+
 ## [0.45.0] - 2026-09-20
 
 A synced library and a hand-typed one look identical once they are in Shelf, and
@@ -3910,6 +3970,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.45.1]: https://github.com/dgahagan/shelf/releases/tag/v0.45.1
 [0.45.0]: https://github.com/dgahagan/shelf/releases/tag/v0.45.0
 [0.44.0]: https://github.com/dgahagan/shelf/releases/tag/v0.44.0
 [0.43.0]: https://github.com/dgahagan/shelf/releases/tag/v0.43.0

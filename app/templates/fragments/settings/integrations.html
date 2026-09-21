@@ -125,6 +125,9 @@
                         Updated: <span x-text="result.updated"></span>,
                         Unchanged: <span x-text="result.unchanged"></span>,
                         Skipped: <span x-text="result.skipped"></span>
+                        <template x-if="result.in_trash > 0">
+                            <span class="text-shelf-muted"> · In Trash: <span x-text="result.in_trash"></span></span>
+                        </template>
                     </p>
                 </template>
             </div>
@@ -337,6 +340,9 @@
                         Added: <span x-text="importResult.added" class="text-shelf-success"></span>,
                         Updated: <span x-text="importResult.updated" class="text-shelf-accent2"></span>,
                         Skipped: <span x-text="importResult.skipped"></span>
+                        <template x-if="importResult.in_trash > 0">
+                            <span class="text-shelf-muted"> · In Trash: <span x-text="importResult.in_trash"></span></span>
+                        </template>
                         <template x-if="importResult.errors > 0">
                             <span class="text-shelf-error"> · Errors: <span x-text="importResult.errors"></span></span>
                         </template>
@@ -352,7 +358,7 @@
                 <div x-show="showImportLog" x-transition class="mt-2 max-h-48 overflow-y-auto bg-shelf-bg rounded-lg p-2 text-xs font-mono space-y-0.5">
                     <template x-for="entry in importLog" :key="entry.i">
                         <div class="flex gap-2">
-                            <span :class="entry.s === 'added' ? 'text-shelf-success' : entry.s === 'updated' ? 'text-shelf-accent2' : entry.s === 'skipped' ? 'text-shelf-muted' : 'text-shelf-error'"
+                            <span :class="entry.s === 'added' ? 'text-shelf-success' : entry.s === 'updated' ? 'text-shelf-accent2' : entry.s === 'skipped' ? 'text-shelf-muted' : entry.s === 'in_trash' ? 'text-shelf-muted' : 'text-shelf-error'"
                                   x-text="entry.s" class="w-16 shrink-0"></span>
                             <span class="truncate text-shelf-text" x-text="entry.t"></span>
                         </div>

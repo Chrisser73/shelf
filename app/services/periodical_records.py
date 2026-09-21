@@ -130,39 +130,55 @@ def find_duplicate_issue(
     Prefer a full carrier+supplement barcode when available. Otherwise use
     publication + volume + issue number, then publication + issue date. The
     977 serial variant is intentionally not treated as an issue number.
+
+    **Live wins.** `periodical_issues` has no unique index, and all three
+    reads are bare `LIMIT 1` with no `ORDER BY`, so a trashed issue can
+    shadow a live twin that matches equally well. Every read therefore runs
+    **joined to `items_live` first**, across all three strategies, and only
+    when all three miss does the unjoined pass run to find a trashed
+    candidate the caller may restore. Without the ordering, a user who
+    deletes one of two equally-matching issues and re-scans gets the deleted
+    one back while the live one is left alone.
+
+    No physical `items` read is involved — the fallback pass simply does not
+    join the items relation — so this needs no lint exemption.
     """
     ean = (barcode_ean or "").strip() or None
     supplement = (barcode_supplement or "").strip() or None
-    if ean and supplement:
-        row = db.execute(
-            "SELECT item_id FROM periodical_issues "
-            "WHERE barcode_ean = ? AND barcode_supplement = ? LIMIT 1",
-            (ean, supplement),
-        ).fetchone()
-        if row:
-            return row["item_id"]
-
     issue_number = (issue_number or "").strip() or None
     volume = (volume or "").strip() or None
-    if issue_number:
-        row = db.execute(
-            "SELECT item_id FROM periodical_issues WHERE publication_id = ? "
-            "AND COALESCE(volume, '') = COALESCE(?, '') "
-            "AND issue_number = ? COLLATE NOCASE LIMIT 1",
-            (publication_id, volume, issue_number),
-        ).fetchone()
-        if row:
-            return row["item_id"]
-
     issue_date = (issue_date or "").strip() or None
-    if issue_date:
-        row = db.execute(
-            "SELECT item_id FROM periodical_issues "
-            "WHERE publication_id = ? AND issue_date = ? LIMIT 1",
-            (publication_id, issue_date),
-        ).fetchone()
-        if row:
-            return row["item_id"]
+
+    for live_only in (True, False):
+        join = " JOIN items_live i ON i.id = pi.item_id" if live_only else ""
+        if ean and supplement:
+            row = db.execute(
+                f"SELECT pi.item_id FROM periodical_issues pi{join} "
+                "WHERE pi.barcode_ean = ? AND pi.barcode_supplement = ? LIMIT 1",
+                (ean, supplement),
+            ).fetchone()
+            if row:
+                return row["item_id"]
+
+        if issue_number:
+            row = db.execute(
+                f"SELECT pi.item_id FROM periodical_issues pi{join} "
+                "WHERE pi.publication_id = ? "
+                "AND COALESCE(pi.volume, '') = COALESCE(?, '') "
+                "AND pi.issue_number = ? COLLATE NOCASE LIMIT 1",
+                (publication_id, volume, issue_number),
+            ).fetchone()
+            if row:
+                return row["item_id"]
+
+        if issue_date:
+            row = db.execute(
+                f"SELECT pi.item_id FROM periodical_issues pi{join} "
+                "WHERE pi.publication_id = ? AND pi.issue_date = ? LIMIT 1",
+                (publication_id, issue_date),
+            ).fetchone()
+            if row:
+                return row["item_id"]
     return None
 
 

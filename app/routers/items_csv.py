@@ -19,6 +19,7 @@ from app.database import get_db
 from app.routers import items_common
 from app.services import cover_queue
 from app.services import isbn as isbn_svc
+from app.services import item_write
 from app.services import lists
 from app.services import tags as tags_svc
 from app.services.item_write import ItemValueError, insert_item, update_item_fields
@@ -115,6 +116,7 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
 
     imported = 0
     skipped = 0
+    restored = 0
     errors = []
     new_item_ids: list[int] = []
     # Keyed ('isbn', isbn, media) or ('title', title, authors, media) — the
@@ -188,13 +190,22 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 # different edition of the same title that does have one.
                 # Comparison is done in SQL so both sides go through the same
                 # collation.
+                # `isbn IN (?, ?)` can match two different rows (the ISBN-13
+                # and ISBN-10 forms can each be held by a different item), and
+                # the title/author fallback below is covered by no UNIQUE
+                # constraint at all — so neither read may just take whatever
+                # SQLite's unordered LIMIT 1 hands back. ORDER BY puts a live
+                # row first when one exists; a trashed row is only acted on
+                # when no live row matches (claude-R4, "live wins").
                 authors_val = norm["authors"] or ""
                 isbn_pair = isbn_svc.canonical_isbn_pair(isbn_val) if isbn_val else None
                 if isbn_pair:
                     isbn13, isbn10 = isbn_pair
                     file_key = ("isbn", isbn13, media)
                     existing = db.execute(
-                        "SELECT id FROM items WHERE media_type = ? AND isbn IN (?, ?)",
+                        "SELECT id, deleted_at FROM items WHERE media_type = ? "
+                        "AND isbn IN (?, ?) "
+                        "ORDER BY deleted_at IS NOT NULL, id LIMIT 1",
                         (media, isbn13, isbn10),
                     ).fetchone()
                 elif isbn_val:
@@ -208,10 +219,11 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 else:
                     file_key = ("title", title.strip().lower(), authors_val.strip().lower(), media)
                     existing = db.execute(
-                        "SELECT id FROM items WHERE "
+                        "SELECT id, deleted_at FROM items WHERE "
                         "TRIM(title) = TRIM(?) COLLATE NOCASE AND "
                         "TRIM(COALESCE(authors, '')) = TRIM(?) COLLATE NOCASE AND "
-                        "media_type = ? AND (isbn IS NULL OR isbn = '')",
+                        "media_type = ? AND (isbn IS NULL OR isbn = '') "
+                        "ORDER BY deleted_at IS NOT NULL, id LIMIT 1",
                         (title, authors_val, media),
                     ).fetchone()
 
@@ -222,11 +234,26 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     seen_in_file.add(file_key)
 
                 if existing:
+                    # A trashed hit is restored before anything else about
+                    # this row is decided — it must be the row's first write
+                    # (G85): the per-row except below carries on to the next
+                    # row on any later failure, and the whole import commits
+                    # at the end, so nothing after this call may raise for a
+                    # reason a pre-check above could already have caught.
+                    if existing["deleted_at"] is not None:
+                        item_write.restore_item(db, existing["id"])
+                        restored += 1
                     if mode == "skip":
-                        skipped += 1
+                        # Restored or not, a skip-mode hit leaves the row's
+                        # own fields untouched — restore_item only clears
+                        # deleted_at. Do not also count a restored row as
+                        # `skipped`: something *did* happen to it.
+                        if existing["deleted_at"] is None:
+                            skipped += 1
                         continue
                     # mode == update: refresh metadata, and reading state
-                    # for reading-tracker imports
+                    # for reading-tracker imports — identical path for a
+                    # live hit and a just-restored one.
                     _update_from_csv_row(db, existing["id"], norm)
                     # Additive only — import never removes a tag. An absent
                     # `tags` column and an empty `tags` cell are deliberately
@@ -253,7 +280,13 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                         state_fields["date_finished"] = norm["date_finished"]
                     if state_fields:
                         update_item_fields(db, existing["id"], state_fields)
-                    imported += 1
+                    # Disjoint counts, in both modes: a restored row is
+                    # `restored` and nothing else. Counting it as `imported`
+                    # too made "Imported: 5, Restored: 1" unreadable — five
+                    # rows or six? — and disagreed with skip mode, which
+                    # already keeps them apart.
+                    if existing["deleted_at"] is None:
+                        imported += 1
                     continue
 
                 pub_year = norm["publish_year"]
@@ -297,6 +330,10 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
     return {
         "imported": imported,
         "skipped": skipped,
+        # Disjoint from `imported`/`skipped`: a restored row is counted here
+        # only, even when update mode refreshes it after restoring, and it is
+        # never `skipped` — something was written to it.
+        "restored": restored,
         # `errors` is capped for the wire; `error_count` is the true total, so
         # the UI can list twenty of thirty-seven and still say thirty-seven.
         "errors": errors[:20],

@@ -133,6 +133,67 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         # slot (G107).
         "SELECT id FROM items WHERE media_type = 'book' AND": 1,
     },
+    "app/services/item_write.py": {
+        # _trashed_twin — the insert funnel's collision-with-Trash lookup.
+        # It must read the physical table because the UNIQUE constraints do:
+        # a trashed row still holds its (isbn, media_type) / (upc,
+        # media_type) slot, so items_live would hide exactly the row whose
+        # slot the INSERT is about to collide with (G107).
+        # `LIMIT 1` is load-bearing *here*, not only in SQLite: without it
+        # this text is a prefix of refuse_trash_collision's statements below
+        # and would silently span those reads too, which is the exact
+        # ride-along G105 exists to catch.
+        "SELECT id, title FROM items "
+        "WHERE isbn = ? AND media_type = ? AND deleted_at IS NOT NULL "
+        "LIMIT 1": 1,
+        "SELECT id, title FROM items "
+        "WHERE upc = ? AND media_type = ? AND deleted_at IS NOT NULL "
+        "LIMIT 1": 1,
+        # refuse_trash_collision — the update funnel's mirror of the same
+        # rule. `AND id != ?` excludes the row being edited, so re-saving an
+        # item's own unchanged identifiers is never a collision. Physical for
+        # the same reason as the two above.
+        "SELECT id, title FROM items WHERE isbn = ? AND media_type = ? "
+        "AND deleted_at IS NOT NULL AND id != ?": 1,
+        "SELECT id, title FROM items WHERE upc = ? AND media_type = ? "
+        "AND deleted_at IS NOT NULL AND id != ?": 1,
+        # trashed_title — names the trashed row blocking an edit, for the
+        # edit page's refusal arm. Physical by definition: a live row has no
+        # title to report here.
+        "SELECT title FROM items WHERE id = ? AND deleted_at IS NOT NULL": 1,
+    },
+    "app/services/audiobookshelf.py": {
+        # The ABS external-id matcher. Physical so a trashed row is SEEN and
+        # skipped — through the view an ISBN-less item would miss and the
+        # next sync would insert a duplicate. `abs_id` is a plain index, not
+        # unique, so the read orders live rows first and a trashed row is
+        # acted on only when no live row shares the id (claude-R4).
+        "FROM items WHERE abs_id = ? "
+        "ORDER BY deleted_at IS NOT NULL, id LIMIT 1": 1,
+    },
+    "app/services/komga_records.py": {
+        # _existing_record. The JOIN is part of the read (G107): joining the
+        # view is what hid a trashed item's record, and komga_id is the
+        # record table's PRIMARY KEY — so a hidden record meant a fresh
+        # insert, a PK violation, and the whole block rolled back.
+        "SELECT kr.*, i.source, i.media_type, i.deleted_at FROM komga_records kr "
+        "JOIN items i ON i.id = kr.item_id WHERE kr.komga_id = ?": 1,
+    },
+    "app/services/romm_records.py": {
+        # _existing_record — same reasoning as Komga's, and RomM has no
+        # IntegrityError handler at all, so the rollback was unconditional.
+        "SELECT rr.*, i.source, i.deleted_at FROM romm_records rr "
+        "JOIN items i ON i.id = rr.item_id WHERE rr.romm_id = ?": 1,
+    },
+    "app/routers/hardcover.py": {
+        # _trashed_by_hardcover_id — run only after every live strategy in
+        # _find_existing_item (or add-to-shelf's two live guards) has missed,
+        # which is the live-wins rule for a non-unique key (claude-R4,
+        # claude-M2). Physical because it exists to find the row the view
+        # hides.
+        "SELECT id FROM items WHERE hardcover_book_id = ? "
+        "AND deleted_at IS NOT NULL LIMIT 1": 1,
+    },
     "app/routers/items.py": {
         # _find_item_by_barcode's existing-item scan modes must find a
         # soft-deleted row so the next plan can restore it.
@@ -142,9 +203,17 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         "LEFT JOIN locations l ON i.location_id = l.id WHERE i.upc = ?": 1,
     },
     "app/routers/items_csv.py": {
-        # CSV dedup — same reason as _find_item_by_barcode above.
-        "SELECT id FROM items WHERE media_type = ? AND isbn IN (?, ?)": 1,
-        "SELECT id FROM items WHERE TRIM(title) = TRIM(?)": 1,
+        # CSV dedup — same reason as _find_item_by_barcode above. `isbn IN
+        # (?, ?)` can match two different rows (the ISBN-13 and ISBN-10 forms
+        # can each be held by a different item), and the title/author
+        # fallback below is covered by no UNIQUE constraint at all, so both
+        # reads order a live row first and only act on a trashed hit when no
+        # live row matches (claude-R4, "live wins").
+        "SELECT id, deleted_at FROM items WHERE media_type = ? AND isbn IN (?, ?) "
+        "ORDER BY deleted_at IS NOT NULL, id LIMIT 1": 1,
+        "SELECT id, deleted_at FROM items WHERE TRIM(title) = TRIM(?) COLLATE NOCASE AND "
+        "TRIM(COALESCE(authors, '')) = TRIM(?) COLLATE NOCASE AND media_type = ? AND "
+        "(isbn IS NULL OR isbn = '') ORDER BY deleted_at IS NOT NULL, id LIMIT 1": 1,
     },
     "app/routers/item_copies.py": {
         # _barcode_conflict — copy_barcode is UNIQUE collection-wide, so this
@@ -194,12 +263,29 @@ COPIES_ALLOWLIST: dict[str, dict[str, int]] = {
         # separate statement and reads the view.
         "SELECT COALESCE(MAX(copy_number), 0) AS highest "
         "FROM item_copies WHERE item_id = ?": 1,
+        # restore_copy — NOT the predict-a-UNIQUE-violation class the three
+        # entries above are. This read exists to find the row `copies_live`
+        # is deliberately hiding: a restore has to start from the trashed
+        # copy, which by definition no view will return. Reading the view
+        # here would make the function a silent no-op.
+        "SELECT id, item_id, location_id FROM item_copies "
+        "WHERE id = ? AND deleted_at IS NOT NULL": 1,
     },
     "app/services/item_merge.py": {
         # _reparent_copies — numbers the losing item's copies above the
         # keeper's own highest copy_number so nothing collides.
         "SELECT COALESCE(MAX(copy_number), 0) AS n FROM item_copies "
         "WHERE item_id = ?": 1,
+        # _reparent_copies — the row-selection read. NOT the
+        # predict-a-UNIQUE-violation class the entry above (and most of this
+        # allowlist) is: this one exists so a trashed copy of the losing item
+        # is not left invisibly parented to it and destroyed by the caller's
+        # cascading `DELETE FROM items`. `copies_live` would hide exactly
+        # that row, and a trashed copy is restorable, so the loss would be
+        # silent and irreversible — see `reparent_children`'s docstring,
+        # which already forbids losing anything restorable (G107).
+        "SELECT id FROM item_copies WHERE item_id = ? "
+        "ORDER BY copy_number, id": 1,
     },
     "app/routers/item_copies.py": {
         # _barcode_conflict — copy_barcode is UNIQUE collection-wide, so the

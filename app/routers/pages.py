@@ -16,7 +16,7 @@ from app.database import get_db, get_setting, get_game_platforms, get_reading_hi
 from app.routers import items_common
 from app.routers.items_common import SORT_OPTIONS
 from app.routers.series import find_gaps
-from app.services import item_copies, item_template
+from app.services import item_copies, item_template, item_write
 from app.services.home_dashboard import dashboard_summary
 
 router = APIRouter()
@@ -96,7 +96,8 @@ async def browse(
         # Deliberately still global (design §5): none of these appears in
         # `fragments/filter_counts_oob.html`, so none can diverge.
         lent_out_count = db.execute(
-            "SELECT COUNT(DISTINCT item_id) as c FROM checkouts WHERE checked_in IS NULL"
+            "SELECT COUNT(DISTINCT c.item_id) as c FROM checkouts c "
+            "JOIN items_live i ON i.id = c.item_id WHERE c.checked_in IS NULL"
         ).fetchone()["c"]
 
         from app.services.tags import get_all_tags
@@ -379,14 +380,22 @@ async def item_edit(
     item_id: int,
     from_: str = Query("", alias="from"),
     error: str | None = Query(None),
+    trashed: int | None = Query(None),
     _=Depends(require_role("editor")),
 ):
     back = nav.back_target(from_)
+    trashed_title = None
     with get_db() as db:
         item = db.execute(
             f"SELECT i.*, {lists.WISHLISTED_SQL} AS wishlisted FROM items_live i WHERE i.id = ?",
             (item_id,),
         ).fetchone()
+        # An identifier_in_trash refusal names the blocking row by id; the
+        # title is resolved here and escaped by the template, so nothing the
+        # user typed is ever echoed back through the query string (G58).
+        # FastAPI rejects a non-integer `trashed`, so no parsing is needed.
+        if trashed is not None:
+            trashed_title = item_write.trashed_title(db, trashed)
         locations = db.execute(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
@@ -403,6 +412,7 @@ async def item_edit(
         "item_edit.html",
         {"item": item, "back": back, "media_types": MEDIA_TYPES, "game_platforms": game_platforms,
          "locations": locations, "error": error,
+         "trashed_title": trashed_title,
          "isbn_invalid": isbn_invalid, "upc_invalid": upc_invalid},
     )
 

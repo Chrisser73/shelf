@@ -316,7 +316,11 @@ async def shelf_fill_scan(
             {**context, "scan_action": "/api/shelf-fill/scan"},
         )
 
-    if item_id and status in {"added", "duplicate"}:
+    # `restored` joins the set: a re-add of a trashed book is a successful
+    # placement, and a status this gate does not list falls straight through
+    # the whole post-processing block — the position assignment, the OOB
+    # summary refresh and _render_result (G103).
+    if item_id and status in {"added", "duplicate", "restored"}:
         try:
             with get_db() as db:
                 placed = _place_item(db, int(item_id), location_id)

@@ -183,7 +183,8 @@ async def sync(on_progress: ProgressCallback | None = None) -> dict[str, int]:
     if not server or not key:
         raise komga_libraries.KomgaError("Komga URL and API key are required")
 
-    stats = {"created": 0, "adopted": 0, "updated": 0, "skipped": 0, "errors": 0}
+    stats = {"created": 0, "adopted": 0, "updated": 0, "skipped": 0,
+             "in_trash": 0, "errors": 0}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         libraries = await komga_libraries.fetch_libraries(
             client, server, key, configured=config["kinds"]
@@ -219,9 +220,14 @@ async def sync(on_progress: ProgressCallback | None = None) -> dict[str, int]:
                         stats[action] += 1
                     else:
                         stats["updated"] += 1
-                    await _ingest_cover(
-                        client, server, key, result["item_id"], candidate["komga_id"]
-                    )
+                    # A candidate left in Trash gets no cover either: the
+                    # skip must land before the item's first write (G85),
+                    # and a cover is a write to the row the sync is meant to
+                    # leave exactly as the user left it.
+                    if action != "in_trash":
+                        await _ingest_cover(
+                            client, server, key, result["item_id"], candidate["komga_id"]
+                        )
                     status = action
                 except (komga_records.KomgaPersistenceError, ValueError):
                     logger.warning("Skipping unsafe Komga candidate %r", candidate.get("komga_id"), exc_info=True)

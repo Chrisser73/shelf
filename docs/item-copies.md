@@ -74,11 +74,20 @@ rather than move one.
 Removal is permanent. A copy's condition, acquisition details and provenance go
 with the row — the delete is a `DELETE`, not a flag — which is why the UI
 control is guarded by a confirmation naming what is lost. Both `items` and
-`item_copies` now carry a `deleted_at` column. Nothing writes it yet — the
-delete is still a `DELETE` — but the read side is already behind it: every read
-of copies goes through the `copies_live` view, which hides a copy whose own
-column is set and every copy of an item whose column is set. It is the seam a
-later soft-delete feature switches on, with the readers already repointed.
+`item_copies` now carry a `deleted_at` column, and the service holds the four
+functions that write it — `trash_copy` / `restore_copy` here, `trash_item` /
+`restore_item` for items — but **no route calls the trashing ones**, so removal
+in the UI is still a `DELETE`. The read side is already behind the column:
+every read of copies goes through the `copies_live` view, which hides a copy
+whose own column is set and every copy of an item whose column is set. It is
+the seam a later soft-delete feature switches on, with the readers already
+repointed and the collision rules already in place.
+
+Trashing a copy **demotes it in the same statement that stamps it**. The
+partial index that allows one primary per item spans trashed rows, so without
+the demote, trashing an item's only primary copy and then adding another would
+collide with the trashed row still holding the slot. A restored copy comes back
+as a secondary, or as the primary when the item has none.
 
 ## Which surfaces write copies
 

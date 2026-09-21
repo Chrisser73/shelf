@@ -23,7 +23,8 @@ from app.routers.items_common import SORT_OPTIONS  # re-exported for pages.py
 from app.services import isbn as isbn_svc
 from app.services import browse_counts
 from app.services import lists
-from app.services.item_write import (ItemValueError, insert_item, update_item_fields,
+from app.services.item_write import (IdentifierInTrash, ItemValueError,
+                                     insert_item, update_item_fields,
                                      update_items_fields, validate_item_fields,
                                      validated_location_id)
 from app.services import item_write  # _coerce_owned (bulk update), promote_wishlisted (scan)
@@ -33,6 +34,7 @@ from app.services import cover_queue
 from app.services import legacy_book
 from app.services import scan_outcome
 from app.services import item_merge
+from app.services import restore_report
 from app.services import item_template
 from app.services import upc as upc_svc, tmdb, igdb
 from app.services import synopsis as synopsis_svc
@@ -580,12 +582,8 @@ async def scan_isbn(
                 },
             )
 
-        item_id = items_common._save_item(metadata, isbn13, media_type, location_id, source, hc_ids)
-
-        # Wishlist mode: set owned = 0
-        if mode == "wishlist":
-            with get_db() as db:
-                update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
+        item_id = items_common._save_item(metadata, isbn13, media_type, location_id,
+                                          source, hc_ids, owned=mode != "wishlist")
 
         # Queue the cover instead of downloading it in-request. The
         # hints are the exact three inputs the download used to take, so
@@ -598,18 +596,20 @@ async def scan_isbn(
         })
 
 
-    status = "wishlisted" if mode == "wishlist" else "added"
+    # Read the restore flag before the id is used for anything else.
+    status = restore_report.restored_status(
+        item_id, "wishlisted" if mode == "wishlist" else "added")
     items_common._log_scan(isbn13, media_type, status, item_id, mode)
 
+    card = ({"title": metadata["title"], "authors": metadata.get("authors"),
+             "cover_path": None, "cover_pending": True}
+            if status != "restored" else restore_report.restored_card(item_id))
     resp = templates.TemplateResponse(
         request, "fragments/scan_result.html",
         {
             "status": status,
             "isbn": isbn13,
-            "title": metadata["title"],
-            "authors": metadata.get("authors"),
-            "cover_path": None,
-            "cover_pending": True,
+            **card,
             "item_id": item_id,
             "source": source,
             "media_type_label": MEDIA_TYPES.get(media_type, media_type),
@@ -707,9 +707,14 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
         db.execute("BEGIN IMMEDIATE")
         existing = _find_duplicate_item(db, isbn13, upc_code, media_type)
         if existing is None:
+            # Wishlist intent rides the insert, not a second transaction: a
+            # restoring funnel has to be told it, and the demote this
+            # replaced also sat outside the lock above.
+            wishlist = {"owned": 0, "wishlisted": True} if mode == "wishlist" else {}
             try:
                 item_id = insert_item(
                     db,
+                    **wishlist,
                     title=title,
                     authors=form.get("authors"),
                     isbn=isbn13,
@@ -752,12 +757,9 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
              "item_id": existing["id"]},
         )
 
-    # Wishlist mode: set owned = 0 (mirrors /api/scan, items.py:538-540).
-    if mode == "wishlist":
-        with get_db() as db:
-            update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
 
-    status = "wishlisted" if mode == "wishlist" else "added"
+    status = restore_report.restored_status(
+        item_id, "wishlisted" if mode == "wishlist" else "added")
 
     # Handle cover upload.
     #
@@ -779,8 +781,9 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
             if content and len(content) > 100:
                 cover_path = covers.save_uploaded_cover(item_id, content)
 
-        # If no upload, check for preview cover from scan, then try Amazon
-        if not cover_path and isbn13:
+        # If no upload, check for preview cover from scan, then try Amazon —
+        # unless this restored a row that keeps its stored cover.
+        if not cover_path and isbn13 and not restore_report.keeps_stored_cover(item_id):
             preview_path = covers.COVERS_DIR / f"preview_{isbn13}.jpg"
             if preview_path.exists():
                 # Rename preview to permanent cover
@@ -808,9 +811,13 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
         {
             "status": status,
             "isbn": isbn13 or upc_code or "",
-            "title": title,
-            "authors": form.get("authors"),
-            "cover_path": cover_path,
+            # A restored row shows its stored title and authors; an
+            # explicitly uploaded cover still wins over the stored one.
+            **({"title": title, "authors": form.get("authors"),
+                "cover_path": cover_path}
+               if status != "restored"
+               else {**restore_report.restored_card(item_id),
+                     **({"cover_path": cover_path} if cover_path else {})}),
             "item_id": item_id,
             "source": "manual",
             "media_type_label": MEDIA_TYPES.get(media_type, media_type),
@@ -1065,6 +1072,11 @@ async def merge_items(request: Request, _=Depends(require_role("admin"))):
                 # would refuse the copy.
                 try:
                     fill = validate_item_fields(db, fill)
+                    # Collision preflight here, not at the write below: that
+                    # runs after the DELETE, so a refusal there would arrive
+                    # with the husk gone and roll the merge back. The husk is
+                    # live, so only a third, trashed row can collide.
+                    item_write.refuse_trash_collision(db, "id = ?", [keep_id], fill)
                 except ItemValueError as e:
                     # Name the row: the loop stops on the first bad one, and a
                     # multi-row merge otherwise reports a value with no way to
@@ -1101,9 +1113,13 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
     # code — G58). Nothing is saved on any refusal.
     edit_url = f"/item/{item_id}/edit" + (f"?from={back_key}" if back_key else "")
 
-    def _refused(code):
-        return RedirectResponse(url=f"{edit_url}{'&' if '?' in edit_url else '?'}error={code}",
-                                status_code=303)
+    def _refused(code, **extra):
+        url = f"{edit_url}{'&' if '?' in edit_url else '?'}error={code}"
+        # `trashed=<id>` only: the template resolves the title itself, so no
+        # user text is ever echoed back through the query string (G58).
+        for key, value in extra.items():
+            url += f"&{key}={value}"
+        return RedirectResponse(url=url, status_code=303)
 
     fields = {}
     try:
@@ -1209,6 +1225,8 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         # rewrites isbn10 too — #54's second half.
         try:
             update_item_fields(db, item_id, fields)
+        except IdentifierInTrash as e:
+            return _refused(e.code, trashed=e.item_id)
         except ItemValueError as e:
             return _refused(e.code)
         except sqlite3.IntegrityError:

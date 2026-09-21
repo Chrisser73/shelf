@@ -27,6 +27,14 @@
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
         That UPC / EAN isn't a valid retail barcode — correct it or clear the field. Nothing was saved.
     </div>
+    {% elif error == "identifier_in_trash" %}
+    <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
+        {% if trashed_title %}
+        “{{ trashed_title }}” is in Trash and already uses that identifier. Restore it from Trash, or delete it permanently, before using it here. Nothing was saved.
+        {% else %}
+        That identifier belongs to an item in Trash. Restore that item, or delete it permanently, before using it here. Nothing was saved.
+        {% endif %}
+    </div>
     {% elif error == "upc_conflict" %}
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
         That UPC / EAN is already assigned to another item of this media type. Nothing was saved.
