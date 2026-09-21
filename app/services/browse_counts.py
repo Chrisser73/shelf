@@ -85,6 +85,20 @@ def filter_counts(db, values: dict, total: int) -> dict:
         ).fetchall()
     }
 
+    platform_where, platform_params = _count_where("platform_filter")
+    _platform_join = " AND" if platform_where else " WHERE"
+    platform_counts = {
+        row["slug"]: {"name": row["name"], "item_count": row["item_count"]}
+        for row in db.execute(
+            f"SELECT p.slug, p.name, COUNT(*) AS item_count "
+            f"FROM items_live i JOIN game_platforms p ON p.slug = i.platform "
+            f"{platform_where}{_platform_join} i.media_type = 'video_game' "
+            "GROUP BY p.slug, p.name, p.sort_order "
+            "ORDER BY p.sort_order, p.name COLLATE NOCASE",
+            platform_params,
+        ).fetchall()
+    }
+
     src_where, src_params = _count_where("source_filter")
     _src_join = " AND" if src_where else " WHERE"
     source_counts = {
@@ -110,6 +124,7 @@ def filter_counts(db, values: dict, total: int) -> dict:
         "location_counts": location_counts,
         "no_location_count": no_location_count,
         "reading_status_counts": reading_status_counts,
+        "platform_counts": platform_counts,
         "source_counts": source_counts,
         "source_labels": SOURCE_LABELS,
         "locations": locations,
@@ -118,5 +133,6 @@ def filter_counts(db, values: dict, total: int) -> dict:
         "active_owned": values["owned"],
         "active_location": values["location_filter"],
         "active_reading_status": values["reading_status"],
+        "active_platform": values["platform_filter"],
         "active_source": values["source_filter"],
     }

@@ -72,3 +72,26 @@ class TestDeletePlatform:
         with get_db() as check_db:
             item = check_db.execute("SELECT platform FROM items WHERE title = 'Game'").fetchone()
         assert item["platform"] is None
+
+
+class TestPlatformLogos:
+    def test_save_custom_logo_mapping(self, admin_client, db):
+        resp = admin_client.post(
+            "/api/platforms/logos",
+            data={"platform": "switch", "svg_path": "icons/svg/nintendo_switch_tall.svg"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        row = db.execute(
+            "SELECT svg_path FROM game_platform_logos WHERE platform_slug = 'switch'"
+        ).fetchone()
+        assert row["svg_path"] == "icons/svg/nintendo_switch_tall.svg"
+
+    def test_rejects_paths_outside_the_bundled_svg_directory(self, admin_client, db):
+        admin_client.post(
+            "/api/platforms/logos",
+            data={"platform": "switch", "svg_path": "https://example.com/logo.svg"},
+        )
+        assert db.execute(
+            "SELECT 1 FROM game_platform_logos WHERE platform_slug = 'switch'"
+        ).fetchone() is None

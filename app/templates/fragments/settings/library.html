@@ -193,6 +193,48 @@
         </form>
     </div>
 
+    <!-- Platform Logos -->
+    <div class="bg-shelf-card rounded-xl border border-shelf-border p-6">
+        <h2 class="text-lg font-semibold mb-2">Platform Logos</h2>
+        <p class="text-xs text-shelf-muted mb-4">Choose an SVG from <code>static/icons/svg</code> for a game platform. The bundled first guess is used until you save a custom mapping.</p>
+
+        {% if game_platform_logos %}
+        <div class="space-y-2 mb-4 max-h-64 overflow-y-auto">
+            {% for mapping in game_platform_logos %}
+            <div class="flex items-center gap-3 bg-shelf-bg rounded-lg px-4 py-2">
+                {% if mapping.effective_svg_path %}
+                <img src="/static/{{ mapping.effective_svg_path }}" alt="" class="w-12 h-8 object-contain shrink-0">
+                {% else %}
+                <span class="w-12 text-center text-shelf-muted text-xs shrink-0">—</span>
+                {% endif %}
+                <span class="min-w-0 truncate">{{ mapping.name }} <span class="text-shelf-muted text-xs">({{ mapping.slug }})</span></span>
+                <span class="ml-auto text-xs text-shelf-muted truncate">{{ mapping.svg_path or mapping.effective_svg_path or 'No logo' }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <form action="/api/platforms/logos" method="post" class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-2">
+            <div>
+                <label for="logo-platform" class="sr-only">Platform</label>
+                <input id="logo-platform" name="platform" list="logo-platforms" placeholder="Platform slug (e.g. atari2600)" required
+                       class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <datalist id="logo-platforms">
+                    {% for p in game_platforms_list %}<option value="{{ p.slug }}">{{ p.name }}</option>{% endfor %}
+                </datalist>
+            </div>
+            <div>
+                <label for="logo-svg-path" class="sr-only">SVG logo</label>
+                <select id="logo-svg-path" name="svg_path" required
+                        class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                    <option value="">Select a logo…</option>
+                    {% for path in svg_logo_paths %}<option value="{{ path }}">{{ path }}</option>{% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">Save mapping</button>
+        </form>
+    </div>
+
     <!-- Game Platforms -->
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6">
         <h2 class="text-lg font-semibold mb-4">Game Platforms</h2>

@@ -18,6 +18,7 @@ from app.routers.items_common import SORT_OPTIONS
 from app.routers.series import find_gaps
 from app.services import item_copies, item_template
 from app.services.home_dashboard import dashboard_summary
+from app.services.platform_logos import available_svg_paths, logo_path
 
 router = APIRouter()
 
@@ -619,8 +620,14 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
             "GROUP BY b.id ORDER BY b.name"
         ).fetchall()
         game_platforms_list = db.execute(
-            "SELECT * FROM game_platforms ORDER BY sort_order, name"
+            "SELECT p.*, l.svg_path FROM game_platforms p "
+            "LEFT JOIN game_platform_logos l ON l.platform_slug = p.slug "
+            "ORDER BY p.sort_order, p.name"
         ).fetchall()
+        game_platform_logos = [
+            {**dict(platform), "effective_svg_path": logo_path(platform["slug"], platform["svg_path"])}
+            for platform in game_platforms_list
+        ]
         share_links = db.execute(
             "SELECT * FROM share_links ORDER BY created_at DESC"
         ).fetchall()
@@ -667,6 +674,8 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
          "borrowers": borrowers, "secrets_saved": secrets_saved,
          "secrets_present": secrets_present, "abs_url_present": abs_url_present,
          "game_platforms_list": game_platforms_list,
+         "game_platform_logos": game_platform_logos,
+         "svg_logo_paths": available_svg_paths(),
          "hideable_nav_tab_states": hideable_nav_tab_states,
          "borrower_error_message": borrower_error_message,
          "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats},

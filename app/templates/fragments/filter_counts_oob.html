@@ -65,4 +65,19 @@
     <option value="read" {{ 'selected' if active_reading_status == 'read' else '' }}>Read{% if rsc.get('read') %} ({{ rsc.read }}){% endif %}</option>
 </select>
 {% endif %}
+
+{% if platform_counts is defined and (platform_counts or active_platform) %}
+<select id="platform-filter" name="platform_filter" hx-swap-oob="true"
+        hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+        hx-include="{{ filter_includes('platform_filter') }}"
+        class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+    <option value="" {{ 'selected' if not active_platform else '' }}>All Platforms</option>
+    {% for slug, platform in platform_counts.items() %}
+    <option value="{{ slug }}" {{ 'selected' if active_platform == slug else '' }}>{{ platform.name }} ({{ platform.item_count }})</option>
+    {% endfor %}
+    {% if active_platform and active_platform not in platform_counts %}
+    <option value="{{ active_platform }}" selected>{{ active_platform }} (0)</option>
+    {% endif %}
+</select>
+{% endif %}
 {% endif %}

@@ -248,6 +248,11 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
     # up without the column (G1).
     (39, "Add tags media_type scope column",
      "ALTER TABLE tags ADD COLUMN media_type TEXT DEFAULT NULL"),
+    (40, "Add game platform logo mappings",
+     """CREATE TABLE IF NOT EXISTS game_platform_logos (
+            platform_slug TEXT PRIMARY KEY REFERENCES game_platforms(slug) ON DELETE CASCADE,
+            svg_path TEXT NOT NULL
+        )"""),
 )
 
 MIGRATION_TABLES = """

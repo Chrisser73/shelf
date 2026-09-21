@@ -44,6 +44,31 @@
         </div>
     </div>
 
+    {% if platforms %}
+    <section class="mb-8" data-testid="home-platforms">
+        <div class="flex items-center justify-between gap-4 mb-4">
+            <div>
+                <h2 class="text-lg font-semibold">Game platforms</h2>
+                <p class="text-xs text-shelf-muted mt-1">Games in your collection, grouped by platform.</p>
+            </div>
+            <a href="/browse?media_type_filter=video_game" class="text-sm text-shelf-accent2 hover:text-shelf-accent">Browse games</a>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+            {% for platform in platforms %}
+            <a href="/browse?platform_filter={{ platform.slug }}" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors text-center gap-4 grid">
+                <p class="text-shelf-muted text-sm truncate">{{ platform.name }}</p>
+                {% if platform.logo_path %}
+                <img src="/static/{{ platform.logo_path }}" alt="" class="max-h-6 w-full object-contain" style="max-height: 84px">
+                {% endif %}
+
+                <p class="text-3xl font-bold">{{ platform.item_count }}</p>
+<!--                <p class="text-xs text-shelf-muted mt-1">{{ 'game' if platform.item_count == 1 else 'games' }}</p>-->
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <section class="bg-shelf-card border border-shelf-border rounded-lg p-5">
             <div class="flex items-center justify-between gap-4 mb-4">

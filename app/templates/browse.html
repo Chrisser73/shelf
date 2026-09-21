@@ -215,6 +215,22 @@
                 <option value="read" {{ 'selected' if f.reading_status == 'read' else '' }}>Read{% if rsc.get('read') %} ({{ rsc.read }}){% endif %}</option>
             </select>
 
+            <!-- Platform Filter (only when games with a platform exist) -->
+            {% if platform_counts or f.platform_filter %}
+            <select id="platform-filter" name="platform_filter"
+                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+                    hx-include="{{ filter_includes('platform_filter') }}"
+                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <option value="" {{ 'selected' if not f.platform_filter else '' }}>All Platforms</option>
+                {% for slug, platform in platform_counts.items() %}
+                <option value="{{ slug }}" {{ 'selected' if f.platform_filter == slug else '' }}>{{ platform.name }} ({{ platform.item_count }})</option>
+                {% endfor %}
+                {% if f.platform_filter and f.platform_filter not in platform_counts %}
+                <option value="{{ f.platform_filter }}" selected>{{ f.platform_filter }} (0)</option>
+                {% endif %}
+            </select>
+            {% endif %}
+
             <!-- Tag Filter (only when tags exist) -->
             {% if all_tags %}
             <select id="tag-filter" name="tag"

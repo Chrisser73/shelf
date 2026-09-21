@@ -5,6 +5,7 @@ from fastapi.responses import RedirectResponse
 
 from app.auth import require_role
 from app.database import get_db
+from app.services.platform_logos import normalise_svg_path
 
 router = APIRouter(prefix="/api/platforms", dependencies=[Depends(require_role("admin"))])
 
@@ -35,4 +36,26 @@ async def delete_platform(platform_id: int):
         if row:
             db.execute("UPDATE items SET platform = NULL WHERE platform = ?", (row["slug"],))
             db.execute("DELETE FROM game_platforms WHERE id = ?", (platform_id,))
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/logos")
+async def save_platform_logo(platform: str = Form(...), svg_path: str = Form("")):
+    """Create or replace a platform's mapping from the bundled SVG files."""
+    platform = platform.strip()
+    path = normalise_svg_path(svg_path)
+    with get_db() as db:
+        exists = db.execute(
+            "SELECT 1 FROM game_platforms WHERE slug = ?", (platform,)
+        ).fetchone()
+        if not exists:
+            return RedirectResponse(url="/settings", status_code=303)
+        if path is None:
+            db.execute("DELETE FROM game_platform_logos WHERE platform_slug = ?", (platform,))
+        else:
+            db.execute(
+                "INSERT INTO game_platform_logos (platform_slug, svg_path) VALUES (?, ?) "
+                "ON CONFLICT(platform_slug) DO UPDATE SET svg_path = excluded.svg_path",
+                (platform, path),
+            )
     return RedirectResponse(url="/settings", status_code=303)
