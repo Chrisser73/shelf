@@ -1,0 +1,13 @@
+services:
+  shelf:
+    build:
+      context: ./
+    platform: linux/arm64
+    container_name: shelf
+    ports:
+      - "18888:18888"
+    environment:
+      CERT_SAN: ${CERT_SAN}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
