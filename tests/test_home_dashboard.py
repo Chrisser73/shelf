@@ -39,6 +39,20 @@ def test_media_type_breakdown_is_data_driven(db):
     ]
 
 
+def test_platform_breakdown_uses_live_video_games_and_platform_names(db):
+    insert_item(db, title="Mario", media_type="video_game", platform="switch")
+    insert_item(db, title="Zelda", media_type="video_game", platform="switch")
+    insert_item(db, title="Astro", media_type="video_game", platform="ps5")
+    insert_item(db, title="Not a game", media_type="book", platform="switch")
+
+    assert home_dashboard.dashboard_summary(db)["platforms"] == [
+        {"slug": "switch", "name": "Nintendo Switch", "svg_path": None,
+         "item_count": 2, "logo_path": "icons/svg/nintendo_switch.svg"},
+        {"slug": "ps5", "name": "PlayStation 5", "svg_path": None,
+         "item_count": 1, "logo_path": "icons/svg/playstation_ps5_compact.svg"},
+    ]
+
+
 def test_lent_out_counts_items_not_checkout_rows(db):
     item_id = insert_item(db, title="Borrowed", media_type="book")
     borrower_id = db.execute(
