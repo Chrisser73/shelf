@@ -251,6 +251,9 @@ PROD_DIR ?= $(HOME)/shelf-prod
 dev:
 	docker compose up -d --build
 
+dev-local:
+	DATA_DIR=./data-dev .venv/bin/uvicorn app.main:app --reload
+
 dev-down:
 	docker compose down
 
