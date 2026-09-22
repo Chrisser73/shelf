@@ -348,6 +348,12 @@ a retail UPC and neither produces a plain `items` row:
   the user confirms those. A portal that refuses or answers nothing is handled as
   a clean `found=False`, not an error: a datacenter IP blocked at the portal must
   degrade to "look it up yourself", not to a failed scan.
+  When the portal's answer is wrong or missing, the confirmation card offers an
+  **assisted search** (`services/periodical_google.py`): a Google Books query by
+  magazine title, paced through `outbound.fetch` on the existing Google Books
+  host. A chosen result only refills the card; the scanned EAN and supplement
+  stay the issue's identity, and an ISSN is taken only when its check digit is
+  valid. Nothing is written until the user confirms.
 - **Discogs** (`services/discogs.py`) searches for an exact pressing and fetches a
   release by id, with the admin's personal access token (`discogs_token`, a
   sensitive setting). **Nothing calls it yet** — it is groundwork for optional

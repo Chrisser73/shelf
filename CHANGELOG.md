@@ -6,6 +6,36 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-09-22
+
+A magazine's 977 barcode does not always lead to a usable publication. The ISSN
+it encodes is sometimes wrong, and sometimes the ISSN source knows nothing about
+it. Until now you then had to type the magazine's title and ISSN by hand. Now
+you can search for the magazine instead.
+
+This release carries one community contribution, from
+[@sudo-rpaisley](https://github.com/sudo-rpaisley).
+
+### Added
+
+- **Search for a magazine when its barcode lookup falls short.** The periodical
+  confirmation card now has a **Wrong or missing publication? Search magazines**
+  section. Search Google Books by magazine title, then choose **Use result** to
+  fill the card's publication title, ISSN and issue date. Check them and choose
+  **Add confirmed issue** as before. A plain **Search exact barcode on the web**
+  link sits beside it.
+  - Choosing a result never adds an issue by itself. It only fills the card.
+  - The scanned barcode and its 2- or 5-digit add-on stay the issue's identity.
+    A result can correct the publication, but it cannot change which issue you
+    scanned.
+  - An ISSN is accepted only if its check digit is valid.
+  - If the issue is already in your library, or in Trash, confirming opens it
+    (restoring it from Trash first). No second copy is added.
+  - Covers from search results appear in the result list only. They are not
+    saved with the issue.
+  Contributed by [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#136](https://github.com/dgahagan/shelf/pull/136).
+
 ## [0.46.0] - 2026-09-21
 
 Until now, deleting something in Shelf deleted it for good. A wrong click on
@@ -4068,6 +4098,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.47.0]: https://github.com/dgahagan/shelf/releases/tag/v0.47.0
 [0.46.0]: https://github.com/dgahagan/shelf/releases/tag/v0.46.0
 [0.45.1]: https://github.com/dgahagan/shelf/releases/tag/v0.45.1
 [0.45.0]: https://github.com/dgahagan/shelf/releases/tag/v0.45.0
