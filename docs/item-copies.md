@@ -22,7 +22,9 @@ owned and already has an explicit legacy location receives a primary copy.
 
 The partial unique index on `item_copies(item_id)` permits at most one primary
 copy, `(item_id, copy_number)` is unique, and `copy_barcode` is unique across
-the collection. Deleting an item cascades to its copies; deleting a location
+the collection. Deleting an item permanently (a purge from Trash, or a merge's
+husk) cascades to its copies; moving it to Trash hides them through the view
+and writes nothing to them. Deleting a location
 sets copy locations to `NULL`.
 
 The copy table references the existing `locations` row rather than storing a
@@ -34,7 +36,7 @@ location tree's business — see `app/services/locations.py`.
 ## The write funnel
 
 `insert_copy` and `update_copy` in `app/services/item_copies.py` are the only
-way a row reaches or changes in this table, and `delete_copy` /
+way a row reaches or changes in this table, and `purge_copy` /
 `delete_copies_for_item` the only way one leaves it, guarded the same way
 `app/services/item_write.py` is for `items`: column names are validated against `PRAGMA table_info`, so an
 unknown column raises rather than being silently dropped, and unset columns take
@@ -52,8 +54,8 @@ so the seam and the primary still mirror each other.
 
 ## Removing a copy, and the promotion
 
-`delete_copy` removes one row and then keeps every reader of "where is this
-item?" answering alike:
+**Remove copy** on the item page calls `trash_copy`, which moves one copy to
+Trash and then keeps every reader of "where is this item?" answering alike:
 
 - Removing a **secondary** changes nothing else. The seam and the primary copy
   are untouched.
@@ -71,17 +73,16 @@ write re-enters `sync_primary_location`, which creates a primary when it finds
 none — a seam write made while the item has no primary would invent a copy
 rather than move one.
 
-Removal is permanent. A copy's condition, acquisition details and provenance go
-with the row — the delete is a `DELETE`, not a flag — which is why the UI
-control is guarded by a confirmation naming what is lost. Both `items` and
-`item_copies` now carry a `deleted_at` column, and the service holds the four
-functions that write it — `trash_copy` / `restore_copy` here, `trash_item` /
-`restore_item` for items — but **no route calls the trashing ones**, so removal
-in the UI is still a `DELETE`. The read side is already behind the column:
-every read of copies goes through the `copies_live` view, which hides a copy
-whose own column is set and every copy of an item whose column is set. It is
-the seam a later soft-delete feature switches on, with the readers already
-repointed and the collision rules already in place.
+Removal is reversible. The copy keeps its row, with its condition, acquisition
+details and provenance, and gets a `deleted_at` stamp; every read of copies
+goes through the `copies_live` view, which hides a copy whose own column is set
+and every copy of an item whose column is set. The **Trash** page lists it
+under its item, and **Restore** (`restore_copy`) brings it back. Only two
+things still `DELETE` a copy row: an admin's **Delete permanently** on the
+Trash page (`purge_copy`, which accepts only a trashed copy), and the archive
+import removing the placeholder primary it just created
+(`delete_copies_for_item`). A purge needs no promotion: the copy was demoted
+and the survivors settled when it was trashed.
 
 Trashing a copy **demotes it in the same statement that stamps it**. The
 partial index that allows one primary per item spans trashed rows, so without

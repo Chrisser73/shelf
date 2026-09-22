@@ -9,7 +9,7 @@ from app.auth import require_role
 from app.config import DATABASE_PATH, DATA_DIR
 from app.crypto import SENSITIVE_KEYS, encrypt_value, get_encryption_key
 from app.currency import CURRENCIES, invalidate_cache as invalidate_currency_cache
-from app.database import get_db, get_setting
+from app.database import get_db, get_setting, set_setting
 from app.nav import HIDEABLE_KEYS, invalidate_cache as invalidate_nav_cache
 from app.services import audiobookshelf
 from app.services.national import SEARCH_LANGS
@@ -41,10 +41,7 @@ def _upsert_setting(db, key: str, value: str, cleared: bool = False):
             return
         else:
             value = encrypt_value(value, get_encryption_key())
-    db.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
-        (key, value, value),
-    )
+    set_setting(db, key, value)
 
 
 @router.post("")
@@ -178,6 +175,32 @@ async def update_lending_settings(
             ("notify_format", fmt),
         ]:
             _upsert_setting(db, key, value, cleared=clear_notify_url == "on" and key == "notify_url")
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/trash")
+async def update_trash_settings(trash_retention_days: str = Form("180")):
+    """Save the Trash retention window.
+
+    Separate from POST /api/settings on purpose, same as /lending: a partial
+    form posted there would blank the integration credentials.
+    """
+    from app.services import trash
+
+    raw = trash_retention_days.strip() or "180"
+    # int() on an ASCII-only string: str.isdigit() also accepts "²" and other
+    # Unicode digits, which get_retention_days then reads back as the default.
+    try:
+        days = int(raw) if raw.isascii() else -1
+    except ValueError:
+        days = -1
+    if not 0 <= days <= trash.MAX_TRASH_RETENTION_DAYS:
+        return {"ok": False, "message": "Retention days must be a whole number"}
+
+    with get_db() as db:
+        _upsert_setting(db, "trash_retention_days", str(days))
+        trash.settle_marker(db)
+    trash.invalidate()
     return RedirectResponse(url="/settings", status_code=303)
 
 

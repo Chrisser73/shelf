@@ -281,7 +281,7 @@
                     </a>
                     {% endif %}
                     {% if user and user.role in ('admin', 'editor') %}
-                    <button hx-delete="/api/items/{{ item.id }}" hx-confirm="Delete '{{ item.title }}'?" data-after-request="goto-browse"
+                    <button hx-delete="/api/items/{{ item.id }}" hx-confirm="Move '{{ item.title }}' to Trash?" data-after-request="goto-browse"
                             class="px-4 py-2 bg-shelf-error/20 text-shelf-error rounded-lg text-sm hover:bg-shelf-error/30 transition-colors">
                         Delete
                     </button>

@@ -362,7 +362,7 @@ class TestSingleWritePath:
                 offenders.append(f"{rel}:{line_no}")
         assert not offenders, (
             "item_copies rows must be removed through the delete arm of "
-            "app.services.item_copies (delete_copy / delete_copies_for_item), "
+            "app.services.item_copies (purge_copy / delete_copies_for_item), "
             "not raw SQL:\n  "
             + "\n  ".join(offenders)
         )
@@ -516,6 +516,66 @@ class TestSingleWritePath:
         quoted.write_text("# deleted_at = datetime('now') is described here\n")
         buf2, _ = _normalised_source(quoted)
         assert not DELETED_AT_ASSIGNMENT.search(buf2)
+
+    def test_items_rows_are_deleted_by_exactly_three_functions(self):
+        """The permanent-delete twin of the `deleted_at` pin.
+
+        After soft-delete-trash T4 every user-facing delete moves a row to
+        Trash. Three functions still remove an `items` row for real:
+        `merge_items` (the husk, after its children are reparented),
+        `_retire_kids_book` (a twin folded into its book), and
+        `trash.purge_item` (Trash's Delete permanently). A fourth is a new way
+        to lose data and should be a decision, not a drive-by — so the claim
+        is about functions, not files. Scanned through the normalised buffer
+        (G53: the explanatory comment at `items.py` that spells the statement
+        is not a delete; a docstring would be).
+        """
+        pattern = re.compile(r"DELETE\s+FROM\s+items\b", re.I)
+        expected = {
+            ("app/routers/items.py", "merge_items"),
+            ("app/database.py", "_retire_kids_book"),
+            ("app/services/trash.py", "purge_item"),
+        }
+        found = set()
+        for path in APP_DIR.rglob("*.py"):
+            rel = str(path.relative_to(REPO_ROOT))
+            buf, line_for = _normalised_source(path)
+            for m in pattern.finditer(buf):
+                found.add((rel, _enclosing_function(path, line_for(m.start()))))
+        assert found == expected, (
+            "`DELETE FROM items` may live only in merge_items, "
+            "_retire_kids_book and trash.purge_item — found: "
+            + ", ".join(f"{rel}::{fn}" for rel, fn in sorted(found, key=str))
+        )
+
+    def test_the_items_delete_guard_is_exempted_by_path_not_by_basename(self, tmp_path):
+        """G88: a same-named file elsewhere is attributed by its real path, so
+        a `trash.py` in another package gets no free pass."""
+        fake_pkg = tmp_path / "services"
+        fake_pkg.mkdir()
+        impostor = fake_pkg / "trash.py"
+        impostor.write_text(
+            'def purge_item(db, item_id):\n'
+            '    db.execute("DELETE FROM items WHERE id = ?", (item_id,))\n'
+        )
+        buf, line_for = _normalised_source(impostor)
+        hits = list(re.finditer(r"DELETE\s+FROM\s+items\b", buf))
+        assert len(hits) == 1
+        assert "app/services/trash.py" not in str(impostor)
+
+    def test_the_items_delete_guard_sees_an_adjacent_literal_split(self, tmp_path):
+        split = tmp_path / "split.py"
+        split.write_text(
+            'def sneak(db):\n'
+            '    db.execute(\n'
+            '        "DELETE FROM "\n'
+            '        "items WHERE id = ?"\n'
+            '    )\n'
+        )
+        buf, line_for = _normalised_source(split)
+        m = re.search(r"DELETE\s+FROM\s+items\b", buf)
+        assert m, "adjacent literals must join, or a delete can hide across two"
+        assert _enclosing_function(split, line_for(m.start())) == "sneak"
 
     def test_insert_detection_sees_adjacent_string_literals(self, tmp_path):
         """M1's second bypass: the insert guard scanned one physical line at a

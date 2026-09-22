@@ -43,7 +43,10 @@ def _copies_for_item(data_dir, item_id: int):
     conn.row_factory = sqlite3.Row
     try:
         return conn.execute(
-            "SELECT * FROM item_copies WHERE item_id = ? ORDER BY copy_number, id",
+            # Live copies only: Remove copy now moves a row to Trash, where it
+            # still exists physically with `deleted_at` set.
+            "SELECT * FROM item_copies WHERE item_id = ? AND deleted_at IS NULL "
+            "ORDER BY copy_number, id",
             (item_id,),
         ).fetchall()
     finally:
@@ -296,10 +299,7 @@ def test_removing_primary_promotes_lowest_numbered_survivor(live_server, authed_
     ):
         authed_page.get_by_test_id("remove-copy").click()
 
-    assert len(messages) == 1
-    assert "#1" in messages[0]
-    for word in ("condition", "acquisition", "provenance", "permanently"):
-        assert word in messages[0].lower(), f"{word!r} missing from: {messages[0]!r}"
+    assert messages == ["Move copy #1 to Trash? Restore it from Trash to get it back."]
 
     remaining = _copies_for_item(data_dir, item_id)
     assert len(remaining) == 3
@@ -368,7 +368,7 @@ def test_removing_last_copy_nulls_seam_and_leaves_item_standing(live_server, aut
         authed_page.get_by_test_id("remove-copy").click()
 
     assert len(messages) == 1, "removing the last copy must still confirm first"
-    assert "permanently" in messages[0].lower()
+    assert "Trash" in messages[0]
 
     assert _copies_for_item(data_dir, item_id) == []
     assert _item_location_id(data_dir, item_id) is None

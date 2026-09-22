@@ -22,8 +22,22 @@ Middleware, outermost first (`app/main.py`):
 
 Routes live in `app/routers/`, one module per feature. Pages render full
 templates; HTMX endpoints render fragments from `app/templates/fragments/`.
-`TemplateResponse` is wrapped to inject `user` and `nav_tabs` into every
-context.
+`TemplateResponse` is wrapped to inject `user`, `nav_tabs` and `trash_nag`
+into every context. `trash_nag` is the admin Trash banner's state: the wrapper
+checks the role **before** any service call, so a non-admin render runs no
+Trash code and no query, and an admin render reads `trash.expired_count()`'s
+one-hour module cache. A failed read means no banner for that render, never a
+failed page; `base.html` guards on `{% if trash_nag %}`, so a hand-built
+environment without the key still renders.
+
+**Trash** is two routers in `app/routers/trash.py`, registered separately: the
+unprefixed page (`GET /trash`, editor) and the API under `/api/trash/` —
+restore an item or copy (editor), delete permanently, **Empty expired** and
+dismiss the banner (admin). Every role check is per route; there is no
+router-level dependency, so the editor/admin split is visible at each
+decorator. The API is rate-limited and CSRF-checked like any `/api/` route.
+Every mutating Trash route takes `BEGIN IMMEDIATE` before the read that decides
+what to act on.
 
 ## Data
 
@@ -81,10 +95,11 @@ value cannot match a twin stored under the canonical one — and
 `item_write.validate_item_fields` is the backstop that makes it impossible
 for a retired value to reach the table by any path.
 
-**`items` and `item_copies` each carry `deleted_at TEXT DEFAULT NULL`, and
-nothing sets it.** Deletion is still a `DELETE`: the column is the seam a later
-soft-delete feature switches on, landed on its own so that the read side could
-be repointed against an unchanged test suite. Both columns are appended
+**`items` and `item_copies` each carry `deleted_at TEXT DEFAULT NULL`, and it
+is how Trash works.** Deleting an item or removing a copy stamps the column;
+restoring clears it; every reader sees only unstamped rows (below). The column
+landed on its own, ahead of Trash, so the read side could be repointed against
+an unchanged test suite. Both columns are appended
 `MIGRATIONS` entries and deliberately absent from `SCHEMA`'s `CREATE TABLE`
 — `init_db()` runs `SCHEMA` and then replays every migration on a fresh
 database, so a second copy of the column would raise `duplicate column name`
@@ -164,8 +179,8 @@ object rather than to the edition: `condition`, `acquired_date`,
 `acquisition_source`, `acquisition_price`, `provenance`, `notes`, a
 `copy_barcode` (unique across the collection) and its own `location_id`
 (`ON DELETE SET NULL`). `(item_id, copy_number)` is unique and a partial
-unique index allows at most one `is_primary = 1` row per item; deleting an item
-cascades to its copies. **`items.location_id` is the compatibility seam**:
+unique index allows at most one `is_primary = 1` row per item; permanently
+deleting an item cascades to its copies (trashing one writes nothing to them). **`items.location_id` is the compatibility seam**:
 `item_write.py` mirrors a written `location_id` into that item's primary copy
 (creating it if needed), a null never invents a copy, and secondary copies are
 never moved by the legacy field — see `app/services/item_copies.py` and
@@ -187,15 +202,16 @@ change the numbers on an insurance report, which is its own decision.
 
 **`item_copies` has a write funnel.** `insert_copy` and `update_copy` in
 `app/services/item_copies.py` are the only way a row reaches or changes in the
-table, and `delete_copy` / `delete_copies_for_item` the only way one leaves it,
-exactly as `item_write.py` is for `items`: column names are validated against
+table, and `purge_copy` (Trash's Delete permanently, trashed copies only) /
+`delete_copies_for_item` (the archive import's placeholder removal) the only
+ways one leaves it, exactly as `item_write.py` is for `items`: column names are validated against
 `PRAGMA table_info`, so an unknown column raises instead of being dropped, and
 a location change clears the copy's location-scoped `position_order` unless the
 caller sets one explicitly. `tests/test_item_write.py` enforces the funnel by
 scanning `app/` for raw statements. Two set-based `INSERT ... SELECT` backfills
 stay raw and are allowlisted by path — migration 26's, which runs before any
 application code is importable, and `backfill_legacy_locations`. `add_copy`
-and `delete_copy` sit above the row-level pair and hold the rules no caller
+and `trash_copy` sit above the row-level pair and hold the rules no caller
 should reproduce: numbering a new copy above the item's highest, deciding
 `is_primary` from what the item already has, and promoting the lowest-numbered
 survivor when the primary is removed. See `docs/item-copies.md`.
@@ -332,8 +348,14 @@ a retail UPC and neither produces a plain `items` row:
   the user confirms those. A portal that refuses or answers nothing is handled as
   a clean `found=False`, not an error: a datacenter IP blocked at the portal must
   degrade to "look it up yourself", not to a failed scan.
+- **Discogs** (`services/discogs.py`) searches for an exact pressing and fetches a
+  release by id, with the admin's personal access token (`discogs_token`, a
+  sensitive setting). **Nothing calls it yet** — it is groundwork for optional
+  exact-pressing enrichment of a Music item, and it is not meant to replace the
+  MusicBrainz release as a release's identity. `api.discogs.com` is paced at
+  1 req/s, the published rate for authenticated requests.
 
-Both pace through `services/outbound.py` like every other shared public host.
+All three pace through `services/outbound.py` like every other shared public host.
 
 **One family of UPC is intercepted above all of that**, by
 `services/legacy_book.py`: the pre-Bookland price-point UPC-A a few publishers
@@ -1177,9 +1199,38 @@ one of two equal matches and re-importing resurrects the deleted one.
 / `restore_item` and `item_copies.trash_copy` / `restore_copy` — and both
 funnels refuse it as a caller-supplied field name, so it cannot be reached
 through `update_item_fields` either. A source pin in `tests/test_item_write.py`
-holds the four-function claim by enclosing function, not by file. **No route
-puts a row into Trash yet**: the delete sites still `DELETE`, so every rule
-above is installed and proven before it can be reached.
+holds the four-function claim by enclosing function, not by file. Three routes
+put rows into Trash — the item delete (`routers/items.delete_item`, also what
+Browse's bulk delete loops over), Remove copy (`routers/item_copies`) and the
+Audiobookshelf excluded-library cleanup (`routers/sync`) — and
+`tests/test_trash_funnel.py` pins exactly those three. None of them touches
+`scan_log`: the link survives, recent scans join `items_live`, and a restore
+re-links it for free.
+
+**`DELETE FROM items` lives in exactly three functions** — `merge_items`
+(`routers/items.py`, the husk, after `item_merge.reparent_children` has moved
+every child including trashed copies), `_retire_kids_book` (`database.py`, a
+twin folded into its book), and `trash.purge_item` (Trash's Delete permanently,
+which accepts only a trashed row and nulls `scan_log.item_id` first, the one
+child without an `ON DELETE` clause). A purge is the one place the child
+cascades should fire. A source pin in `tests/test_item_write.py` holds the
+claim by `(path, enclosing function)` over the same comment-stripped buffer as
+the other pins, so prose in a docstring counts and a comment does not. Cover
+files are never unlinked, on any delete path.
+
+**The Trash service** (`app/services/trash.py`) owns retention and nothing
+deletes on a timer. `trash_retention_days` (default 180; `0` means nothing
+expires) is read with `get_setting`. **"Expired" is one predicate**,
+`expired_clause(days, alias)`, shared by the count, the Trash page's filter and
+Empty expired; a copy expires on its own clock only while its item is live — a
+trashed item's copies are counted, listed and purged with the item.
+`expired_count()` is a module-level cache with a one-hour TTL rather than a
+background sweep, invalidated from three classes of writer: the four funnel
+functions, the purges, and the retention setting's save. With a connection it
+reads fresh and leaves the cache alone, for callers inside a transaction. The
+banner's dismissal is a `settings` row (`trash_nag_dismissed_count`) riding in
+the same cache entry, written under `BEGIN IMMEDIATE` with the count it
+records; the banner returns when the count exceeds it.
 
 The rule is pinned structurally. `tests/test_item_write.py` requires that
 `INSERT INTO items` exists only in `item_write.py`, and that every raw
@@ -1220,7 +1271,7 @@ Two details decide whether the guard actually guards:
 
 Some reads stay on the physical tables, each allowlisted by repository-relative
 path — never by basename — with its reason at the entry. On the **items** side,
-22 entries excusing 24 reads:
+30 entries excusing 32 reads:
 
 - the `items_live` CREATE in `get_db()` itself — the seam reads the physical
   table by definition, and so does the `copies_live` CREATE, which joins `items`;
@@ -1246,9 +1297,13 @@ path — never by basename — with its reason at the entry. On the **items** si
 - the four sync external-id matchers — `services/audiobookshelf.py`,
   `services/komga_records.py`, `services/romm_records.py`,
   `routers/hardcover.py` — which must *see* a trashed twin in order to leave
-  it alone (see *Writing items* above).
+  it alone (see *Writing items* above);
+- the Trash service (`services/trash.py`) — the expired count and the ids Empty
+  expired purges, `copy_state` (which tells `restore_copy`'s three `None`
+  outcomes apart), `purge_item`'s guard and the Trash page's listing. Trash is
+  the one surface whose whole job is the rows the views hide.
 
-On the **copies** side, 10 entries excusing 10 reads. **Eight are one class: a
+On the **copies** side, 15 entries excusing 15 reads. **Eight are one class: a
 read that exists to predict a UNIQUE violation reads the physical table,
 because the constraint does.** A trashed row still occupies its unique slot, so
 a guard asking "will this insert collide?" must see trashed rows or it predicts
@@ -1269,12 +1324,13 @@ classes** — `add_copy` reads the highest `copy_number` (predicts the constrain
 and whether the item has any copy at all (an ordinary read) and is therefore
 split in two, the `MAX` on `item_copies` and the `COUNT(*)` on `copies_live`.
 
-**The other two are a different class, and say so at their entries**, because
+**The other seven are a different class, and say so at their entries**, because
 a reader who generalises the rule above would "fix" them by repointing them at
-the view. Both read the physical table to find a row the view deliberately
-hides, and neither predicts a constraint: `restore_copy`
-(`services/item_copies.py`), which has to start from the trashed copy it is
-bringing back, and `_reparent_copies`' row-selection read
+the view. All read the physical table to find a row the view deliberately
+hides, and none predicts a constraint: `restore_copy` and `purge_copy`
+(`services/item_copies.py`), which have to start from the trashed copy they act
+on; the four Trash service reads above that join copies; and
+`_reparent_copies`' row-selection read
 (`services/item_merge.py`), which moves a merged item's trashed copies onto the
 keeper — through the view they would stay parented to the husk and be destroyed
 by its `ON DELETE CASCADE`, losing a restorable row for good.

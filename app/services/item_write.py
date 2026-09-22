@@ -80,6 +80,7 @@ from app.database import get_game_platforms
 from app.services import isbn as isbn_svc
 from app.services import item_copies
 from app.services import lists
+from app.services import trash
 from app.services.write_targets import (  # noqa: F401 — re-exported
     IdentifierInTrash,
     ItemValueError,
@@ -773,9 +774,10 @@ def trash_item(db, item_id: int) -> bool:
     writes nothing and returns `False`. That is what lets a caller treat the
     return as "I am the one who trashed it" rather than re-reading the row.
 
-    **No route calls this in this release.** It exists so the collision rules
-    in `insert_item` and the update funnel can be installed and proven before
-    any trashed row can exist; the delete sites still `DELETE`.
+    The three soft delete sites call this: the item page's and Browse's
+    Delete (`routers/items.delete_item`) and the Audiobookshelf excluded-
+    library cleanup. Only Trash's Delete permanently removes the row
+    (`services/trash.purge_item`).
 
     Caller must hold the write lock. The row is not re-read first — the guard
     is in the statement, which is one serialized unit, rather than in a bare
@@ -789,6 +791,7 @@ def trash_item(db, item_id: int) -> bool:
         "WHERE id = ? AND deleted_at IS NULL",
         (item_id,),
     )
+    trash.invalidate(db)
     return cursor.rowcount > 0
 
 
@@ -816,4 +819,8 @@ def restore_item(db, item_id: int) -> bool:
         "WHERE id = ? AND deleted_at IS NOT NULL",
         (item_id,),
     )
-    return cursor.rowcount > 0
+    restored = cursor.rowcount > 0
+    if restored:
+        trash.settle_marker(db)
+    trash.invalidate(db)
+    return restored

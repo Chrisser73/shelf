@@ -38,6 +38,13 @@ URL and token, **Test**, then choose which libraries to include. Set an
 interval for automatic sync or run it by hand. Items removed from ABS can be
 cleaned up from the same card.
 
+**Move Excluded Items to Trash** saves the library selection, then moves every
+Shelf item that came from an unchecked library to [Trash](items.md#trash).
+Audiobookshelf itself is not touched, and nothing is lost: restore any of them
+from Trash. **A sync does not bring them back on its own.** Re-checking the
+library and syncing again skips every item that is in Trash, and the summary
+counts them under **In Trash** — restore the ones you want first, then sync.
+
 **If Shelf reaches ABS at a different address than your browser does, fill in
 the Browser URL.** Shelf commonly talks to Audiobookshelf over a Docker network
 or a LAN hostname — `http://audiobookshelf:80` — while you open it through a

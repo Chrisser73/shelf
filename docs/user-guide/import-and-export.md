@@ -9,6 +9,10 @@ All under Settings → Data. Four mechanisms, each for a different job.
 | **Portable archive** | Moving Shelf to a new server, giving someone your library | **Yes** | No |
 | **Database backup** | Disaster recovery of *this* instance | No | Yes (hashed/encrypted) |
 
+**Trash is carried by the database backup only.** The CSV export and the
+portable archive contain what is in your library, not what is in
+[Trash](items.md#trash); a later release will carry deleted items through both.
+
 ## CSV export
 
 **Import / Export → Export CSV** writes one row per item:
@@ -22,6 +26,8 @@ states: owned (`1`, `0`), on your wishlist (`0`, `1`) and neither (`0`, `0`).
 Re-importing the file into an empty library brings all three back.
 
 `tags` holds the item's tags, separated by `; `.
+
+Items in [Trash](items.md#trash) are not exported.
 
 ## CSV import
 
@@ -71,6 +77,11 @@ not owned, and every other new row arrives owned.
   and wishlist state change only where the file has a value for them: a
   file without an `owned` or `wishlisted` column leaves that part of every
   matched item as it was.
+
+**A row that matches an item in Trash restores it** — it comes back as it
+was, is counted as restored in the summary, and then Skip or Update applies to
+it like any other match. Re-importing a file never adds a second copy of
+something you deleted.
 
 Those are the only two. Any other value is refused outright: the whole file is
 rejected with an error, before it is read, and nothing is written.
@@ -133,7 +144,8 @@ are planned.
 series, reading log, checkouts, **your physical copies**, **which items are
 on your wishlist** and **the cover images**. No users, passwords, API
 credentials, settings or certificates — so it's safe to hand to someone else
-or keep in a shared drive.
+or keep in a shared drive. Items in [Trash](items.md#trash), and copies
+removed on their own, are left out.
 
 Three things to know about how copies come back:
 

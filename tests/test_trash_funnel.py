@@ -1,11 +1,12 @@
-"""The four trash funnel functions, called by no route.
+"""The four trash funnel functions, proven by calling them directly.
 
 `item_write.trash_item` / `restore_item` and `item_copies.trash_copy` /
-`restore_copy` are the only writers of `deleted_at`. Nothing in `app/` calls
-them in this release — the delete sites still `DELETE` — so this file is where
-every rule they install is proven, by calling them directly. That is the whole
-point of landing them ahead of the flip: the collision rules can be shown to
-hold before any route can produce a trashed row.
+`restore_copy` are the only writers of `deleted_at`. They landed ahead of the
+flip, called by no route, so the collision rules could be shown to hold before
+any route could produce a trashed row. Since soft-delete-trash T4 the three
+soft delete sites call the trashing pair and the Trash page restores; this file
+still proves every rule at the function, which is the faster and more explicit
+seed.
 
 The source pin that holds the four-function claim lives in
 `tests/test_item_write.py::TestSingleWritePath`.
@@ -459,35 +460,25 @@ class TestMergeReparentsTrashedCopies:
 
 
 class TestNoRouteCallsThem:
-    def test_no_route_can_put_anything_into_trash(self):
-        """**No route writes `deleted_at` in the trashing direction.**
+    def test_only_the_three_soft_delete_sites_put_anything_into_trash(self):
+        """**Exactly three routes write `deleted_at` in the trashing
+        direction** — the item delete (`items.py`), the Audiobookshelf
+        excluded-library cleanup (`sync.py`) and Remove copy
+        (`item_copies.py`).
 
-        Narrowed from "no route calls any of the four" when T9 landed, and
-        the narrowing is the honest claim rather than a concession. Three
-        routes *do* call `restore_item`, by design: music's and periodicals'
-        earliest duplicate guards read a child table with no items join, so
-        a trashed row would send the user to a page that bounces to Browse
-        before the funnel is ever reached (halt 6, G100); and CSV import's
-        dedup reads find a trashed row directly (not through `insert_item`,
-        since there is no INSERT to fold it into — the row already exists)
-        and restore it before deciding skip vs. update (T11, "live wins").
-        Those restores are this plan's work.
-
-        What still makes the release invisible is the other direction:
-        nothing can *create* a trashed row, so no restore can ever fire.
-        When plan 4 flips the delete sites, this test is the one that is
-        supposed to go red.
+        This test's earlier form said *no* route could; soft-delete-trash T4
+        flipped the delete sites and narrowed it to the named three. A fourth
+        caller is a new way into Trash and should be a decision, not a
+        drive-by.
         """
         import ast
         from pathlib import Path
 
-        # `ast`, not a text scan. A grep for the four names reds on the
-        # *docstrings* that say no route calls them — `routers/item_copies.py`
-        # carries exactly that sentence — which is G53's shape: prose quoting
-        # a construct is not the construct. Only a real call counts.
+        # `ast`, not a text scan: prose naming the functions is not a call
+        # (G53's shape).
         names = {"trash_item", "trash_copy"}
         routers = Path(__file__).resolve().parents[1] / "app" / "routers"
-        offenders = []
+        callers = set()
         for path in routers.rglob("*.py"):
             tree = ast.parse(path.read_text())
             for node in ast.walk(tree):
@@ -500,13 +491,14 @@ class TestNoRouteCallsThem:
                     else None
                 )
                 if called in names:
-                    offenders.append(f"{path.name}:{node.lineno} {called}()")
-        assert not offenders, (
-            "No route may put a row into Trash in this release — the delete "
-            "sites are plan 4's:\n  " + "\n  ".join(offenders)
-        )
+                    callers.add((path.name, called))
+        assert callers == {
+            ("items.py", "trash_item"),
+            ("sync.py", "trash_item"),
+            ("item_copies.py", "trash_copy"),
+        }, f"the routes that put rows into Trash changed: {sorted(callers)}"
 
-        # And the restore side is exactly the two earliest guards, no more.
+        # And the restore side is exactly these five routers, no more.
         restorers = set()
         for path in routers.rglob("*.py"):
             for node in ast.walk(ast.parse(path.read_text())):
@@ -519,9 +511,10 @@ class TestNoRouteCallsThem:
                 )
                 if called in {"restore_item", "restore_copy"}:
                     restorers.add(path.name)
+        # trash.py is Trash's own Restore buttons (soft-delete-trash T2).
         assert restorers == {"music.py", "periodicals.py", "items_csv.py",
-                             "hardcover.py"}, (
-            "the direct restores are music's, periodicals', items_csv's and "
-            "Hardcover add-to-shelf's only — every other add path restores "
+                             "hardcover.py", "trash.py"}, (
+            "the direct restores are music's, periodicals', items_csv's, "
+            "Hardcover add-to-shelf's and Trash's own — every other add path restores "
             f"through insert_item's funnel, found: {sorted(restorers)}"
         )

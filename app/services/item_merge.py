@@ -125,7 +125,7 @@ def _reparent_copies(db, keep_id: int, other_id: int) -> None:
 def reparent_children(db, keep_id: int, other_id: int) -> None:
     """Move every child record of ``other_id`` onto ``keep_id``.
 
-    Must run before ``DELETE FROM items WHERE id = other_id``. Safe to call
+    Must run before the caller deletes the ``other_id`` row. Safe to call
     when the merged row has no children.
 
     **What is deliberately not moved, and why.** ``romm_records``,

@@ -90,6 +90,11 @@
         </div>
     </nav>
 
+    {# Admin-only; `trash_nag` is injected by the TemplateResponse wrapper in
+       app/main.py. Guarded so a hand-built environment without the key still
+       renders (G92). #}
+    {% if trash_nag %}{% include "fragments/trash_nag.html" %}{% endif %}
+
     <!-- Content -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {% block content %}{% endblock %}

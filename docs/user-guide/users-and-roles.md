@@ -5,8 +5,8 @@ logins, three roles.
 
 | Role | Can |
 |---|---|
-| **Admin** | Everything — settings, users, integrations, locations, borrowers, sync, bulk ops, backup/restore, logs, plus all editor rights |
-| **Editor** | Add / edit / delete items, all scan modes, covers, lend and return, tags, import / export CSV and archives |
+| **Admin** | Everything — settings, users, integrations, locations, borrowers, sync, bulk ops, backup/restore, logs, **delete permanently and empty expired Trash**, the Trash retention setting, plus all editor rights |
+| **Editor** | Add / edit items, delete them to Trash and restore them from Trash, all scan modes, covers, lend and return, tags, import / export CSV and archives |
 | **Viewer** | Browse, search, Series, Stats, Store Mode, set reading status on items, export CSV |
 
 Cover controls — **Find cover**, **Upload**, **Remove cover**, **Retry
@@ -15,6 +15,11 @@ The same goes for **Lend** / **Check in** and **Push to Hardcover** on the item
 page, the Series page's rename, merge and disband actions, and Discover's
 add-to-wishlist buttons: viewers get the read-only view of each, with the
 loan context and the Series list still shown.
+
+**Trash** (account menu → Library) is for editors and admins. Both can
+restore; only an admin sees **Delete permanently**, **Empty expired** and the
+banner that says when Trash holds rows past the retention window. Viewers
+cannot delete, so they have no Trash.
 
 The first account created in the setup wizard is an admin. There must always
 be at least one admin.

@@ -164,6 +164,7 @@
     <div class="w-12 h-16 bg-shelf-hover rounded flex items-center justify-center text-shelf-muted text-xs">
         {% if status == 'added' or status == 'wishlisted' or status == 'promoted' or status == 'restored' %}+
         {% elif status == 'duplicate' %}=
+        {% elif status == 'in_trash' %}&#8634;
         {% elif status in ('checked_out', 'returned', 'moved', 'confirmed', 'relocated', 'found', 'marked_read', 'elsewhere') %}&check;
         {% else %}!{% endif %}
     </div>
@@ -171,9 +172,10 @@
 
     <div class="flex-1 min-w-0">
         {# Statuses with a title link #}
-        {% if status in ('added', 'wishlisted', 'duplicate', 'checked_out', 'returned', 'moved', 'confirmed', 'relocated', 'found', 'marked_read', 'already_checked_out', 'not_checked_out', 'elsewhere', 'promoted', 'restored') %}
+        {% if status in ('added', 'wishlisted', 'duplicate', 'checked_out', 'returned', 'moved', 'confirmed', 'relocated', 'found', 'marked_read', 'already_checked_out', 'not_checked_out', 'elsewhere', 'promoted', 'restored', 'in_trash') %}
         <p class="font-medium truncate" data-scan-title>
-            {% if item_id %}<a href="/item/{{ item_id }}" class="hover:text-shelf-accent2">{{ title }}</a>
+            {# An item in Trash has no page to link to — /item/<id> bounces to Browse. #}
+            {% if item_id and status != 'in_trash' %}<a href="/item/{{ item_id }}" class="hover:text-shelf-accent2">{{ title }}</a>
             {% else %}{{ title }}{% endif %}
         </p>
         {% if authors %}<p class="text-sm text-shelf-muted truncate" data-scan-authors>{{ authors }}</p>{% endif %}
@@ -182,6 +184,21 @@
         {# Status-specific detail line #}
         {% if status == 'restored' %}
         <span data-scan-detail>Restored from Trash</span>
+        {% elif status == 'in_trash' %}
+        <p class="text-xs text-shelf-muted" data-scan-detail>In Trash since {{ (deleted_at or '')[:10] }} &mdash; restore it to lend, move or rate it</p>
+        {# A side-trip to a fixed route, so it does not read scan_action
+           (G103): it restores this item whatever mode the scan ran in, and the
+           route answers with the `restored` card in this card's place. #}
+        <form hx-post="/api/trash/items/{{ item_id }}/restore"
+              hx-target="closest .scan-result" hx-swap="outerHTML" class="mt-2">
+            <input type="hidden" name="isbn" value="{{ isbn }}">
+            <input type="hidden" name="mode" value="{{ mode }}">
+            <input type="hidden" name="render" value="scan">
+            <button type="submit" data-testid="scan-restore-from-trash"
+                    class="px-3 py-1.5 bg-shelf-accent/20 text-shelf-accent2 rounded-lg text-xs hover:bg-shelf-accent/30 transition-colors">
+                Restore
+            </button>
+        </form>
         {% elif status == 'added' %}
         <p class="text-xs text-shelf-muted">{{ media_type_label }} via {{ source }}</p>
         {% elif status == 'wishlisted' %}
@@ -268,7 +285,7 @@
     <span data-scan-badge class="text-xs px-2 py-1 rounded-full shrink-0
         {% if status in ('added', 'returned', 'confirmed', 'marked_read', 'promoted', 'restored') %}bg-shelf-success/20 text-shelf-success
         {% elif status == 'wishlisted' %}bg-purple-500/20 text-purple-400
-        {% elif status in ('duplicate', 'already_checked_out', 'not_checked_out') %}bg-shelf-warning/20 text-shelf-warning
+        {% elif status in ('duplicate', 'already_checked_out', 'not_checked_out', 'in_trash') %}bg-shelf-warning/20 text-shelf-warning
         {% elif status == 'checked_out' %}bg-orange-500/20 text-orange-400
         {% elif status in ('moved', 'found', 'relocated', 'elsewhere') %}bg-blue-500/20 text-blue-400
         {% else %}bg-shelf-error/20 text-shelf-error{% endif %}">
@@ -286,6 +303,7 @@
         {% elif status == 'marked_read' %}read
         {% elif status == 'already_checked_out' %}already lent
         {% elif status == 'not_checked_out' %}not lent
+        {% elif status == 'in_trash' %}in Trash
         {% else %}{{ status }}{% endif %}
     </span>
 </div>

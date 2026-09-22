@@ -3,8 +3,8 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-3824%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![E2E tests](https://img.shields.io/badge/e2e%20tests-257%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-3952%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![E2E tests](https://img.shields.io/badge/e2e%20tests-262%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
 A self-hosted home library catalog with barcode scanning, multi-mode scanning workflows, automatic metadata lookup, cover art, and collection management — all in a single Docker container.
@@ -32,6 +32,7 @@ Most home library apps are cloud-hosted, mobile-only, or require you to manually
 - **Video game support** — scan UPC barcodes for modern games or search IGDB by title for retro cartridges (Atari 2600, NES, SNES, etc.). Cover art, publisher, series, and platform tracking with a customizable platform list
 - **Lend with confidence** — track who borrowed what with the Lend/Return scan modes and a "Lent Out" filter on the browse page
 - **Inventory auditing** — pick a location, scan everything on the shelf, then see what's missing
+- **Delete without fear** — deleting an item or removing a copy moves it to Trash with its tags, loans, copies and history intact. Editors restore in one click; admins empty it, prompted once rows pass a retention window (180 days by default). Nothing is deleted on a timer
 - **Know what you own** — ISBNdb integration estimates your collection's value and generates a location-grouped, print-ready valuation report for insurance documentation
 
 ## Screenshots
@@ -185,7 +186,8 @@ each option before anything is sent.
 - **Stats dashboard** — books read per year, collection growth, top authors, and value-over-time charts (server-rendered SVG, no JS)
 - **Locations** — organize by room, shelf, or any system you like, and nest them: a shelf inside a bookcase inside a room. Rename or move a location and everything beneath it follows. See [Locations](docs/user-guide/locations.md)
 - **Shelf Fill** — pick a room, bookcase or shelf and it stays selected while you scan item after item onto it. Items already catalogued move without a fresh metadata lookup; unrecognised barcodes fall through to the normal Add pipeline. See [Shelf Fill](docs/user-guide/shelf-fill.md)
-- **Physical copies** — own two of something and track them apart: add a copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes. Removing the copy marked primary promotes the next one and the item's location follows it
+- **Physical copies** — own two of something and track them apart: add a copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes. Removing the copy marked primary promotes the next one and the item's location follows it. A removed copy goes to Trash with its details, not away for good
+- **Trash** — deleted items and removed copies wait in Trash (account menu → Library) with everything attached to them: restore brings them back exactly as they were, and scanning one in Lend, Move or any other existing-item mode says *In Trash* and offers Restore instead of acting on it. Admins delete permanently or empty what has passed the retention window, and get a dismissable banner when there is something to empty. See [Items → Trash](docs/user-guide/items.md#trash)
 - **Arrange a shelf** — any location gets an Arrange page where you drag the physical copies into the order they actually sit in, or order them automatically by title, creator, series, release or issue. The order belongs to the copy, so duplicates stay distinct and can sit side by side
 - **Related media groups** — connect the different forms of one work (a novel, its audiobook, its film adaptation) as `format`, `related` or `adaptation`. Every item shows its whole group in a panel on the item page, with direct links marked apart from the ones reached through a third item; editors search the catalogue to add a relationship, viewers see the group read-only. A group is the connected set of links, so linking A to B and B to C presents all three. Matching is manual by design. See [Related Media](docs/related-media.md)
 - **Game platforms** — customizable list of platforms, add your own for niche or retro systems
@@ -269,8 +271,8 @@ marked `noindex`, and revocable at any time.
 
 | Role | Can do |
 |------|--------|
-| **Admin** | Everything: settings, users, locations, sync, bulk ops, logs |
-| **Editor** | Add/edit/delete items, scan (all modes), covers (find/upload/paste URL/remove, and the cover review queue), checkout/checkin, import/export |
+| **Admin** | Everything: settings, users, locations, sync, bulk ops, logs, delete permanently / empty Trash |
+| **Editor** | Add/edit items, delete to Trash and restore, scan (all modes), covers (find/upload/paste URL/remove, and the cover review queue), checkout/checkin, import/export |
 | **Viewer** | Browse, search, reading status, export CSV, view stats |
 
 ## Metadata Sources

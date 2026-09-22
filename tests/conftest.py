@@ -99,6 +99,11 @@ def _isolated_db(tmp_path, monkeypatch):
     import app.services.item_copies as item_copies_mod
     item_copies_mod.reset_column_cache()
 
+    # Reset the Trash expired-count cache — one test's trashed rows and
+    # retention setting would otherwise answer the next test's count (G13).
+    import app.services.trash as trash_mod
+    monkeypatch.setattr(trash_mod, "_cache", None)
+
     # Reset the IGDB token cache — otherwise one test's cached OAuth token
     # leaks into the next test's credential pair.
     import app.services.igdb as igdb_mod

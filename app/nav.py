@@ -33,10 +33,12 @@ NAV_TABS = [
     {"key": "periodicals", "label": "Periodicals", "path": "/periodicals"},
     {"key": "discover", "label": "Discover", "path": "/discover", "requires": "hardcover"},
     {"key": "stats", "label": "Stats", "path": "/stats"},
+    {"key": "trash", "label": "Trash", "path": "/trash", "roles": ("admin", "editor"),
+     "menu": "account", "heading": "Library"},
     {"key": "settings", "label": "Settings", "path": "/settings", "roles": ("admin",),
-     "menu": "account"},
+     "menu": "account", "heading": "Administration"},
     {"key": "logs", "label": "Logs", "path": "/logs", "roles": ("admin",),
-     "menu": "account"},
+     "menu": "account", "heading": "Administration"},
 ]
 
 # The page that controls visibility must stay reachable, and so must the
@@ -177,6 +179,7 @@ def visible_tabs(user: dict | None) -> list[dict]:
             "label": tab["label"],
             "path": tab["path"],
             "menu": tab.get("menu", ""),
+            "heading": tab.get("heading", ""),
         })
     return tabs
 

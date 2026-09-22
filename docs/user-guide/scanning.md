@@ -24,7 +24,7 @@ The mode is sticky — set it once and scan a pile.
 
 | Mode | What happens on each scan |
 |---|---|
-| **Add** | Look up metadata, download the cover, add the item as owned. Scanning a barcode you already own shows the existing item instead of duplicating it — whatever the media-type dropdown says. Scanning something on your wishlist marks it owned and takes it off the wishlist (*Now owned*). A dropdown pick the barcode contradicts is corrected rather than obeyed (see [Media types](#media-types)) |
+| **Add** | Look up metadata, download the cover, add the item as owned. Scanning a barcode you already own shows the existing item instead of duplicating it — whatever the media-type dropdown says. Scanning something on your wishlist marks it owned and takes it off the wishlist (*Now owned*). Scanning something you deleted brings it back from Trash as it was (*Restored from Trash*) rather than adding a second record. A dropdown pick the barcode contradicts is corrected rather than obeyed (see [Media types](#media-types)) |
 | **Wishlist** | Same lookup, but the item is added to your wishlist, not as owned. A barcode already in your library is left as it is |
 | **Lend** | Pick a borrower first; each scan checks that item out to them. Optional due date |
 | **Return** | Each scan checks the item back in, whoever had it |
@@ -34,6 +34,15 @@ The mode is sticky — set it once and scan a pile.
 | **Quick Rate** | Marks the item as read / finished with today's date |
 
 The Scan tab is for editors and admins; viewers don't see it.
+
+### Scanning an item that is in Trash
+
+**Lend, Return, Move, Inventory, Lookup and Quick Rate never act on an item in
+[Trash](items.md#trash).** The card says *In Trash since* the date it was
+deleted, with an amber **in Trash** badge, and nothing else happens: no loan,
+no move, no rating, no inventory mark. A **Restore** button on the card brings
+the item back, and the card turns into *Restored from Trash*; scan it again to
+lend, move or rate it. Both scans appear in Recent scans.
 
 ### Auditing a shelf with more than one copy
 

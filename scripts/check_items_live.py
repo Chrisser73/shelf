@@ -74,7 +74,7 @@ VIOLATION_MSG = (
 # needed here — nothing in app/ does `yield from item_copies` or
 # `from item_copies import x` today, unlike the items case (see the
 # `_ITEMS_READ` comment above) — but the DELETE exclusion still applies:
-# app/services/item_copies.py has two `DELETE FROM item_copies ...`
+# app/services/item_copies.py has three `DELETE FROM item_copies ...`
 # statements (writes, stay on the physical table). `\b` does not split on
 # `_`, so `copies_live` never matches.
 _COPIES_READ = re.compile(r"(?<!DELETE )\b(FROM|JOIN)\s+item_copies\b", re.I)
@@ -162,6 +162,36 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         # title to report here.
         "SELECT title FROM items WHERE id = ? AND deleted_at IS NOT NULL": 1,
     },
+    "app/services/trash.py": {
+        # expired_count's two halves. It counts exactly the rows the views
+        # hide: trashed items, and trashed copies whose item is live (the
+        # item join is physical so the copy half can ask that itself).
+        "(SELECT COUNT(*) FROM items i WHERE": 1,
+        "(SELECT COUNT(*) FROM item_copies c JOIN items i "
+        "ON i.id = c.item_id AND i.deleted_at IS NULL WHERE": 1,
+        # expired_ids — what Empty expired purges, chosen under its lock.
+        # Same two halves as the count, returning ids.
+        "SELECT i.id FROM items i WHERE": 1,
+        "SELECT c.id FROM item_copies c JOIN items i ON i.id = c.item_id "
+        "AND i.deleted_at IS NULL WHERE": 1,
+        # copy_state — tells restore_copy's three None outcomes apart; must
+        # see a trashed copy and a trashed item, which the views hide.
+        "FROM item_copies c JOIN items i ON i.id = c.item_id WHERE c.id = ?": 1,
+        # purge_item's guard — a purge starts from the row items_live hides.
+        "SELECT id FROM items WHERE id = ? AND deleted_at IS NOT NULL": 1,
+        # listing()'s item half — the Trash page itself, so it must see the
+        # rows items_live hides by definition.
+        "FROM items i WHERE i.deleted_at IS NOT NULL": 1,
+        # listing()'s copy half — the JOIN to items is part of the read
+        # (G107): a copy's group heading needs to know whether its item is
+        # live or trashed, which items_live cannot answer either way. The
+        # full span (through the WHERE) keeps this text from also spanning
+        # copy_state's shorter "...c.item_id WHERE c.id = ?" match above —
+        # a short prefix here would ride along on that one too (G105).
+        "FROM item_copies c JOIN items i ON i.id = c.item_id "
+        "LEFT JOIN locations l ON l.id = c.location_id "
+        "WHERE c.deleted_at IS NOT NULL": 1,
+    },
     "app/services/audiobookshelf.py": {
         # The ABS external-id matcher. Physical so a trashed row is SEEN and
         # skipped — through the view an ISBN-less item would miss and the
@@ -195,8 +225,10 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         "AND deleted_at IS NOT NULL LIMIT 1": 1,
     },
     "app/routers/items.py": {
-        # _find_item_by_barcode's existing-item scan modes must find a
-        # soft-deleted row so the next plan can restore it.
+        # _find_item_by_barcode — the existing-item scan modes must find a
+        # row in Trash so they can report it and offer Restore instead of
+        # "not in your collection". Ordered live-first: an ISBN held by a
+        # live row and a trashed one (different media types) answers live.
         "SELECT i.*, l.name as location_name FROM items i "
         "LEFT JOIN locations l ON i.location_id = l.id WHERE i.isbn = ?": 1,
         "SELECT i.*, l.name as location_name FROM items i "
@@ -270,6 +302,9 @@ COPIES_ALLOWLIST: dict[str, dict[str, int]] = {
         # here would make the function a silent no-op.
         "SELECT id, item_id, location_id FROM item_copies "
         "WHERE id = ? AND deleted_at IS NOT NULL": 1,
+        # purge_copy — the same class as restore_copy's read: a purge starts
+        # from the trashed copy no view will return.
+        "SELECT id FROM item_copies WHERE id = ? AND deleted_at IS NOT NULL": 1,
     },
     "app/services/item_merge.py": {
         # _reparent_copies — numbers the losing item's copies above the
@@ -295,6 +330,24 @@ COPIES_ALLOWLIST: dict[str, dict[str, int]] = {
         # above, for the same reason.)
         "SELECT c.id AS copy_id, c.item_id, i.title FROM item_copies c "
         "JOIN items i ON i.id = c.item_id WHERE c.copy_barcode = ?": 1,
+    },
+    "app/services/trash.py": {
+        # expired_count's copy half — finds the trashed copies the view
+        # hides, counted only while their item is live.
+        "(SELECT COUNT(*) FROM item_copies c JOIN items i "
+        "ON i.id = c.item_id AND i.deleted_at IS NULL WHERE": 1,
+        # expired_ids' copy half and copy_state — both find trashed copies
+        # the view hides (see the items ALLOWLIST entries for this path).
+        "SELECT c.id FROM item_copies c JOIN items i ON i.id = c.item_id "
+        "AND i.deleted_at IS NULL WHERE": 1,
+        "FROM item_copies c JOIN items i ON i.id = c.item_id WHERE c.id = ?": 1,
+        # listing()'s copy half — same reasoning as the items ALLOWLIST
+        # entry above (a copy group must see a trashed copy no view returns,
+        # and its item's live/trashed state for the heading link); same full
+        # span for the same reason.
+        "FROM item_copies c JOIN items i ON i.id = c.item_id "
+        "LEFT JOIN locations l ON l.id = c.location_id "
+        "WHERE c.deleted_at IS NOT NULL": 1,
     },
     "app/services/archive.py": {
         # Archive import — same copy_barcode UNIQUE conflict check as

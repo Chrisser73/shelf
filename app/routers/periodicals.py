@@ -207,9 +207,10 @@ async def confirm_periodical_issue(
 async def periodicals_page(request: Request, _=Depends(require_role("viewer"))):
     with get_db() as db:
         publications = db.execute(
-            """SELECT p.*, COUNT(pi.item_id) AS issue_count
+            """SELECT p.*, COUNT(il.id) AS issue_count
                FROM periodical_publications p
                LEFT JOIN periodical_issues pi ON pi.publication_id = p.id
+               LEFT JOIN items_live il ON il.id = pi.item_id
                GROUP BY p.id
                ORDER BY p.title COLLATE NOCASE"""
         ).fetchall()

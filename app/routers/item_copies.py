@@ -13,7 +13,7 @@ pattern `routers/tags.py` uses for the tag chips, and the two GETs are the
 panel and the collapsed block Cancel restores.
 
 **Every write goes through `app.services.item_copies`** — `add_copy`,
-`update_copy` and `delete_copy`. The source-scanning guards in
+`update_copy` and `trash_copy`. The source-scanning guards in
 `tests/test_item_write.py` refuse a raw statement against this table from any
 module but the service, matched by repository-relative path, so a module named
 like the service earns no exemption (G88). Describe the funnel by function
@@ -324,17 +324,14 @@ async def remove_copy(
     copy_id: int,
     _=Depends(require_role("editor")),
 ):
-    """Remove one copy, permanently. Its condition, acquisition detail and
-    provenance go with it — the row is deleted rather than marked, which is
-    why the control is guarded by an `hx-confirm` naming what is lost.
-    `item_copies` carries a `deleted_at` column and every read here goes
-    through the `copies_live` view that filters on it, and the service now
-    holds `trash_copy` / `restore_copy` — but **no route calls them**, this
-    one included, so removal here is still a `DELETE`.
+    """Move one copy to Trash. Reversible from the Trash page, where it is
+    listed under its item with its condition, acquisition detail and
+    provenance intact; only an admin's Delete permanently removes the row.
 
-    Removing the primary promotes the lowest-numbered survivor and re-points
-    the seam; removing the last copy nulls the seam and leaves the item
-    standing. Both rules live in the service.
+    The primary and last-copy rules are unchanged: removing the primary
+    promotes the lowest-numbered survivor and re-points the seam; removing
+    the last copy nulls the seam and leaves the item standing. Both rules
+    live in the service (`trash_copy`).
     """
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
@@ -346,5 +343,5 @@ async def remove_copy(
             db.rollback()
             return _refusal("Copy not found", 404)
 
-        item_copies.delete_copy(db, copy_id)
+        item_copies.trash_copy(db, copy_id)
         return _render_block(request, db, item_id)

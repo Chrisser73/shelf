@@ -26,6 +26,28 @@ Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
 
+### After upgrading to 0.46.0
+
+**Delete now moves things to Trash.** Deleting an item — from its page, from
+Browse's bulk delete, or by the Audiobookshelf excluded-library cleanup — and
+removing a copy no longer delete anything. The item or copy goes to
+[Trash](user-guide/items.md#trash) (account menu → Library) with everything
+attached to it, and **Restore** brings it back. Only an admin's **Delete
+permanently** or **Empty expired** removes a row for good. Merging records
+still removes the merged record, as before.
+
+**Nothing you deleted before this upgrade comes back.** Those deletes were
+permanent when you made them; Trash starts empty.
+
+**The retention window defaults to 180 days** (Settings → Library → Trash).
+Past it, admins see a banner offering to empty the expired rows; nothing is
+deleted automatically.
+
+**No migrations run.** The columns Trash uses shipped earlier, empty.
+
+**Exports leave Trash out.** The CSV export and the portable archive contain
+only what is not in Trash; the database backup carries everything.
+
 ### After upgrading to 0.43.0
 
 **Kids books become books with a tag.** `kids_book` was a media type that had

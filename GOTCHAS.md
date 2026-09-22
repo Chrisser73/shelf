@@ -309,6 +309,13 @@ grep -n "htmx.process" static/js/browse.js                  # expect >= 1, in th
   `cdf32ca` (2026-08-19, nav cache wired into the same resets);
   `03b93f0` (2026-08-24, issue #36 — `igdb._token_cache`, a cache that had
   been leaking across tests on `main` since IGDB was added).
+- **A cache its writers invalidate is blind to a raw write.** An E2E test
+  that backdates or inserts through sqlite directly, after the server has
+  already populated a module cache, reads the stale value until the TTL
+  lapses — `trash.expired_count()` holds for an hour. Seed before the first
+  render that fills the cache, or trigger an invalidation through the app
+  (`tests/e2e/test_trash.py` posts the unchanged retention setting;
+  `a41b16d`, 2026-09-21). The unit suite's per-test reset hides this.
 - **Verify:** the isolation suite still passes and the known caches are
   reset: `python -m pytest tests/test_conftest_isolation.py -q` and
   `grep -c "_cached\|_token_cache" tests/conftest.py` (expect ≥ 4). The
@@ -4914,6 +4921,13 @@ EOF
 python -m pytest tests/test_copies_live_contract.py -q
 ```
 
+- **A physical read that can match a live row *and* a trashed one must order
+  live first** (`ORDER BY deleted_at IS NOT NULL, id`). A `UNIQUE(isbn,
+  media_type)` slot does not stop one ISBN being held by a live book and a
+  trashed audiobook, so an unordered `fetchone()` picks arbitrarily.
+  `_find_item_by_barcode` had no `ORDER BY` for as long as nothing could be
+  trashed; the soft-delete flip made it answer "in Trash" over a live row
+  (`31ff477`, 2026-09-21, pinned in `tests/test_scan_modes.py::TestScanInTrash`).
 - **Status:** documented; census of violations zero (`make check-deleted`).
   Not a lint candidate — only a human can say whether a given read exists to
   predict a constraint or to answer a question about the collection.
@@ -5181,10 +5195,70 @@ grep -rn "keeps_stored_cover\|restored_card" app/ | grep -v "def "
   None of these was a careless review. An enumeration is written from the
   sites someone looked at, and the misses are the ones nobody opened.
 - **Evidence:** the tracker NOTEs on T1 (`0d67f62`), T7 (`e858c8c`), T8
-  (`792f33d`) and T12 (`080db1e`).
+  (`792f33d`) and T12 (`080db1e`). Again on `feat/soft-delete-trash`
+  (2026-09-21): the plan named **3** `delete_copy` test callers to re-aim and
+  there were **8** (caught by the prep review); the remove-copy confirm lived in
+  a different template from the one named; a hard-delete pin in
+  `tests/test_tags.py` was on no list at all (`1ba6e7f`); and the Komga/RomM
+  docs the plan told T9 to amend describe a cleanup those integrations do not
+  have.
 - **Verify:** judgement. When you tick off a named list, write down how many
   sites you found beside how many were named.
 - **Status:** documented. Not a lint candidate.
+
+## G114 — When a row can be hidden instead of deleted, and a child keeps its foreign key
+
+- **Rule:** a child column pointing at a soft-deletable row no longer means
+  "that row exists and can be shown". Every consumer that **links, renders or
+  acts on** the child's foreign key must key on a join to the live view
+  (`LEFT JOIN items_live i … i.id AS live_item_id`), not on the child's own
+  column. Walk the consumers — templates included — before the flip, not
+  after.
+- **Why:** the hard delete used to null or cascade the child, so "the FK is
+  set" and "the parent is live" were the same fact and every template could
+  test either. Soft delete splits them silently: the query already joins the
+  live view for its *columns*, so it looks correct, while the template tests
+  the *child's* id and renders a link to a page that bounces to Browse. No
+  test fails, because no test ever had a trashed parent to render.
+- **Evidence:** `feat/soft-delete-trash` T4 (`1ba6e7f`, 2026-09-21).
+  `delete_item` stopped nulling `scan_log.item_id` by design; the recent-scans
+  strip's SELECT joined `items_live`, and the plan read that as "already
+  handled" — but `fragments/recent_scans.html` linked on `scan.item_id`. Found
+  in orchestrator review while re-aiming a pin; fixed with `live_item_id` and
+  pinned in `tests/test_items.py::TestDeleteItem`.
+- **Verify:** for each child table whose FK survives a soft delete, grep its
+  render sites for the raw column:
+
+```bash
+grep -rn "scan\.item_id\|sl\.item_id" app/templates/ app/routers/
+# every hit that builds a link or a cover URL must read the live join instead
+```
+
+- **Status:** documented. Only `scan_log` keeps its link today (every other
+  child is `ON DELETE CASCADE` and simply stays hidden with its parent).
+
+## G115 — When the code under test swallows exceptions, and the pin stubs a callee to raise
+
+- **Rule:** a pin of the form "patch X to raise; the request still succeeds,
+  so X was not called" is **vacuous** when the caller wraps X in `try/except`.
+  The raise is caught, the response is the same either way, and the pin
+  cannot go red. Record calls instead (`calls.append(...)`) and assert the
+  list is empty.
+- **Why:** a caller that degrades gracefully is the right design — a banner
+  that fails to load must never take the page down — and that is exactly the
+  shape that defeats the stub. The mutation test is what catches it: move the
+  guard and the pin stays green.
+- **Evidence:** `feat/soft-delete-trash` T7 (`36f3a2b`, 2026-09-21). The plan
+  asked for "patch `trash.nag_state` to raise, render, 200" to prove a
+  non-admin render reaches no Trash code; the `TemplateResponse` wrapper
+  catches any Trash failure. Rewritten to record calls; the mutation (role
+  check moved from the wrapper into `nag_state`) then went red.
+- **Verify:** for a pin that stubs with `side_effect=`/a raising lambda, check
+  whether any frame between the request and the stub has an `except
+  Exception:`. If one does, the pin must assert on calls, not on the status.
+- **Status:** documented. Lint candidate in part — a raising stub in a test
+  whose target module contains `except Exception` is findable, but whether the
+  frame is on the path is not.
 
 ## Graveyard
 

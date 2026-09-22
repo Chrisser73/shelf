@@ -334,7 +334,7 @@ def test_item_delete(live_server, authed_page):
     with authed_page.expect_navigation():
         delete_btn.click()
 
-    assert messages == ["Delete 'Book To Delete'?"]
+    assert messages == ["Move 'Book To Delete' to Trash?"]
 
     # Should be gone — either redirected to browse or item no longer shows
     if "/item/" not in authed_page.url:

@@ -109,6 +109,12 @@ async def checkout_item(
         due = None
 
     with get_db() as db:
+        # Lock first: an item trashed or lent between these reads and the
+        # INSERT would otherwise get a loan anyway (G18).
+        db.execute("BEGIN IMMEDIATE")
+        # A stale item page can still post here after the item went to Trash.
+        if db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone() is None:
+            return JSONResponse({"ok": False, "message": "Item not found"}, status_code=404)
         # Check not already checked out
         active = db.execute(
             "SELECT id FROM checkouts WHERE item_id = ? AND checked_in IS NULL", (item_id,)

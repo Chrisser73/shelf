@@ -27,7 +27,7 @@ from app.services.item_write import (IdentifierInTrash, ItemValueError,
                                      insert_item, update_item_fields,
                                      update_items_fields, validate_item_fields,
                                      validated_location_id)
-from app.services import item_write  # _coerce_owned (bulk update), promote_wishlisted (scan)
+from app.services import item_write  # _coerce_owned (bulk update), promote_wishlisted (scan), trash_item (delete)
 from app.services import openlibrary, googlebooks, hardcover, covers, national
 from app.services import detect
 from app.services import cover_queue
@@ -102,7 +102,8 @@ def _find_item_by_barcode(raw: str) -> dict | None:
         if isbn13:
             item = db.execute(
                 "SELECT i.*, l.name as location_name FROM items i "
-                "LEFT JOIN locations l ON i.location_id = l.id WHERE i.isbn = ?",
+                "LEFT JOIN locations l ON i.location_id = l.id WHERE i.isbn = ? "
+                "ORDER BY i.deleted_at IS NOT NULL, i.id",  # live wins over Trash
                 (isbn13,),
             ).fetchone()
             if item:
@@ -110,7 +111,8 @@ def _find_item_by_barcode(raw: str) -> dict | None:
         if upc_norm:
             item = db.execute(
                 "SELECT i.*, l.name as location_name FROM items i "
-                "LEFT JOIN locations l ON i.location_id = l.id WHERE i.upc = ?",
+                "LEFT JOIN locations l ON i.location_id = l.id WHERE i.upc = ? "
+                "ORDER BY i.deleted_at IS NOT NULL, i.id",  # live wins over Trash
                 (upc_norm,),
             ).fetchone()
             if item:
@@ -370,6 +372,8 @@ async def scan_isbn(
     if mode in _EXISTING_ITEM_MODES:
         lookup_barcode = legacy_isbn13 if legacy_candidates else raw
         item = _find_item_by_barcode(lookup_barcode)
+        if item and item.get("deleted_at"):  # in Trash: report, never act
+            return items_scan_modes._scan_mode_in_trash(request, templates, item, raw, mode)
         # inventory mode handles not-found specially
         if mode == "inventory":
             return items_scan_modes._scan_mode_inventory(
@@ -1167,7 +1171,10 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
             "SELECT isbn, upc, media_type, series_name FROM items_live WHERE id = ?",
             (item_id,),
         ).fetchone()
-        old_series_name = row["series_name"] if row else None
+        # Missing or in Trash — a stale edit form must not write to either.
+        if row is None:
+            return HTMLResponse("Not found", status_code=404)
+        old_series_name = row["series_name"]
 
         # #87: the edit form re-posts every named control on every save,
         # including a stored ISBN/UPC that predates the validator — which
@@ -1184,13 +1191,12 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         # correct, since an unchanged identifier cannot newly collide, but
         # worth re-reading if a future branch is added below this guard
         # that answers the same "did this identifier change" question (G68).
-        if row is not None:
-            if (fields.get("isbn") is not None and fields["isbn"] == row["isbn"]
-                    and isbn_svc.canonical_isbn_pair(fields["isbn"]) is None):
-                del fields["isbn"]
-            if (fields.get("upc") is not None and fields["upc"] == row["upc"]
-                    and not upc_svc.canonical_retail_barcode(fields["upc"])[0]):
-                del fields["upc"]
+        if (fields.get("isbn") is not None and fields["isbn"] == row["isbn"]
+                and isbn_svc.canonical_isbn_pair(fields["isbn"]) is None):
+            del fields["isbn"]
+        if (fields.get("upc") is not None and fields["upc"] == row["upc"]
+                and not upc_svc.canonical_retail_barcode(fields["upc"])[0]):
+            del fields["upc"]
 
         if not fields:
             return RedirectResponse(url=redirect_url, status_code=303)
@@ -1211,8 +1217,6 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         if fields.get("upc"):
             effective_media_type = fields.get("media_type")
             if effective_media_type is None:
-                if row is None:
-                    return HTMLResponse("Not found", status_code=404)
                 effective_media_type = row["media_type"]
             conflict = db.execute(
                 "SELECT id FROM items_live WHERE upc = ? AND media_type = ? AND id != ? LIMIT 1",
@@ -1439,45 +1443,16 @@ async def backfill_synopses_stream(request: Request, _=Depends(require_role("adm
 
 @router.delete("/items/{item_id}")
 async def delete_item(item_id: int, _=Depends(require_role("editor"))):
+    """Move one item to Trash. Reversible from the Trash page: its copies,
+    loans, tags, links and scan history stay attached and return with it.
+    A second call on the same id is a no-op and still answers 200."""
     with get_db() as db:
         row = db.execute("SELECT title FROM items_live WHERE id = ?", (item_id,)).fetchone()
         title = row["title"] if row else "Item"
-        # Clear scan_log FK (no ON DELETE CASCADE on that table)
-        db.execute("UPDATE scan_log SET item_id = NULL WHERE item_id = ?", (item_id,))
-        db.execute("DELETE FROM items WHERE id = ?", (item_id,))
+        item_write.trash_item(db, item_id)
     resp = HTMLResponse('{"ok": true}', headers={"Content-Type": "application/json"})
-    resp.headers["HX-Trigger"] = items_common._toast_header(f"Deleted: {title[:50]}")
+    resp.headers["HX-Trigger"] = items_common._toast_header(f"Moved to Trash: {title[:50]}")
     return resp
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 @router.get("/recent-scans")
@@ -1490,7 +1465,7 @@ async def recent_scans(
     templates = request.app.state.templates
     with get_db() as db:
         scans = db.execute(
-            "SELECT sl.*, i.title, i.authors, i.cover_path "
+            "SELECT sl.*, i.id AS live_item_id, i.title, i.authors, i.cover_path "
             "FROM scan_log sl LEFT JOIN items_live i ON sl.item_id = i.id "
             "WHERE sl.mode = ? ORDER BY sl.created_at DESC LIMIT 20",
             (mode,),

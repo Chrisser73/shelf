@@ -57,7 +57,9 @@ class TestDeleteItem:
         assert resp.status_code in (401, 403)
 
     def test_delete_with_scan_log_entries(self, admin_client, db):
-        """Items with scan_log entries should delete cleanly (FK nullified)."""
+        """Delete moves the item to Trash and leaves its scan history linked,
+        so a restore finds it; the recent-scans strip renders the row unlinked
+        meanwhile, because it joins items_live."""
         item_id = _insert_item(db, title="Scanned Book", isbn="9780000002037")
         db.execute(
             "INSERT INTO scan_log (isbn, media_type, result, item_id, mode) VALUES (?, ?, ?, ?, ?)",
@@ -73,10 +75,32 @@ class TestDeleteItem:
             assert item is None
             log = check_db.execute("SELECT item_id FROM scan_log WHERE isbn = '9780000002037'").fetchone()
             assert log is not None
-            assert log["item_id"] is None
+            assert log["item_id"] == item_id
+        # The strip still lists the scan, unlinked: its item is in Trash.
+        strip = admin_client.get("/api/recent-scans", params={"mode": "add"}).text
+        assert "9780000002037" in strip
+        assert f'href="/item/{item_id}"' not in strip
 
-    def test_delete_with_checkout_cascades(self, admin_client, db):
-        """Deleting an item with checkouts should cascade delete them."""
+    def test_delete_moves_the_row_to_trash(self, admin_client, db):
+        item_id = _insert_item(db, title="Trash Bound", isbn="9780000002051")
+        db.commit()
+        resp = admin_client.delete(f"/api/items/{item_id}")
+        assert resp.status_code == 200
+        assert "Moved to Trash: Trash Bound" in resp.headers["HX-Trigger"]
+        with get_db() as check_db:
+            row = check_db.execute(
+                "SELECT deleted_at FROM items WHERE id = ?", (item_id,)
+            ).fetchone()
+            assert row is not None and row["deleted_at"] is not None
+            assert check_db.execute(
+                "SELECT 1 FROM items_live WHERE id = ?", (item_id,)
+            ).fetchone() is None
+        # A second delete is a no-op, not an error.
+        assert admin_client.delete(f"/api/items/{item_id}").status_code == 200
+
+    def test_delete_keeps_the_loan_hidden_and_restore_brings_it_back(self, admin_client, db):
+        """Delete no longer cascades: the loan survives, hidden from every
+        lent-out count, and returns with the item."""
         item_id = _insert_item(db, title="Checked Out", isbn="9780000002044")
         bid = _insert_borrower(db, "Test")
         db.execute(
@@ -87,9 +111,20 @@ class TestDeleteItem:
         resp = admin_client.delete(f"/api/items/{item_id}")
         assert resp.status_code == 200
 
+        from app.services import item_write
+        from app.services.home_dashboard import dashboard_summary
+
         with get_db() as check_db:
             checkout = check_db.execute("SELECT id FROM checkouts WHERE item_id = ?", (item_id,)).fetchone()
-            assert checkout is None
+            assert checkout is not None
+            assert dashboard_summary(check_db)["lent_out_count"] == 0
+        browse = admin_client.get("/api/search", params={"lent_out": "1"}).text
+        assert "Checked Out" not in browse
+
+        with get_db() as check_db:
+            assert item_write.restore_item(check_db, item_id)
+        with get_db() as check_db:
+            assert dashboard_summary(check_db)["lent_out_count"] == 1
 
 
 class TestBrowseLentOutFilter:

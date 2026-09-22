@@ -10,20 +10,19 @@ used by the existing UI. The primary copy mirrors that value when one exists;
 secondary copies are never moved by legacy item writes.
 
 **The write funnel.** ``insert_copy`` and ``update_copy`` are the only way a
-row reaches or changes in this table, and ``delete_copy`` /
-``delete_copies_for_item`` the only way one leaves it, exactly as
+row reaches or changes in this table, and ``purge_copy`` (Trash's Delete
+permanently) and ``delete_copies_for_item`` (the archive import's placeholder
+removal) the only ways one leaves it, exactly as
 ``item_write.insert_item`` is for ``items``. ``add_copy`` is the funnel's
 front door for the item page: it owns numbering and the primary decision, so
 no caller has to reproduce either.
 
-**Trash is a third arm, and no route reaches it yet.** ``trash_copy`` and
-``restore_copy`` are the only writers of ``deleted_at`` here — the twin of
+**Trash is how a copy is removed.** ``trash_copy`` and ``restore_copy`` are
+the only writers of ``deleted_at`` here — the twin of
 ``item_write.trash_item`` / ``restore_item`` for ``items`` — and both funnels
 refuse the column as a caller-supplied field name, so it cannot be reached
-through ``insert_copy`` or ``update_copy`` either. Nothing in ``app/`` calls
-the two functions in this release: removal in the UI is still a ``DELETE``.
-They exist so that the collision rules around a trashed row can be installed
-and proven before the delete sites are flipped.
+through ``insert_copy`` or ``update_copy`` either. The item page's Remove copy
+calls ``trash_copy``; the Trash page restores and purges.
 Column names are validated against ``PRAGMA table_info(item_copies)``, so an
 unknown column raises instead of being silently dropped, and unset columns are
 left out of the statement so the ``SCHEMA`` defaults apply. Two set-based
@@ -57,6 +56,8 @@ location keeps the position.
 
 from collections.abc import Mapping
 from typing import Any
+
+from app.services import trash
 
 #: Columns a caller may never set on insert — the database owns them.
 #: `deleted_at` is owned by `trash_copy` / `restore_copy` below and by nothing
@@ -309,7 +310,7 @@ def _lowest_numbered_copy(db, item_id: int):
     list is the one that gets promoted. Returns `None` when the item has no
     copies left.
 
-    Caller must already hold the write lock (see `delete_copy`).
+    Caller must already hold the write lock (see `trash_copy`).
     """
     return db.execute(
         "SELECT id, location_id FROM copies_live WHERE item_id = ? "
@@ -330,7 +331,7 @@ def add_copy(db, item_id: int, fields: Mapping[str, Any] | None = None) -> int:
     what `sync_primary_location` would have produced for the same input, and
     the legacy `items.location_id` seam is re-pointed at that copy so the
     primary and the seam still mirror each other (the invariant in this
-    module's docstring, and what `delete_copy`'s promotion preserves from the
+    module's docstring, and what `trash_copy`'s promotion preserves from the
     other direction). An item that already has a copy gets a **secondary**:
     `is_primary` is 0, the existing primary is untouched, and the seam does
     not move — adding a second copy is not a move of the first.
@@ -391,62 +392,16 @@ def add_copy(db, item_id: int, fields: Mapping[str, Any] | None = None) -> int:
     return copy_id
 
 
-def delete_copy(db, copy_id: int) -> dict[str, Any] | None:
-    """Remove one physical copy, promoting a survivor when it was the primary.
-
-    Returns `None` when no such copy exists. Otherwise a dict the caller can
-    render from: `item_id`, `was_primary`, `promoted_copy_id` (the survivor
-    that inherited primary, or `None`) and `remaining` (how many copies the
-    item has left).
-
-    Three outcomes, and the seam moves in two of them:
-
-    - **A secondary goes.** Nothing else changes; `items.location_id` and the
-      primary copy are untouched.
-    - **The primary goes and others survive.** The lowest-numbered survivor is
-      promoted and the seam is re-pointed at *its* location, so Browse, CSV
-      export, the archive and Scan keep reading a real location rather than a
-      new null. Silent by design — the design plan settled that this is not
-      announced.
-    - **The last copy goes.** The seam is set to NULL. The item row itself is
-      **not** deleted: a located item with no copies is a legitimate state
-      (G86), and so is an unlocated one.
-
-    Removal through the UI is permanent — condition, acquisition detail and
-    provenance go with the row. `trash_copy` below is the reversible path, and
-    **no route calls it in this release**, so this is still a `DELETE`.
-
-    Caller must hold the write lock. The read that chooses the survivor and
-    the writes that promote it are one serialized unit, and the copy row is
-    re-read here rather than trusted from the caller's earlier read, because a
-    bare `SELECT` takes no lock under sqlite3's deferred isolation (G18).
-    Every route here opens its block with `BEGIN IMMEDIATE`.
-    """
-    copy = db.execute(
-        "SELECT id, item_id, is_primary FROM copies_live WHERE id = ?",
-        (copy_id,),
-    ).fetchone()
-    if copy is None:
-        return None
-
-    item_id = copy["item_id"]
-    was_primary = bool(copy["is_primary"])
-    db.execute("DELETE FROM item_copies WHERE id = ?", (copy_id,))
-    return _settle_after_removal(db, item_id, was_primary)
-
-
 def _settle_after_removal(db, item_id: int, was_primary: bool) -> dict[str, Any]:
     """Promote a survivor and re-point the seam, after a copy has gone.
 
-    Shared by `delete_copy` and `trash_copy`, which differ only in *how* the
-    copy leaves — one removes the row, the other stamps it out of
-    `copies_live`. Everything after that is the same decision, and the two
-    writes below are order-dependent (G96), so they are written once rather
-    than copied.
+    Called by `trash_copy` once the copy is stamped out of `copies_live`. The
+    two writes below are order-dependent (G96). A purge needs no settle: the
+    copy was settled when it was trashed.
 
-    Caller must already have removed the copy and must hold the write lock.
-    `was_primary` is read from the copy **before** it goes, because neither
-    caller can ask afterwards.
+    Caller must already have removed the copy from the view and must hold the
+    write lock. `was_primary` is read from the copy **before** it goes,
+    because the caller cannot ask afterwards.
     """
     survivor = _lowest_numbered_copy(db, item_id)
     promoted_copy_id = None
@@ -480,12 +435,24 @@ def _settle_after_removal(db, item_id: int, was_primary: bool) -> dict[str, Any]
 
 
 def trash_copy(db, copy_id: int) -> dict[str, Any] | None:
-    """Move one physical copy to Trash, promoting a survivor as a delete would.
+    """Move one physical copy to Trash, promoting a survivor when it was primary.
 
-    Returns `None` when the copy is not live, and otherwise the same dict
-    `delete_copy` returns: `item_id`, `was_primary`, `promoted_copy_id` and
-    `remaining`. The three outcomes `delete_copy` documents hold here too,
-    because both share `_settle_after_removal`.
+    Returns `None` when the copy is not live. Otherwise a dict the caller can
+    render from: `item_id`, `was_primary`, `promoted_copy_id` (the survivor
+    that inherited primary, or `None`) and `remaining` (how many live copies
+    the item has left).
+
+    Three outcomes, and the seam moves in two of them:
+
+    - **A secondary goes.** Nothing else changes; `items.location_id` and the
+      primary copy are untouched.
+    - **The primary goes and others survive.** The lowest-numbered survivor is
+      promoted and the seam is re-pointed at *its* location, so Browse, CSV
+      export, the archive and Scan keep reading a real location rather than a
+      new null. Silent by design.
+    - **The last copy goes.** The seam is set to NULL. The item row itself is
+      **not** trashed: a located item with no copies is a legitimate state
+      (G86), and so is an unlocated one.
 
     **The copy is demoted in the same statement that stamps it**, and that is
     load-bearing rather than tidy. `add_copy` decides primary from a
@@ -500,8 +467,11 @@ def trash_copy(db, copy_id: int) -> dict[str, Any] | None:
     UNIQUE constraints still see it. That is why `restore_copy` cannot
     collide either.
 
-    **No route calls this in this release.** Same lock and logging rules as
-    `delete_copy`.
+    The item page's Remove copy calls this. Caller must hold the write lock:
+    the read that chooses the survivor and the writes that promote it are one
+    serialized unit, and the copy is re-read here rather than trusted from
+    the caller's earlier read, because a bare `SELECT` takes no lock under
+    sqlite3's deferred isolation (G18). It never logs (G3).
     """
     copy = db.execute(
         "SELECT id, item_id, is_primary FROM copies_live WHERE id = ?",
@@ -517,6 +487,7 @@ def trash_copy(db, copy_id: int) -> dict[str, Any] | None:
         "updated_at = datetime('now') WHERE id = ?",
         (copy_id,),
     )
+    trash.invalidate(db)
     return _settle_after_removal(db, item_id, was_primary)
 
 
@@ -543,8 +514,8 @@ def restore_copy(db, copy_id: int) -> dict[str, Any] | None:
     **It cannot collide.** A trashed copy never gave up its
     `UNIQUE(item_id, copy_number)` or `UNIQUE(copy_barcode)` slot.
 
-    **No route calls this in this release.** Same lock and logging rules as
-    `delete_copy`.
+    The Trash page's Restore calls this. Same lock and logging rules as
+    `trash_copy`.
     """
     # The physical table, deliberately: this read exists to find the row the
     # view hides. Unlike every other exemption in this module it is *not*
@@ -589,9 +560,37 @@ def restore_copy(db, copy_id: int) -> dict[str, Any] | None:
     remaining = db.execute(
         "SELECT COUNT(*) AS n FROM copies_live WHERE item_id = ?", (item_id,)
     ).fetchone()["n"]
+    trash.settle_marker(db)
+    trash.invalidate(db)
     return {
         "item_id": item_id,
         "copy_id": copy_id,
         "is_primary": is_primary,
         "remaining": remaining,
     }
+
+
+def purge_copy(db, copy_id: int) -> bool:
+    """Delete one **trashed** copy for good, and return whether it went.
+
+    The funnel's delete arm for Trash; `delete_copies_for_item` is the
+    archive import's. A live copy, or one that does not exist, is refused
+    with `False`.
+
+    **No settle.** The copy was demoted when it was trashed and
+    `_settle_after_removal` ran then, so the primary and the seam already
+    reflect the survivors; removing the row changes nothing a reader sees.
+
+    Caller holds the write lock; the guard read is under it (G18).
+    """
+    # The physical table, deliberately: this read exists to find the row
+    # `copies_live` hides — a purge starts from a trashed copy.
+    if db.execute(
+        "SELECT id FROM item_copies WHERE id = ? AND deleted_at IS NOT NULL",
+        (copy_id,),
+    ).fetchone() is None:
+        return False
+    db.execute("DELETE FROM item_copies WHERE id = ?", (copy_id,))
+    trash.settle_marker(db)
+    trash.invalidate(db)
+    return True

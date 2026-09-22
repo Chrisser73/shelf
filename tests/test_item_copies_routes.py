@@ -402,9 +402,9 @@ class TestEditPanel:
         for tag in price_tag:
             assert 'step="any"' in tag or 'min=' in tag, tag
 
-    def test_the_remove_confirm_names_what_is_lost(self, admin_client, db):
-        """Removal is permanent — there is no soft delete anywhere in this
-        schema — so the confirm has to say what goes with the row."""
+    def test_the_remove_confirm_says_the_copy_goes_to_trash(self, admin_client, db):
+        """Removal moves the copy to Trash, so the confirm says where it goes
+        and how to get it back — and no longer warns that anything is lost."""
         seed = _seed_two_copies(db)
 
         html = admin_client.get(
@@ -414,8 +414,8 @@ class TestEditPanel:
         confirm = re.search(r'hx-confirm="([^"]*)"', html)
         assert confirm, "Remove copy must be guarded by hx-confirm"
         message = confirm.group(1)
-        for word in ("condition", "acquisition", "provenance", "permanently"):
-            assert word in message, f"the confirm does not name {word}: {message}"
+        assert message == "Move copy #2 to Trash? Restore it from Trash to get it back."
+        assert "permanently" not in message
 
     def test_the_condition_input_suggests_without_constraining(self, admin_client, db):
         seed = _seed_two_copies(db)

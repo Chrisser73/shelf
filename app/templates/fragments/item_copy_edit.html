@@ -98,7 +98,7 @@
             <button type="button" data-testid="remove-copy"
                     hx-delete="/api/items/{{ item_id }}/copies/{{ copy.id }}"
                     hx-target="#item-copies" hx-swap="outerHTML"
-                    hx-confirm="Remove copy #{{ copy.copy_number }}? Its condition, acquisition details and provenance are deleted permanently and cannot be restored."
+                    hx-confirm="Move copy #{{ copy.copy_number }} to Trash? Restore it from Trash to get it back."
                     class="px-3 py-1 bg-shelf-error/20 text-shelf-error rounded-lg text-xs hover:bg-shelf-error/30 transition-colors ml-auto">Remove copy</button>
         </div>
     </form>

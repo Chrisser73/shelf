@@ -54,7 +54,7 @@ from app.config import (
 from app.currency import CURRENCIES, format_money, get_currency
 from app.services.national import SEARCH_LANGS
 from app.database import init_db, get_db
-from app.routers import pages, items, item_copies, items_covers, cover_review, cover_review_actions, items_csv, items_catalog, locations, location_order, platforms, settings, sync, checkouts, valuation, hardcover, store, series, share, tags, intake, archive, shelf_fill, romm, komga, periodicals, music, related_media
+from app.routers import pages, items, item_copies, items_covers, cover_review, cover_review_actions, items_csv, items_catalog, locations, location_order, platforms, settings, sync, checkouts, valuation, hardcover, store, series, share, tags, intake, archive, shelf_fill, romm, komga, periodicals, music, related_media, trash
 from app.routers import auth_routes
 
 
@@ -437,6 +437,25 @@ templates.env.globals["browse_column_config"] = browse_columns.client_config
 # Wrap TemplateResponse to auto-inject 'user' from request.state
 _original_template_response = templates.TemplateResponse
 
+def _trash_nag(user):
+    """The admin Trash banner's state for this render, or None.
+
+    Runs on every render for every user, so the role is checked here, before
+    any service call: a non-admin render reaches no Trash code and no query.
+    An admin's render reads the cached count (one query pair per process per
+    hour). A failure means no banner this render, never a failed page — the
+    same rule as the nav's settings read.
+    """
+    if not user or user["role"] != "admin":
+        return None
+    from app.services import trash
+    try:
+        return trash.nag_state(user)
+    except Exception:
+        logger.warning("Could not read the Trash count", exc_info=True)
+        return None
+
+
 def _template_response_with_user(request_or_self, *args, **kwargs):
     # Handle both templates.TemplateResponse(request, name, ctx) patterns
     if hasattr(request_or_self, 'state'):
@@ -449,6 +468,7 @@ def _template_response_with_user(request_or_self, *args, **kwargs):
     # Find the context dict and inject user + the nav tabs that user can see
     from app.nav import visible_tabs
     user = getattr(request.state, "user", None)
+    trash_nag = _trash_nag(user)
     context = kwargs.get('context', None)
     if context is None:
         # Context is a positional arg (3rd after request, name)
@@ -456,10 +476,12 @@ def _template_response_with_user(request_or_self, *args, **kwargs):
             if isinstance(a, dict):
                 a.setdefault("user", user)
                 a.setdefault("nav_tabs", visible_tabs(user))
+                a.setdefault("trash_nag", trash_nag)
                 break
     else:
         context.setdefault("user", user)
         context.setdefault("nav_tabs", visible_tabs(user))
+        context.setdefault("trash_nag", trash_nag)
 
     return _original_template_response(request_or_self, *args, **kwargs)
 
@@ -529,3 +551,5 @@ app.include_router(romm.router)
 app.include_router(komga.router)
 app.include_router(periodicals.router)
 app.include_router(related_media.router)
+app.include_router(trash.router)
+app.include_router(trash.page_router)

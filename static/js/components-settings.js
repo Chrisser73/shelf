@@ -160,13 +160,13 @@ document.addEventListener('alpine:init', function () {
                     .catch(() => { this.libsSaving = false; showToast('Save failed', 'error') });
             },
             cleanup() {
-                if (!confirm('Remove all Shelf items that came from unchecked libraries? Audiobookshelf itself is not touched, and re-checking a library re-imports them on the next sync.')) return;
+                if (!confirm('Move all Shelf items that came from unchecked libraries to Trash? Audiobookshelf itself is not touched, and you can restore them from Trash. A later sync does not re-import an item that is in Trash: restore it first.')) return;
                 this.cleaning = true; this.cleanResult = false;
                 // Persist the current selection first so the cleanup matches what's on screen
                 fetch('/api/sync/audiobookshelf/libraries', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken()}, body: JSON.stringify({excluded: this.excludedIds()})})
                     .then(() => fetch('/api/sync/audiobookshelf/libraries/cleanup', {method: 'POST', headers: {'X-CSRF-Token': window.csrfToken()}}))
                     .then(r => r.json())
-                    .then(d => { this.cleaning = false; this.cleanResult = d; if (d.ok) showToast('Removed ' + d.deleted + ' items') })
+                    .then(d => { this.cleaning = false; this.cleanResult = d; if (d.ok) showToast('Moved ' + d.deleted + ' items to Trash') })
                     .catch(() => { this.cleaning = false; showToast('Cleanup failed', 'error') });
             }
         };

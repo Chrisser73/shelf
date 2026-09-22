@@ -10,7 +10,7 @@ from starlette.responses import StreamingResponse
 from app.auth import require_role
 from app.config import HTTP_TIMEOUT
 from app.database import get_db, get_setting
-from app.services import audiobookshelf
+from app.services import audiobookshelf, item_write
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ async def save_abs_libraries(request: Request):
 
 @router.post("/audiobookshelf/libraries/cleanup")
 async def cleanup_excluded_libraries():
-    """Delete Shelf items that came from ABS libraries now marked excluded.
+    """Move to Trash the Shelf items that came from ABS libraries now excluded.
 
     Matches items two ways: by stamped abs_library_id (items synced after
     the column existed) and by live ABS listing of each excluded library
@@ -178,12 +178,13 @@ async def cleanup_excluded_libraries():
             ).fetchall()
             ids.update(r["id"] for r in rows)
 
+        # Soft: each row keeps its scan history and returns intact from
+        # Trash. `deleted` counts rows this call actually moved.
         for item_id in ids:
-            db.execute("UPDATE scan_log SET item_id = NULL WHERE item_id = ?", (item_id,))
-            db.execute("DELETE FROM items WHERE id = ?", (item_id,))
-            deleted += 1
+            if item_write.trash_item(db, item_id):
+                deleted += 1
 
-    logger.info("Removed %d items from %d excluded ABS libraries", deleted, len(excluded))
+    logger.info("Moved %d items from %d excluded ABS libraries to Trash", deleted, len(excluded))
     return {"ok": True, "deleted": deleted}
 
 

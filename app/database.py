@@ -827,6 +827,19 @@ def get_setting(db, key: str) -> str:
     return get_setting_value(key, raw)
 
 
+def set_setting(db, key: str, value: str) -> None:
+    """Write one setting row, replacing any stored value.
+
+    Non-sensitive keys only: this stores `value` as given. A key in
+    `crypto.SENSITIVE_KEYS` goes through `routers/settings._upsert_setting`,
+    which encrypts it first and then calls this.
+    """
+    db.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
+        (key, value, value),
+    )
+
+
 def get_all_settings(db) -> dict[str, str]:
     """Get all settings as a dict with env var overrides applied.
 
@@ -921,9 +934,44 @@ def init_db():
         logger.info("%s", line)
 
 
+class _Connection(sqlite3.Connection):
+    """A connection that runs registered callbacks after each successful commit.
+
+    A process cache invalidated inside a transaction can be refilled from the
+    pre-commit state before the commit lands; `after_commit` lets the writer
+    invalidate again once its rows are visible to other connections.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._after_commit = []
+
+    def commit(self):
+        super().commit()
+        callbacks, self._after_commit = self._after_commit, []
+        for callback in callbacks:
+            callback()
+
+    def rollback(self):
+        super().rollback()
+        self._after_commit = []
+
+
+def after_commit(conn, callback) -> None:
+    """Run `callback` once `conn`'s current transaction commits; drop it on rollback.
+
+    A connection `get_db()` did not open has no hook, so the callback runs now.
+    """
+    hooks = getattr(conn, "_after_commit", None)
+    if hooks is None:
+        callback()
+    elif callback not in hooks:
+        hooks.append(callback)
+
+
 @contextmanager
 def get_db():
-    conn = sqlite3.connect(str(DATABASE_PATH))
+    conn = sqlite3.connect(str(DATABASE_PATH), factory=_Connection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")

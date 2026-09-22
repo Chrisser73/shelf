@@ -76,6 +76,7 @@ lives:
 | **Borrowers** | People you lend to. Deleting a borrower keeps their loan history |
 | **Game Platforms** | The platform list used for video games — 30 built in, add your own |
 | **Lending** | "Overdue after N days" for loans without a due date (0 disables). Notification URL (ntfy topic or JSON webhook) for the daily overdue digest, with a **Send test** button |
+| **Trash** | "Prompt to empty Trash after N days" (`trash_retention_days`, default 180; 0 never prompts). Past the window, admins see a dismissable banner linking to the expired rows; nothing is deleted automatically. See [Trash](user-guide/items.md#trash) |
 
 ### Integrations
 
@@ -88,6 +89,7 @@ lives:
 | **Movie Database (TMDb)** | API key for DVD / Blu-ray lookups, for **Find cover** on a DVD, and for the lookup a Photo Intake row typed DVD runs when you confirm it |
 | **Photo Intake (Vision)** | Provider: Anthropic (API key + model), OpenAI-compatible (base URL, optional key, model, ingest long-edge), or Ollama (URL, model, ingest long-edge) |
 | **IGDB (Video Games)** | Twitch client ID + secret, for game lookups, for **Find cover** on a video game, and for the lookup a Photo Intake row typed Video Game runs when you confirm it |
+| **Discogs** | Personal access token, for the optional Discogs music lookup. Nothing uses it yet: the lookup arrives in a later release, and MusicBrainz stays the source of a music release's identity |
 
 Each card has a short inline setup guide for obtaining its credential. Keys
 are **write-only** — once saved you see a masked placeholder and a "clear"

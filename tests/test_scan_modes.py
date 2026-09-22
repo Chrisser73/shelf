@@ -1210,3 +1210,153 @@ def stub_book_lookup_alias(monkeypatch):
         return (meta, "openlibrary", {}, provider_result.found("openlibrary", meta))
 
     monkeypatch.setattr(items_common, "_lookup_metadata", _lookup)
+
+
+class TestScanInTrash:
+    """soft-delete-trash T5: an existing-item mode that finds the barcode on
+    an item in Trash reports `in_trash` and offers Restore — and the mode's
+    own action does not run."""
+
+    ISBN = "9780000000026"
+
+    def _trashed(self, db, **fields):
+        from app.services import item_write
+
+        item_id = _insert_item(db, title="Binned Book", isbn=self.ISBN, **fields)
+        item_write.trash_item(db, item_id)
+        return item_id
+
+    def _scan(self, client, mode, **extra):
+        return client.post("/api/scan", data={"isbn": self.ISBN, "mode": mode, **extra})
+
+    def _last_scan(self, db):
+        return db.execute(
+            "SELECT result, mode, item_id FROM scan_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    def _assert_in_trash_card(self, resp, item_id):
+        assert resp.status_code == 200
+        assert 'data-scan-status="in_trash"' in resp.text
+        assert "Binned Book" in resp.text
+        assert "In Trash since" in resp.text
+        assert f'hx-post="/api/trash/items/{item_id}/restore"' in resp.text
+        # No link to a page that would bounce to Browse.
+        assert f'href="/item/{item_id}"' not in resp.text
+
+    def test_lend_reports_in_trash_and_lends_nothing(self, admin_client, db):
+        item_id = self._trashed(db)
+        bid = _insert_borrower(db, "Alice")
+        db.commit()
+        resp = self._scan(admin_client, "lend", borrower_id=str(bid))
+        self._assert_in_trash_card(resp, item_id)
+        assert db.execute("SELECT COUNT(*) FROM checkouts").fetchone()[0] == 0
+        assert tuple(self._last_scan(db)) == ("in_trash", "lend", item_id)
+
+    def test_return_reports_in_trash_and_leaves_the_loan_open(self, admin_client, db):
+        item_id = self._trashed(db)
+        bid = _insert_borrower(db, "Bea")
+        loan = db.execute(
+            "INSERT INTO checkouts (item_id, borrower_id) VALUES (?, ?)", (item_id, bid)
+        ).lastrowid
+        db.commit()
+        resp = self._scan(admin_client, "return")
+        self._assert_in_trash_card(resp, item_id)
+        assert db.execute(
+            "SELECT checked_in FROM checkouts WHERE id = ?", (loan,)
+        ).fetchone()["checked_in"] is None
+        assert tuple(self._last_scan(db)) == ("in_trash", "return", item_id)
+
+    def test_move_reports_in_trash_and_moves_nothing(self, admin_client, db):
+        item_id = self._trashed(db)
+        loc = _insert_location(db, "Garage")
+        db.commit()
+        resp = self._scan(admin_client, "move", location_id=str(loc))
+        self._assert_in_trash_card(resp, item_id)
+        assert db.execute(
+            "SELECT location_id FROM items WHERE id = ?", (item_id,)
+        ).fetchone()["location_id"] is None
+        assert tuple(self._last_scan(db)) == ("in_trash", "move", item_id)
+
+    def test_inventory_reports_in_trash_and_writes_nothing(self, admin_client, db):
+        home = _insert_location(db, "Home Shelf")
+        item_id = self._trashed(db, location_id=home)
+        audit = _insert_location(db, "Audit Shelf")
+        db.commit()
+        before = dict(db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone())
+        resp = self._scan(admin_client, "inventory", location_id=str(audit))
+        self._assert_in_trash_card(resp, item_id)
+        assert "relocated" not in resp.text
+        assert dict(db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()) == before
+        assert tuple(self._last_scan(db)) == ("in_trash", "inventory", item_id)
+
+    def test_lookup_reports_in_trash_and_writes_nothing(self, admin_client, db):
+        item_id = self._trashed(db)
+        db.commit()
+        before = dict(db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone())
+        resp = self._scan(admin_client, "lookup")
+        self._assert_in_trash_card(resp, item_id)
+        assert dict(db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()) == before
+        assert tuple(self._last_scan(db)) == ("in_trash", "lookup", item_id)
+
+    def test_quick_rate_reports_in_trash_and_rates_nothing(self, admin_client, db):
+        item_id = self._trashed(db)
+        db.commit()
+        resp = self._scan(admin_client, "quick_rate")
+        self._assert_in_trash_card(resp, item_id)
+        row = db.execute(
+            "SELECT reading_status, date_finished FROM items WHERE id = ?", (item_id,)
+        ).fetchone()
+        assert row["reading_status"] != "read" and row["date_finished"] is None
+        assert tuple(self._last_scan(db)) == ("in_trash", "quick_rate", item_id)
+
+    def test_a_live_row_on_the_same_isbn_wins_over_trash(self, admin_client, db):
+        from app.services import item_write
+
+        gone = _insert_item(db, title="Binned Audio", isbn=self.ISBN, media_type="audiobook")
+        item_write.trash_item(db, gone)
+        _insert_item(db, title="Live Paper", isbn=self.ISBN, media_type="book")
+        db.commit()
+        resp = self._scan(admin_client, "lookup")
+        assert 'data-scan-status="found"' in resp.text
+        assert "Live Paper" in resp.text
+
+    def test_recent_scans_renders_in_trash_as_a_warning(self, admin_client, db):
+        self._trashed(db)
+        db.commit()
+        self._scan(admin_client, "lookup")
+        strip = admin_client.get("/api/recent-scans", params={"mode": "lookup"}).text
+        row = re.search(r'<span class="text-xs px-2 py-1 rounded-full shrink-0([^"]*)">\s*in_trash', strip)
+        assert row, strip
+        assert "text-shelf-warning" in row.group(1)
+
+    def test_restore_from_the_card_answers_restored_and_logs_it(self, admin_client, db):
+        item_id = self._trashed(db)
+        db.commit()
+        resp = admin_client.post(f"/api/trash/items/{item_id}/restore", data={
+            "isbn": self.ISBN, "mode": "lend", "render": "scan",
+        })
+        assert resp.status_code == 200
+        assert 'data-scan-status="restored"' in resp.text
+        assert "Restored from Trash" in resp.text
+        assert db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone()
+        assert tuple(self._last_scan(db)) == ("restored", "lend", item_id)
+        # A second click is idempotent: the same card, not an error.
+        again = admin_client.post(f"/api/trash/items/{item_id}/restore", data={
+            "isbn": self.ISBN, "mode": "lend", "render": "scan",
+        })
+        assert 'data-scan-status="restored"' in again.text
+
+    def test_restore_from_the_card_for_a_missing_item_is_an_error_card(self, admin_client):
+        resp = admin_client.post("/api/trash/items/99999/restore", data={
+            "isbn": self.ISBN, "mode": "lookup", "render": "scan",
+        })
+        assert resp.status_code == 404
+        assert 'data-scan-status="error"' in resp.text
+
+    def test_viewer_cannot_restore_from_the_card(self, viewer_client, db):
+        item_id = self._trashed(db)
+        db.commit()
+        resp = viewer_client.post(f"/api/trash/items/{item_id}/restore", data={
+            "isbn": self.ISBN, "mode": "lookup", "render": "scan",
+        })
+        assert resp.status_code == 403

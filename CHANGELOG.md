@@ -6,6 +6,104 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-09-21
+
+Until now, deleting something in Shelf deleted it for good. A wrong click on
+**Delete** took the item and everything attached to it: its copies, tags, loans,
+reading history and related-media links. Nothing could bring any of it back
+except a database backup. Removing a copy was just as final.
+
+Shelf now has a **Trash**. Deleting an item or removing a copy moves it there
+with everything attached. **Restore** puts it back exactly as it was. Only an
+admin can delete something permanently, and nothing is ever deleted on a timer.
+The three releases before this one made that safe, one piece at a time. This is
+the one you can see.
+
+This release also carries three community contributions: a Dutch
+national-bibliography lookup from
+[@MartinZwolle](https://github.com/MartinZwolle), and the first two pieces of
+Discogs support from [@sudo-rpaisley](https://github.com/sudo-rpaisley).
+
+### Added
+
+- **A Trash page.** Open it from the account menu, under **Library**. Editors
+  and admins can see it. It lists deleted items. It also lists copies removed on
+  their own, grouped under their item. An item that was on loan when it was
+  deleted is marked **Loaned**, because the loan is still open and still counts
+  against its borrower.
+  - **Restore** (editor or admin) puts an item or a copy back as it was. You
+    cannot restore a copy whose item is also in Trash. Restore the item instead,
+    and its copies come back with it.
+  - **Delete permanently** (admin) removes one item or copy for good, with
+    everything attached to it. It cannot be undone.
+  - **Empty expired** (admin) permanently deletes everything that has been in
+    Trash longer than the retention window. **Show expired only** shows just
+    those rows.
+- **A retention window and a reminder, not a timer.** Settings → Library →
+  **Trash** sets how many days a deleted row waits before it counts as
+  *expired*. The default is 180 days, and **0** turns the reminder off. When rows
+  pass the window, every admin sees a banner at the top of each page with a link
+  to them. **Dismiss** hides it on every device until more rows expire. Nothing
+  is deleted until an admin says so.
+- **Scanning something in Trash tells you so.** In Lend, Return, Move,
+  Inventory, Lookup and Quick Rate, a scanned item that is in Trash is not lent,
+  moved, rated or marked. The card says *In Trash since* the date it was
+  deleted, with a **Restore** button. Scan again after restoring to carry on.
+  In Add mode, scanning it restores it (*Restored from Trash*) and does not add
+  a second record.
+- **Dutch books are looked up in the Dutch National Bibliography.** An ISBN in
+  the 978-90 or 978-94 group is now looked up in the KB's Nederlandse
+  Bibliografie Totaal first, before Open Library. This works the same way the
+  DNB lookup does for German ISBNs and the SBN lookup does for Italian ones.
+  Older records often carry only an ISBN-10, so the lookup asks for both forms.
+  An ISBN the KB does not hold falls through to Open Library as before.
+  Contributed by [@MartinZwolle](https://github.com/MartinZwolle) in
+  [#139](https://github.com/dgahagan/shelf/pull/139)
+- **A place to save a Discogs token.** Settings → Integrations has a new
+  **Discogs** section. It stores a personal access token encrypted, like every
+  other credential, and never shows it back to you. Nothing uses the token yet.
+  The Discogs lookup it enables will come in a later release, and MusicBrainz
+  stays the source of a music release's identity. Contributed by
+  [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#141](https://github.com/dgahagan/shelf/pull/141)
+
+### Changed
+
+- **Delete now moves things to Trash.** This covers **Delete** on an item page,
+  **Delete Selected** in Browse, **Remove copy** on the item page, and the
+  Audiobookshelf **Move Excluded Items to Trash** cleanup (it was **Remove
+  Excluded Items from Shelf**). None of these deletes anything now. While an
+  item is in Trash it is gone from Browse, Home, Stats, Store Mode, the valuation
+  report and every count, the same as before.
+- **A sync does not bring back what you moved to Trash.** Audiobookshelf, Komga,
+  RomM and Hardcover skip an item that is in Trash and count it under **In
+  Trash** in their summary. If you exclude a library, clean up, and then include
+  it again, restore the items you want from Trash first, then sync.
+- **Editors delete to Trash; only admins delete for good.** Editors keep the
+  **Delete** button they had, and they can restore. Permanent deletion is
+  admin-only. Viewers cannot delete, so they do not see Trash.
+
+Deliberately left out, and worth knowing:
+
+- **Nothing you deleted before this upgrade comes back.** Those deletes were
+  permanent when you made them, so Trash starts empty.
+- **Merging two items still removes the merged record.** The merge can copy the
+  identifier of the record it removes onto the one you keep. A trashed record
+  would still hold that identifier and block the merge. Undoing a merge is not
+  something Trash does.
+- **Trash is not in the CSV export or the portable archive yet.** Both contain
+  only what is not in Trash. The database backup (Settings → Data) carries
+  everything, Trash included. A later release adds Trash to both exports.
+- **There is no undo button at the moment you delete.** Trash is the undo.
+
+### Internal
+
+- **Discogs provider foundation.** A service module that searches Discogs for
+  an exact release and looks it up by ID. Nothing calls it yet. Requests to
+  `api.discogs.com` are paced at 1 per second. Contributed by
+  [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#137](https://github.com/dgahagan/shelf/pull/137)
+
 ## [0.45.1] - 2026-09-21
 
 A Trash you can restore from has a problem that the Trash page does not show.
@@ -3970,6 +4068,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.46.0]: https://github.com/dgahagan/shelf/releases/tag/v0.46.0
 [0.45.1]: https://github.com/dgahagan/shelf/releases/tag/v0.45.1
 [0.45.0]: https://github.com/dgahagan/shelf/releases/tag/v0.45.0
 [0.44.0]: https://github.com/dgahagan/shelf/releases/tag/v0.44.0

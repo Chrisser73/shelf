@@ -76,11 +76,13 @@ its home.
   A copy barcode belongs to one copy across your whole collection: reusing one
   is refused, and the message names the item already holding it.
 
-  **Remove copy** is in the same panel, behind a confirmation. **Removal is
-  permanent**: that copy's condition, acquisition details and provenance are
-  deleted and cannot be restored. Removing the copy marked primary hands that
-  status to the lowest-numbered copy left, and the item's location follows it.
-  Removing the last copy leaves the item in your catalogue with no location.
+  **Remove copy** is in the same panel, behind a confirmation. It moves the
+  copy to [Trash](#trash), where it waits with its condition, acquisition
+  details and provenance intact until someone restores it. Removing the copy
+  marked primary hands that status to the lowest-numbered copy left, and the
+  item's location follows it. Removing the last copy leaves the item in your
+  catalogue with no location. A restored copy comes back as a secondary copy
+  unless the item has no primary left.
 
   Adding, editing and removing copies needs an editor or admin account.
   Viewers see the list and nothing else.
@@ -115,8 +117,10 @@ changing the **Media type** dropdown updates what is shown straight away.
 Anything the item *already* has a value for stays visible even when its
 media type would normally hide it, so an existing value is never put out of
 reach — and nothing is dropped on save either way. Changing the ISBN does *not* re-fetch metadata
-automatically — use **Retry cover** / **Fetch synopsis** afterwards, or
-delete and rescan if the record was wrong from the start.
+automatically — use **Retry cover** / **Fetch synopsis** afterwards. If the
+record was wrong from the start, delete it, have an admin **Delete
+permanently** from Trash, and rescan: rescanning an item that is still in
+Trash restores it as it was rather than adding a fresh record.
 
 The **Identifiers** section has a **Scan ISBN** button. It opens the same
 camera scanner the Scan tab uses, with the same per-device decoder, and is the
@@ -218,7 +222,7 @@ Scanning an owned ISBN again opens the existing item rather than creating a
 twin. If you end up with duplicates anyway (two different ISBNs for one
 book, or a manual add before a scan), keep the better record and delete the
 other; tags and loan history live on the record, so move anything you need
-first.
+first. The deleted record goes to Trash, so a wrong pick can be undone.
 
 Bulk **Merge** copies the fields the kept record lacks from the others
 before removing them. A merge that would copy an invalid ISBN is refused and
@@ -232,9 +236,41 @@ duplicate records rather than deleting one: you had two books, and you still do.
 
 ## Deleting
 
-**Delete** on the item page (editor or admin). Loan history referencing the
-item is removed with it. A portable archive export is *not* an undo for
-deletions — keep a backup if that matters.
+**Delete** on the item page, or Browse's bulk delete (editor or admin), moves
+the item to **Trash**. Nothing attached to it is removed: its copies, tags,
+related-media links, loans, reading history and scan history stay with it and
+come back with it. While it is in Trash it is gone from Browse, Home, Stats,
+Store Mode, the valuation report and every count.
+
+### Trash
+
+**Trash** is in the account menu, under **Library** (editors and admins). It
+lists deleted items, and copies removed on their own grouped under their
+item — the item's name links to its page when the item itself is still in
+your catalogue. An item that was on loan when it was deleted is marked
+**Loaned**, because the loan is still open and still counts against its
+borrower.
+
+- **Restore** (editor or admin) puts an item or copy back exactly as it was.
+  Restoring a copy whose item is also in Trash is refused — restore the item,
+  and its copies come back with it.
+- **Delete permanently** (admin) removes one item or copy for good, with
+  everything attached to it. It cannot be undone.
+- **Empty expired** (admin) permanently deletes everything that has been in
+  Trash longer than the retention window (180 days by default — Settings →
+  Library → Trash). **Show expired only** filters the page to those rows.
+
+Nothing is deleted on a timer. Once rows pass the window, admins see a banner
+across the top of every page saying how many; **Dismiss** hides it until more
+rows expire. See [Settings](settings.md).
+
+Scanning or adding something that is in Trash restores it rather than making a
+duplicate. The existing-item scan modes do not: they report it as *In Trash*
+and offer **Restore** — see [Scanning](scanning.md).
+
+Trash is not carried by the CSV export or the portable archive yet — both
+contain only what is not in Trash. The database backup (Settings → Data)
+carries everything, Trash included.
 
 ## Video games
 

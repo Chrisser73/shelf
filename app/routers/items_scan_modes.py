@@ -309,3 +309,21 @@ def _scan_mode_quick_rate(request, templates, item: dict, raw: str):
          "authors": item.get("authors"), "message": "Marked as read"},
     )
     return resp
+
+
+def _scan_mode_in_trash(request, templates, item: dict, raw: str, mode: str):
+    """Any existing-item mode, when the barcode names an item in Trash.
+
+    Reports it and offers Restore; the mode's own action does **not** run —
+    no loan, no move, no count, no rating. A lookup never changes the
+    collection, and neither does a lend of something the user deleted.
+    Restoring is a separate, explicit click (`POST /api/trash/items/{id}/
+    restore` with `render=scan`), which answers with the `restored` card.
+    """
+    items_common._log_scan(raw, item.get("media_type", ""), "in_trash", item["id"], mode)
+    return templates.TemplateResponse(
+        request, "fragments/scan_result.html",
+        {"status": "in_trash", "isbn": raw, "mode": mode, "title": item["title"],
+         "item_id": item["id"], "cover_path": item.get("cover_path"),
+         "authors": item.get("authors"), "deleted_at": item.get("deleted_at")},
+    )

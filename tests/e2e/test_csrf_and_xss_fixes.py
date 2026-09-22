@@ -72,7 +72,7 @@ def test_bulk_delete_succeeds(live_server, authed_page):
     # The count is whatever Select All caught in this session's shared DB, so
     # pin the shape and a non-zero count rather than a brittle exact number.
     assert len(messages) == 1, f"expected exactly one confirm(), got {messages}"
-    m = re.fullmatch(r"Delete (\d+) items\?", messages[0])
+    m = re.fullmatch(r"Move (\d+) items to Trash\?", messages[0])
     assert m, f"unexpected confirm message: {messages[0]!r}"
     assert int(m.group(1)) >= 1, f"confirm named {m.group(1)} items"
 

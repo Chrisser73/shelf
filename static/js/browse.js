@@ -453,11 +453,11 @@ function browsePage() {
         },
 
         async bulkDelete() {
-            if (!confirm('Delete ' + this.selectedIds.length + ' items?')) return;
+            if (!confirm('Move ' + this.selectedIds.length + ' items to Trash?')) return;
             for (var id of this.selectedIds) {
                 await fetch('/api/items/' + id, {method: 'DELETE', headers: {'X-CSRF-Token': window.csrfToken()}});
             }
-            showToast('Deleted ' + this.selectedIds.length + ' items', 'success');
+            showToast('Moved ' + this.selectedIds.length + ' items to Trash', 'success');
             this.selectedIds = [];
             location.reload();
         }

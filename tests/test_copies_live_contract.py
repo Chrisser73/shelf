@@ -3,10 +3,9 @@
 `tests/test_soft_delete_seam.py` already pins the view's own mechanism: that
 it exists on every connection, that it hides a copy whose own `deleted_at` is
 set, that the join also hides every copy of a trashed item, and that writing
-through it fails loudly. This file is the other half: nothing in `app/` ever
-sets `item_copies.deleted_at` (`delete_copy` still hard-deletes), so this is
-the only place in the whole suite that hand-trashes a copy or an item and
-then walks every real reader — the item page, Arrange, Shelf Fill, the
+through it fails loudly. This file is the other half: it hand-trashes a copy
+or an item (the Trash routes and the item page's Remove copy do the same
+through the funnel) and then walks every real reader — the item page, Arrange, Shelf Fill, the
 inventory audit, cover review, the by-id copy routes, `add_copy`'s numbering
 split, merge's renumbering, barcode-conflict prediction and the archive
 import — to check it agrees with the view.

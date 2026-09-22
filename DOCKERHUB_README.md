@@ -138,6 +138,7 @@ key material.
 - Filter and search by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), and custom tags
 - Shelf Fill — keep one shelf selected and scan item after item onto it; Arrange drags the copies on a shelf into the order they really sit in, or sorts them by title, creator, series, release or issue
 - Physical copies — own two of something and track them apart: add a copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes. Removing the copy marked primary promotes the next one and the item's location follows it
+- Trash — deleting an item or removing a copy moves it to Trash with its tags, loans, copies and history intact; editors restore, admins empty it, prompted once rows pass a retention window (180 days by default)
 - Reading tracking — want-to-read, reading, and read with start/finish dates
 - Series tracking — grouped by series with position numbers, gap detection, and one-click "add missing volumes to wishlist" via Hardcover; series synopses, plus rename/merge/disband from the series card
 - Stats dashboard — books read per year, collection growth, top authors, and value-over-time charts
@@ -153,8 +154,8 @@ key material.
 - CSV import/export, plus a portable archive — export the whole collection as one zip **including physical copies and cover art** and merge it into any Shelf instance without refetching a cover
 
 ### Multi-User
-- **Admin** — full control: settings, users, locations, sync, bulk ops, logs
-- **Editor** — add/edit/delete items, scan, manage covers, checkout/checkin
+- **Admin** — full control: settings, users, locations, sync, bulk ops, logs, delete permanently / empty Trash
+- **Editor** — add/edit items, delete to Trash and restore, scan, manage covers, checkout/checkin
 - **Viewer** — browse, search, reading status, export, view stats
 
 ## Optional Integrations

@@ -190,13 +190,13 @@
                             </button>
                             <button @click="cleanup()" :disabled="cleaning || excludedIds().length === 0"
                                     class="px-3 py-1.5 bg-shelf-error/20 text-shelf-error rounded-lg text-xs hover:bg-shelf-error/30 transition-colors disabled:opacity-50">
-                                <span x-show="!cleaning">Remove Excluded Items from Shelf</span>
-                                <span x-show="cleaning">Removing&hellip;</span>
+                                <span x-show="!cleaning">Move Excluded Items to Trash</span>
+                                <span x-show="cleaning">Moving&hellip;</span>
                             </button>
                         </div>
-                        <p class="text-xs text-shelf-muted">Remove saves the selection, then deletes items already synced from unchecked libraries.</p>
+                        <p class="text-xs text-shelf-muted">Saves the selection, then moves items already synced from unchecked libraries to Trash.</p>
                         <template x-if="cleanResult && cleanResult.ok">
-                            <p class="text-xs text-shelf-success">Removed <span x-text="cleanResult.deleted"></span> items.</p>
+                            <p class="text-xs text-shelf-success">Moved <span x-text="cleanResult.deleted"></span> items to Trash.</p>
                         </template>
                     </div>
                 </template>
