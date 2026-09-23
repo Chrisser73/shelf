@@ -1,6 +1,6 @@
 data/
 data-dev/
-.env
+.env*
 __pycache__/
 .devdocs
 .coverage
