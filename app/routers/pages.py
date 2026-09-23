@@ -12,6 +12,7 @@ from app.services import browse_counts
 from app.services import lists
 from app.services import isbn as isbn_svc
 from app.services import upc as upc_svc
+from app.services import tags as tags_svc
 from app.database import get_db, get_setting, get_game_platforms, get_reading_history
 from app.routers import items_common
 from app.routers.items_common import SORT_OPTIONS
@@ -74,6 +75,7 @@ async def browse(
             f"{where} ORDER BY {order_clause} LIMIT ?",
             [get_overdue_days(db)] + params + [DEFAULT_PAGE_SIZE],
         ).fetchall()
+        tags_by_item = tags_svc.tags_for_items(db, [row["id"] for row in items])
 
         total_filtered = db.execute(
             f"SELECT COUNT(*) as c FROM items_live i {where}", params
@@ -121,6 +123,7 @@ async def browse(
 
     ctx = {
         "items": items,
+        "tags_by_item": tags_by_item,
         "media_types": MEDIA_TYPES,
         "series_names": series_names,
         "all_tags": all_tags,
@@ -314,7 +317,7 @@ async def item_detail(
 
         from app.services.tags import get_item_tags, get_all_tags
         item_tags = get_item_tags(db, item_id)
-        all_tags = get_all_tags(db)
+        all_tags = get_all_tags(db, media_type=item["media_type"])
 
         reading_history = get_reading_history(db, item_id)
 
@@ -390,6 +393,8 @@ async def item_edit(
             f"SELECT i.*, {lists.WISHLISTED_SQL} AS wishlisted FROM items_live i WHERE i.id = ?",
             (item_id,),
         ).fetchone()
+        if not item:
+            return RedirectResponse(url="/browse")
         # An identifier_in_trash refusal names the blocking row by id; the
         # title is resolved here and escaped by the template, so nothing the
         # user typed is ever echoed back through the query string (G58).
@@ -400,8 +405,8 @@ async def item_edit(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
         game_platforms = get_game_platforms(db)
-    if not item:
-        return RedirectResponse(url="/browse")
+        item_tags = tags_svc.get_item_tags(db, item_id)
+        all_tags = tags_svc.get_all_tags(db, media_type=item["media_type"])
     # #87 T2: the edit funnel now saves a legacy checksum-invalid isbn/upc
     # unchanged rather than bouncing every save on that row (T1). Surface
     # that silently-kept state to the editor instead of leaving it invisible.
@@ -413,6 +418,7 @@ async def item_edit(
         {"item": item, "back": back, "media_types": MEDIA_TYPES, "game_platforms": game_platforms,
          "locations": locations, "error": error,
          "trashed_title": trashed_title,
+         "item_id": item_id, "item_tags": item_tags, "all_tags": all_tags,
          "isbn_invalid": isbn_invalid, "upc_invalid": upc_invalid},
     )
 
@@ -634,6 +640,7 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
         share_links = db.execute(
             "SELECT * FROM share_links ORDER BY created_at DESC"
         ).fetchall()
+        tags = tags_svc.list_tags_with_counts(db)
     # Iterate the env map, not `settings`: `get_all_settings` carries only keys
     # with a row, so an env-only credential is absent from it (G15) and a
     # comprehension over it can never see one. Keys here — `is_env_override`
@@ -679,5 +686,6 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
          "game_platforms_list": game_platforms_list,
          "hideable_nav_tab_states": hideable_nav_tab_states,
          "borrower_error_message": borrower_error_message,
-         "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats},
+         "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats,
+         "tags": tags, "media_types": MEDIA_TYPES},
     )

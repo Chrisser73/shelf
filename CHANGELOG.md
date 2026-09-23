@@ -6,6 +6,50 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-09-23
+
+Since 0.48.0 you can tag items as you add them — but a tag could not be put on
+the items you already owned without opening them one at a time, and a tag
+with a typo in its name could not be fixed. Now you can tag a whole selection from Browse, rename,
+scope and delete tags in Settings, and see tags in the Browse list.
+
+### Added
+
+- **Add tag and Remove tag in the Browse bulk bar.** Select items, type a tag
+  or pick one from the suggestions, and choose **Add tag** or **Remove tag**.
+  Editors and admins see these buttons; a viewer does not. Removing a tag from
+  the last item that carries it deletes the tag. The result stays on screen
+  after the page reloads, and says so when nothing changed.
+- **A tag manager in Settings → Library → Tags** (admin only). It lists every
+  tag with the number of items that carry it, not counting items in Trash.
+  - **Rename** a tag, and every item keeps it under the new name. Renaming
+    onto a name another tag already has is refused, because merging two tags
+    is not supported yet. Changing only the case is fine.
+  - **Scope** a tag to one media type, or set it back to all types. A scope
+    only narrows where the tag is suggested. It never removes the tag from an
+    item of another type, and the manager shows how many of a tag's items fall
+    outside its scope — *3 outside Book* — so a mismatch is visible.
+  - **Delete** a tag from every item that carries it, items in Trash
+    included, after a confirmation. This cannot be undone.
+  - There is no **Add** button: a tag is created by putting it on an item.
+- **Tags on the item edit page.** A **Tags** section adds and removes chips
+  the same way the item page does. They save at once; the form's **Save**
+  does not touch them.
+- **An optional Tags column in Browse.** Turn it on in the column picker in
+  list view. Each tag shows as a chip, and tapping one filters Browse by that
+  tag.
+
+### Changed
+
+- **Tag suggestions on an item follow its type.** The item page and the edit
+  page suggest your global tags plus the tags scoped to that item's media type,
+  not every tag you have.
+- **Renaming or deleting a tag does not update saved Default tags.** A Default
+  tags field on Scan, Shelf Fill or Photo Intake that still holds the old name
+  creates that tag again on the next item it files. Clear or retype those
+  fields after a rename.
+- The remove (×) button on a tag chip is larger and easier to tap.
+
 ## [0.49.0] - 2026-09-23
 
 Since 0.46.0, deleting an item moves it to Trash — but the CSV export and the
@@ -4198,6 +4242,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.50.0]: https://github.com/dgahagan/shelf/releases/tag/v0.50.0
 [0.49.0]: https://github.com/dgahagan/shelf/releases/tag/v0.49.0
 [0.48.0]: https://github.com/dgahagan/shelf/releases/tag/v0.48.0
 [0.47.0]: https://github.com/dgahagan/shelf/releases/tag/v0.47.0

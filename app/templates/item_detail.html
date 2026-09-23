@@ -125,6 +125,13 @@
 
                 {% include "fragments/item_tags.html" %}
 
+                {# Outside #item-tags: tag mutations swap that fragment
+                   whole, and a loader inside it would reload (and briefly
+                   duplicate) this panel on every add/remove. #}
+                <div hx-get="/api/related-media/items/{{ item_id }}/panel" hx-trigger="load" hx-swap="outerHTML">
+                    <div class="mt-4 text-xs text-shelf-muted">Loading related media…</div>
+                </div>
+
                 {% if item.notes %}
                 <div class="text-sm bg-shelf-bg rounded-lg p-3 mb-6">
                     <span class="text-shelf-muted">Notes:</span> {{ item.notes }}

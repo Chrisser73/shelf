@@ -65,9 +65,11 @@ below — `music_releases` + `music_media` + `music_tracks` +
 
 **`tags.media_type` is an advisory scope, not a constraint.** NULL means the
 tag is global. Nothing strips or refuses an association whose item is outside
-the scope — the column exists so a later release can offer a tag where it is
-relevant without a schema change, and enforcement can be layered on top if it
-is ever wanted. It is added in both places G1 requires: as `MIGRATIONS` entry
+the scope. The Settings tag manager is its only writer: a scope narrows the
+suggestion lists (the item pages' datalist is built from `get_all_tags(db,
+media_type=<the item's type>)`) and the manager counts each scoped tag's
+out-of-scope items, and enforcement can be layered on top if it is ever
+wanted. It is added in both places G1 requires: as `MIGRATIONS` entry
 39 *and* in `MIGRATION_TABLES`' `CREATE TABLE tags`. That is the opposite of
 the `deleted_at` columns below, and the difference is where the table is
 created — `tags` is created by `executescript(MIGRATION_TABLES)`, which runs
@@ -1084,9 +1086,26 @@ route's order exemption → UPC check → conflict lookup → funnel.
 HTTP wrapper over it. It holds name normalisation, get-or-create (an existing
 tag wins outright — its scope is never overwritten), attach/detach with orphan
 collection, a grouped `tags_for_items` for export paths, and the scoped
-suggestion list. Every function runs in the caller's transaction, opens no
-connection of its own and logs nothing, because callers may hold a write lock
-around it.
+suggestion list, plus the bulk and manager operations (`bulk_tag`,
+`update_tag`, `delete_tag`). Every function runs in the caller's transaction,
+opens no connection of its own and logs nothing, because callers may hold a
+write lock around it.
+
+The routes: editors add and remove one item's tags
+(`POST /api/items/{id}/tags`, `DELETE /api/items/{id}/tags/{tag_id}`, both
+HTMX fragment swaps used by the item page and the edit page) and a Browse
+selection's (`POST /api/items/bulk-tags`, JSON, all or nothing — any id not in
+`items_live` refuses the whole request). All three take `BEGIN IMMEDIATE`
+before their liveness check (G18). `bulk-tags` lives in `routers/tags.py`
+despite its path because `items.py` is at its size cap, and `main.py` includes
+`tags.router` **before** `items.router` for it: `items.py`'s
+`POST /items/{item_id}` also matches `/items/bulk-tags` — the int annotation
+validates after path selection, it does not select — and the first match
+wins. Admins rename, re-scope and delete through two plain form routes,
+`POST /api/tags/{id}/update` and `POST /api/tags/{id}/delete`, which 303 back to
+`/settings` or `/settings?tag_error=<code>`; a rename collision is caught by
+the `UNIQUE NOCASE` column rather than a pre-read. The admin gate is per route,
+since the same router carries the editor routes.
 
 **Default tags ride the insert funnel's transaction.** An add route wraps
 its insert in `tags_svc.default_tags(raw)`, and `insert_item` attaches the add

@@ -57,6 +57,26 @@
                 <button @click="bulkUpdate({series_name: '__clear__'})"
                         class="px-3 py-1 bg-shelf-bg border border-shelf-border text-shelf-muted rounded-lg text-xs hover:text-shelf-text">Clear</button>
             </div>
+            {% if user and user.role in ('admin', 'editor') %}
+            <!-- Tags: same input+datalist shape as Series, but two buttons --
+                 a name can be added or removed rather than set/cleared. -->
+            <div class="flex items-center gap-1.5 pl-3 border-l border-shelf-border">
+                <label for="bulk-tag" class="text-sm text-shelf-muted shrink-0">Tag</label>
+                <input type="text" id="bulk-tag" x-model="bulkTagVal" list="bulk-tag-options"
+                       maxlength="40" placeholder="Type or pick a tag..."
+                       data-testid="bulk-tag-input"
+                       class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text w-32">
+                <datalist id="bulk-tag-options">
+                    {% for t in all_tags %}
+                    <option value="{{ t.name }}"></option>
+                    {% endfor %}
+                </datalist>
+                <button @click="bulkTags('add')" :disabled="!bulkTagVal" data-testid="bulk-tag-add"
+                        class="px-3 py-1 bg-shelf-accent text-white rounded-lg text-xs disabled:opacity-40 disabled:cursor-not-allowed">Add tag</button>
+                <button @click="bulkTags('remove')" :disabled="!bulkTagVal" data-testid="bulk-tag-remove"
+                        class="px-3 py-1 bg-shelf-bg border border-shelf-border text-shelf-muted rounded-lg text-xs hover:text-shelf-text disabled:opacity-40 disabled:cursor-not-allowed">Remove tag</button>
+            </div>
+            {% endif %}
             <button @click="bulkDelete()" class="px-3 py-1 bg-shelf-error/20 text-shelf-error rounded-lg text-xs ml-auto">Delete Selected</button>
         </div>
     </div>
@@ -93,7 +113,7 @@
                 <!-- First-use tooltip -->
                 <div x-show="showSelectTip" x-transition
                      class="absolute top-full left-0 mt-2 w-48 bg-shelf-card border border-shelf-border rounded-lg p-2 shadow-xl z-50 text-xs text-shelf-muted">
-                    Tap items to select them for bulk move, type change, status update, or delete.
+                    Tap items to select them for bulk actions such as moving, type/status/series changes, tagging, or deleting.
                 </div>
             </div>
             <template x-if="selectMode">

@@ -3,8 +3,8 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-4085%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![E2E tests](https://img.shields.io/badge/e2e%20tests-269%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-4132%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![E2E tests](https://img.shields.io/badge/e2e%20tests-272%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
 A self-hosted home library catalog with barcode scanning, multi-mode scanning workflows, automatic metadata lookup, cover art, and collection management — all in a single Docker container.
@@ -181,7 +181,7 @@ each option before anything is sent.
 - **Home overview** — Shelf opens on a page that answers "what is happening in my library?": catalogue, owned and wishlist totals, what is lent out, missing covers, a media-type breakdown and recent additions. Browse stays the place for searching, filtering and bulk editing. See [Home](docs/user-guide/home.md)
 - **Filter and search** — by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), and free text
 - **Reading tracking** — want-to-read, reading, and read with start/finish dates
-- **Custom tags** — free-form tags (`signed`, `first-edition`, whatever you like) as chips on the item page, with a tag filter on Browse. Set **default tags** for a scanning session on Scan, Shelf Fill or Photo Intake and every item you add is tagged as it arrives, with suggestions for the media type you are scanning
+- **Custom tags** — free-form tags (`signed`, `first-edition`, whatever you like) as chips on the item page and its edit page, applied to many items at once from the Browse bulk bar, with a tag filter and an optional Tags column on Browse. Admins rename, scope and delete tags in Settings, which shows how many items carry each. Set **default tags** for a scanning session on Scan, Shelf Fill or Photo Intake and every item you add is tagged as it arrives, with suggestions for the media type you are scanning
 - **Synopses** — item descriptions fetched automatically on add, plus a one-click backfill for your existing catalog (Open Library, Google Books, Hardcover)
 - **Stats dashboard** — books read per year, collection growth, top authors, and value-over-time charts (server-rendered SVG, no JS)
 - **Locations** — organize by room, shelf, or any system you like, and nest them: a shelf inside a bookcase inside a room. Rename or move a location and everything beneath it follows. See [Locations](docs/user-guide/locations.md)
@@ -195,7 +195,7 @@ each option before anything is sent.
 - **Loan reminders** — overdue loans get a red badge, and an optional daily digest (ntfy or webhook) nags you about them; configure under Settings → Library → Lending
 - **Wishlist** — a list of what you want, kept alongside your catalog. Owning and wishing are separate: an item can also be neither — a book you read from the library stays in your catalog, with its reading history, without being owned or wished for
 - **Series tracking** — a Series page groups your library by series with position numbers, flags likely gaps, and (with Hardcover configured) checks the full series and adds missing volumes to your wishlist in one click. Each series can carry its own synopsis, written inline or fetched from Hardcover. Rename a series (renaming onto an existing name merges the two — the quick fix for duplicate series records left by metadata lookup) or disband it entirely, right from the series card
-- **Bulk editing** — select multiple items in Browse to move them, change type or reading status, add them to or remove them from the wishlist, or set and clear their series in one go
+- **Bulk editing** — select multiple items in Browse to move them, change type or reading status, add them to or remove them from the wishlist, set and clear their series, or add and remove a tag in one go
 - **Choose your columns** — Browse's list view has a column picker (value, series, publisher, year, pages, language, added date, platform, ISBN/UPC, and more), on top of the author/type/location/status shown by default; the choice is remembered per browser, not per account
 - **Valuation report** — location-grouped, print-ready report of your collection's list-price value for insurance documentation ([print view](screenshots/valuation-report-print.png)); prices via ISBNdb
 - **Display currency** — pick from 20 currencies under Settings → Collection and every value surface follows. This is formatting, not conversion: Shelf never converts amounts between currencies, so the figure ISBNdb returns is the figure shown
@@ -271,8 +271,8 @@ marked `noindex`, and revocable at any time.
 
 | Role | Can do |
 |------|--------|
-| **Admin** | Everything: settings, users, locations, sync, bulk ops, logs, delete permanently / empty Trash |
-| **Editor** | Add/edit items, delete to Trash and restore, scan (all modes), covers (find/upload/paste URL/remove, and the cover review queue), checkout/checkin, import/export |
+| **Admin** | Everything: settings, users, locations, tag rename/scope/delete, sync, bulk ops, logs, delete permanently / empty Trash |
+| **Editor** | Add/edit items, delete to Trash and restore, scan (all modes), covers (find/upload/paste URL/remove, and the cover review queue), checkout/checkin, apply tags (one item or a Browse selection), import/export |
 | **Viewer** | Browse, search, reading status, export CSV, view stats |
 
 ## Metadata Sources

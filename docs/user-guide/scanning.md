@@ -77,6 +77,9 @@ those modes file from then on gets the tag.
   global tag, on the first successful add. There is no trip to Settings.
 - **It is sticky per device**, like the mode and location: it is still there
   after a reload, until you clear it. A phone and a laptop keep their own.
+  Renaming or deleting a tag in [Settings](settings.md#tags) does not change
+  what a saved field holds — the next add creates the old name again, so
+  retype the field after a rename.
 - **Suggestions follow the media type.** The field suggests your own tags
   that suit the selected type, plus a few starter ideas for it (Cookbook,
   Signed, First edition… for books). A type's starters stop showing once you
@@ -91,7 +94,9 @@ those modes file from then on gets the tag.
   and the [Add by hand](#add-by-hand) form — including the one a failed scan
   offers.
 
-Tags are managed from the item page; see [Items](items.md).
+Tags are applied on the item page or its edit page, or in bulk from
+[Browse](browse-and-search.md#bulk-editing), and an admin renames, scopes and
+deletes them in [Settings](settings.md#tags).
 
 ## Title search (no barcode)
 

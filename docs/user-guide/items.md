@@ -86,10 +86,14 @@ its home.
 
   Adding, editing and removing copies needs an editor or admin account.
   Viewers see the list and nothing else.
-- **Tags** — add or remove chips inline. Tags are how categories that are
-  not formats are recorded: a kids' book is a **book tagged `Kids`**, not a
-  media type of its own. The `Kids` tag is global, so it can sit on anything;
-  a later release lets you scope a tag to one media type if you want to.
+- **Tags** — add or remove chips inline, here or in the **Tags** section of
+  the edit page, where they save as you add or remove them (the edit form's
+  **Save** does not touch them). The suggestion list follows the item's type:
+  your global tags plus those scoped to that type. Tags are how categories
+  that are not formats are recorded: a kids' book is a **book tagged
+  `Kids`**, not a media type of its own. The `Kids` tag is global, so it can
+  sit on anything; an admin can scope a tag to one media type, rename it or
+  delete it in [Settings](settings.md#tags).
   Tags can also be set as items arrive: **Default tags** on Scan, Shelf Fill
   and Photo Intake tags everything a session adds (see
   [Default tags](scanning.md#default-tags)).

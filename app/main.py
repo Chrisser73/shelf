@@ -523,6 +523,9 @@ async def health():
 # Routers
 app.include_router(auth_routes.router)
 app.include_router(pages.router)
+# Before items.router: tags.router owns the static POST /api/items/bulk-tags,
+# which items.py's POST /items/{item_id} would otherwise match first.
+app.include_router(tags.router)
 app.include_router(items.router)
 # items.py was split by feature area (Lever 5); all four share the /api prefix.
 app.include_router(items_covers.router)
@@ -542,7 +545,6 @@ app.include_router(store.router)
 app.include_router(series.router)
 app.include_router(share.router)
 app.include_router(item_copies.router)
-app.include_router(tags.router)
 app.include_router(intake.router)
 app.include_router(archive.router)
 app.include_router(music.router)

@@ -13,12 +13,16 @@ def test_settings_page_has_four_section_controls(admin_client):
         assert html.count(f'data-testid="tab-{key}"') == 1
 
 
-def test_settings_page_keeps_existing_setting_surfaces(admin_client):
+def test_settings_page_keeps_existing_setting_surfaces(admin_client, db):
     """The layout is a shell change: representative existing forms survive."""
+    # The tag manager's forms are per-row, so a tag must exist to render one.
+    db.execute("INSERT INTO tags (name) VALUES ('layout-check')")
+    db.execute("COMMIT")
     html = admin_client.get("/settings").text
     assert 'action="/api/settings/display"' in html
     assert 'action="/api/settings/nav"' in html
     assert 'action="/api/settings"' in html
+    assert 'action="/api/tags/' in html
     assert "Audiobookshelf" in html
     assert "Portable archive" in html
     assert "Users" in html

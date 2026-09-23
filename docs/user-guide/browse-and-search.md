@@ -90,10 +90,16 @@ session.
 ## Tags
 
 Tags are free-form labels you invent: `signed`, `first-edition`, `book-club`,
-`to-sell`. Add them as chips on the item page, or set
+`to-sell`. Add them as chips on the item page or its edit page, to many items
+at once from the [bulk bar](#bulk-editing), or set
 [default tags](scanning.md#default-tags) while scanning so each new item
-arrives tagged; filter by them here. Tags are yours alone — they aren't
+arrives tagged; filter by them here. An admin renames, scopes and deletes
+them in [Settings](settings.md#tags). Tags are yours alone — they aren't
 synced anywhere.
+
+**Tags column.** In list view, the column picker offers an optional **Tags**
+column, off by default. It shows each item's tags as chips; tapping one
+filters Browse by that tag.
 
 ## Bulk editing
 
@@ -103,10 +109,19 @@ bar appears with actions:
 - **Move** to a location
 - **Change type**
 - **Set reading status**
+- **Add to / remove from wishlist**
 - **Set series** (or clear it)
+- **Add tag** / **Remove tag** — type a tag name or pick one, then choose the
+  button. Removing a tag from the last item that carries it deletes the tag.
+- **Delete Selected** — moves the items to Trash
 
-Editors and admins only. Bulk actions are immediate and not undoable — filter
-carefully first. A bulk action whose target no longer exists — a location
+Anyone can use **Select**; what happens next depends on your role. Move,
+Change type, Set reading status, the wishlist action and Set series are
+**admin** only. Add tag and Remove tag are for **editors and admins** — a
+viewer does not see them. Delete Selected moves items to Trash and needs an
+**editor** or admin. Bulk actions are immediate — filter carefully first.
+Only Delete is undoable (restore from Trash); a tag you added by mistake is
+removed the same way it was added. A bulk action whose target no longer exists — a location
 deleted from another tab while the bar was open, say — is refused with a
 message and changes nothing.
 

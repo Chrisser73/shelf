@@ -71,6 +71,7 @@ COLUMNS: tuple[BrowseColumn, ...] = (
     BrowseColumn("added", "Added", default_on=False),
     BrowseColumn("platform", "Platform", default_on=False),
     BrowseColumn("identifier", "ISBN/UPC", default_on=False),
+    BrowseColumn("tags", "Tags", default_on=False),
 )
 
 BY_NAME: Mapping[str, BrowseColumn] = {c.name: c for c in COLUMNS}

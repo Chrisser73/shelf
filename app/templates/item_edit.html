@@ -76,6 +76,7 @@
         <a href="#edit-identifiers" data-section-nav="identifiers" data-media-types="book audiobook ebook comic manga dvd cd video_game" data-always-visible="{{ 'true' if item.isbn or item.upc else 'false' }}" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Identifiers</a>
         <a href="#edit-location" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Location</a>
         <a href="#edit-media" data-section-nav="media" data-media-types="video_game audiobook" data-always-visible="{{ 'true' if item.platform or item.narrator or item.duration_mins is not none else 'false' }}" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Media Details</a>
+        <a href="#edit-tags" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Tags</a>
     </nav>
 
     <form id="item-edit-form" action="/api/items/{{ item.id }}" method="post" enctype="multipart/form-data" class="space-y-4">
@@ -371,6 +372,20 @@
             </a>
         </div>
     </form>
+
+    {# Outside the save form on purpose: it carries its own hx-post/hx-delete
+       controls, and nesting forms is invalid HTML that browsers silently
+       repair in ways that drop fields (design §3). #}
+    {# The heading below already names the section, so the fragment's own
+       label is hidden here; a class on the section survives the fragment's
+       outerHTML swaps, a flag passed to the include would not. #}
+    <section id="edit-tags" data-testid="edit-section-tags" class="bg-shelf-card rounded-xl border border-shelf-border p-6 space-y-4 [&_[data-tags-label]]:hidden">
+        <div>
+            <h2 class="text-lg font-semibold">Tags</h2>
+            <p class="text-sm text-shelf-muted mt-1">Tags save as you add or remove them.</p>
+        </div>
+        {% include "fragments/item_tags.html" %}
+    </section>
 </div>
 
 <script src="/static/js/scanner-engine.js"></script>

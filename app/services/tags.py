@@ -18,6 +18,7 @@ item and its tags commit together or not at all (G118).
 """
 
 import re
+import sqlite3
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -133,6 +134,123 @@ def gc_orphans(db, tag_ids) -> None:
         )
 
 
+def tag_ids_for_names(db, names) -> list:
+    """Resolve each name to its tag id (NOCASE, via the column's collation).
+    Unknown names are skipped; nothing is created — removing a name that is
+    not a tag must not make it one."""
+    out = []
+    for name in names:
+        row = db.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
+        if row:
+            out.append(row["id"])
+    return out
+
+
+class UnknownItems(ValueError):
+    """A bulk selection named item ids that are not live (unknown or
+    trashed). `count` is how many."""
+
+    def __init__(self, count: int):
+        super().__init__(f"{count} selected item(s) no longer exist")
+        self.count = count
+
+
+def bulk_tag(db, item_ids, add, remove) -> int:
+    """Add the tags named in `add` to, and remove those named in `remove`
+    from, every item in `item_ids`. Names are already normalised.
+
+    Every id must be live (`items_live`) or `UnknownItems` is raised before
+    anything is written — the whole selection applies or none of it does.
+    Tags left with no association are garbage-collected. Returns how many
+    distinct items had their tag set changed. The caller holds the write
+    lock, so the check and the writes see the same rows (G18).
+    """
+    item_ids = list(dict.fromkeys(item_ids))
+    live = set()
+    chunk_size = 500
+    for start in range(0, len(item_ids), chunk_size):
+        chunk = item_ids[start:start + chunk_size]
+        placeholders = ",".join("?" for _ in chunk)
+        live.update(
+            r["id"] for r in db.execute(
+                f"SELECT id FROM items_live WHERE id IN ({placeholders})", chunk,
+            ).fetchall()
+        )
+    missing = len(item_ids) - len(live)
+    if missing:
+        raise UnknownItems(missing)
+
+    add_ids = [get_or_create_tag(db, name) for name in add]
+    remove_ids = tag_ids_for_names(db, remove)
+    changed = set()
+    for item_id in item_ids:
+        for tag_id in add_ids:
+            cursor = db.execute(
+                "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
+                (item_id, tag_id),
+            )
+            if cursor.rowcount:
+                changed.add(item_id)
+        if remove_ids and detach_tags(db, item_id, remove_ids):
+            changed.add(item_id)
+    gc_orphans(db, remove_ids + add_ids)
+    return len(changed)
+
+
+class TagError(ValueError):
+    """Base for the tag manager's refusals; each maps to a `tag_error` code."""
+
+
+class BlankTag(TagError):
+    pass
+
+
+class DuplicateTag(TagError):
+    pass
+
+
+class TagNotFound(TagError):
+    pass
+
+
+class InvalidScope(TagError):
+    pass
+
+
+def update_tag(db, tag_id: int, name: str, media_type) -> None:
+    """Rename and/or re-scope one tag. `media_type` ''/None makes it global;
+    otherwise it must be a `config.MEDIA_TYPES` key. A rename onto another
+    tag's name (any case) raises `DuplicateTag` — the UNIQUE NOCASE column
+    decides, so there is no read-then-write gap. A case-only rename of the
+    same tag is legal. Touches `tags` only: scope is advisory, so no item
+    loses an association."""
+    name = normalize_tag(name)
+    if not name:
+        raise BlankTag()
+    media_type = media_type or None
+    if media_type is not None and media_type not in config.MEDIA_TYPES:
+        raise InvalidScope()
+    try:
+        cursor = db.execute(
+            "UPDATE tags SET name = ?, media_type = ? WHERE id = ?",
+            (name, media_type, tag_id),
+        )
+    except sqlite3.IntegrityError:
+        raise DuplicateTag() from None
+    if cursor.rowcount == 0:
+        raise TagNotFound()
+
+
+def delete_tag(db, tag_id: int) -> None:
+    """Delete one tag and every association it has, including those on
+    trashed items. `item_tags` would go by ON DELETE CASCADE too; deleting
+    them explicitly keeps this independent of the foreign_keys pragma."""
+    db.execute("DELETE FROM item_tags WHERE tag_id = ?", (tag_id,))
+    cursor = db.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+    if cursor.rowcount == 0:
+        raise TagNotFound()
+
+
 def tags_for_items(db, ids) -> dict:
     """Map real item id -> list of tag names, NOCASE-sorted, for the ids
     given. One grouped query per chunk of 500 ids (SQLite's parameter
@@ -161,7 +279,7 @@ def list_tags_with_counts(db) -> list:
     """Every tag with its live association count and how many of those
     associated items carry a media type the tag is scoped away from.
 
-    No caller today — the tag-manager plan wires this in. Counts only
+    The Settings tag manager lists these. Counts only
     untrashed items (the items_live relation), so a trashed item's
     association counts toward neither `count` nor `out_of_scope_count`.
     """

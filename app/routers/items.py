@@ -929,6 +929,7 @@ async def search_items(
             f"{where} ORDER BY {order_clause} LIMIT ? OFFSET ?",
             [get_overdue_days(db)] + params + [per_page, offset],
         ).fetchall()
+        tags_by_item = tags_svc.tags_for_items(db, [row["id"] for row in items])
 
         # Cross-filter counts for dropdowns (page 1 only). Each group is the
         # same where-clause with its own filter excluded, so the number beside
@@ -953,6 +954,7 @@ async def search_items(
     from datetime import datetime, timedelta
     ctx = {
         "items": items,
+        "tags_by_item": tags_by_item,
         "media_types": MEDIA_TYPES,
         "has_more": has_more,
         "load_more_url": load_more_url,

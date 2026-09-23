@@ -199,6 +199,66 @@ def test_location_delete_uses_the_same_delegated_confirm(live_server, authed_pag
     expect(_remove_button(authed_page, name)).to_have_count(0)
 
 
+def _seed_tag(data_dir, item_id: int, name: str) -> int:
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        cur = conn.execute("INSERT INTO tags (name) VALUES (?)", (name,))
+        tag_id = cur.lastrowid
+        conn.execute(
+            "INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?)", (item_id, tag_id)
+        )
+        conn.commit()
+        return tag_id
+    finally:
+        conn.close()
+
+
+def test_tag_manager_rename_and_delete(live_server, authed_page):
+    """Settings > Library tag manager: rename a tag, then delete it. The
+    delete confirmation comes from the delegated data-confirm listener, so
+    the dialog message is recorded and asserted exactly rather than merely
+    accepted (G28 — an accepted dialog passes on any message, or none)."""
+    data_dir = live_server["data_dir"]
+    item_id = insert_item(data_dir, title="Tag Manager Probe", isbn="9780009995002")
+    old_name = "E2E Settings Tag Old"
+    new_name = "E2E Settings Tag New"
+    tag_id = _seed_tag(data_dir, item_id, old_name)
+
+    # Library is the default Settings tab (recon B-10) — no tab click needed.
+    authed_page.goto(f"{live_server['url']}/settings")
+    authed_page.wait_for_load_state("networkidle")
+
+    row = authed_page.locator(f"[data-testid='tag-row-{tag_id}']")
+    expect(row).to_contain_text(old_name)
+    row.get_by_text("Edit", exact=True).click()
+    row.locator("input[name=name]").fill(new_name)
+    # The POST 303s back to /settings — the page is already there, so
+    # wait_for_url would match the current document instead of the new one.
+    with authed_page.expect_navigation():
+        row.get_by_role("button", name="Save tag").click()
+
+    row = authed_page.locator(f"[data-testid='tag-row-{tag_id}']")
+    expect(row).to_contain_text(new_name)
+
+    messages = []
+
+    def accept(dialog):
+        messages.append(dialog.message)
+        dialog.accept()
+
+    authed_page.once("dialog", accept)
+    with authed_page.expect_navigation():
+        row.get_by_role("button", name="Delete", exact=True).click()
+
+    assert messages == [
+        f"Delete tag '{new_name}' from every item, including items in Trash?"
+    ]
+    # Reload so this is the server's answer, not a stale DOM.
+    authed_page.goto(f"{live_server['url']}/settings")
+    authed_page.wait_for_load_state("networkidle")
+    expect(authed_page.locator(f"[data-testid='tag-row-{tag_id}']")).to_have_count(0)
+
+
 def test_blocked_borrower_delete_shows_the_settings_banner(live_server, authed_page):
     """An active loan blocks the delete and answers with a page, not raw JSON."""
     name = "E2E Blocked Borrower"

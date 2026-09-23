@@ -33,6 +33,27 @@ def _location_id(data_dir, item_id: int):
         conn.close()
 
 
+def _item_tag_names(data_dir, item_id: int) -> list:
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        rows = conn.execute(
+            "SELECT t.name FROM item_tags it JOIN tags t ON t.id = it.tag_id "
+            "WHERE it.item_id = ? ORDER BY t.name COLLATE NOCASE",
+            (item_id,),
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        conn.close()
+
+
+def _tag_row_exists(data_dir, name: str) -> bool:
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        return conn.execute("SELECT 1 FROM tags WHERE name = ?", (name,)).fetchone() is not None
+    finally:
+        conn.close()
+
+
 def test_bulk_move_apply_moves_selected_list_item(live_server, authed_page):
     """Selecting a list row, choosing a location and pressing Apply must move it.
 
@@ -71,6 +92,68 @@ def test_bulk_move_apply_moves_selected_list_item(live_server, authed_page):
         apply_button.click()
 
     assert _location_id(live_server["data_dir"], item_id) == location_id
+
+
+def test_bulk_tag_add_then_remove_on_selected_items(live_server, authed_page):
+    """Adding a tag to a Browse selection tags exactly the selected items,
+    and removing it again clears them and garbage-collects the orphaned
+    `tags` row — mirroring the bulk-move test above, since the bulk-tag
+    controls have the same dead-Alpine-expression risk the move Apply had.
+    """
+    data_dir = live_server["data_dir"]
+    tag_name = "E2E Bulk Tag 7c1"
+    item_a = insert_item(data_dir, title="Bulk Tag Probe A", isbn="9780009994029")
+    item_b = insert_item(data_dir, title="Bulk Tag Probe B", isbn="9780009994036")
+    control = insert_item(data_dir, title="Bulk Tag Probe Control", isbn="9780009994043")
+
+    authed_page.goto(f"{live_server['url']}/browse")
+    authed_page.wait_for_load_state("networkidle")
+    authed_page.locator("[data-testid='view-list']").click()
+    expect(authed_page.locator(f"tr[data-item-id='{item_a}']")).to_be_visible()
+    expect(authed_page.locator(f"tr[data-item-id='{item_b}']")).to_be_visible()
+
+    authed_page.get_by_role("button", name="Select", exact=True).click()
+    authed_page.locator(f"tr[data-item-id='{item_a}']").click()
+    authed_page.locator(f"tr[data-item-id='{item_b}']").click()
+    expect(authed_page.get_by_text("2 selected", exact=True)).to_be_visible()
+
+    authed_page.locator("[data-testid='bulk-tag-input']").fill(tag_name)
+    # The assertion below reads the database, not the page, so the POST
+    # response is the whole contract — the reload that follows it (and the
+    # location.reload() the handler fires) is irrelevant here (G83).
+    with authed_page.expect_response(
+        lambda r: "/api/items/bulk-tags" in r.url and r.request.method == "POST"
+    ):
+        authed_page.locator("[data-testid='bulk-tag-add']").click()
+
+    assert _item_tag_names(data_dir, item_a) == [tag_name]
+    assert _item_tag_names(data_dir, item_b) == [tag_name]
+    assert _item_tag_names(data_dir, control) == []
+    # The result toast is carried across the handler's location.reload() —
+    # shown before it, the reload wiped it (test-drive Observation 2).
+    expect(authed_page.locator("#toast-container")).to_contain_text(
+        f"Added {tag_name} to 2 item(s)"
+    )
+
+    # The reload landed us back on /browse with select mode reset (view mode
+    # persists via localStorage, select mode does not) — re-select both rows
+    # and remove the tag.
+    authed_page.wait_for_load_state("networkidle")
+    authed_page.locator("[data-testid='view-list']").click()
+    authed_page.get_by_role("button", name="Select", exact=True).click()
+    authed_page.locator(f"tr[data-item-id='{item_a}']").click()
+    authed_page.locator(f"tr[data-item-id='{item_b}']").click()
+    expect(authed_page.get_by_text("2 selected", exact=True)).to_be_visible()
+
+    authed_page.locator("[data-testid='bulk-tag-input']").fill(tag_name)
+    with authed_page.expect_response(
+        lambda r: "/api/items/bulk-tags" in r.url and r.request.method == "POST"
+    ):
+        authed_page.locator("[data-testid='bulk-tag-remove']").click()
+
+    assert _item_tag_names(data_dir, item_a) == []
+    assert _item_tag_names(data_dir, item_b) == []
+    assert _tag_row_exists(data_dir, tag_name) is False
 
 
 def test_shortcut_help_button_opens_and_modal_controls_close(live_server, authed_page):

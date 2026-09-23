@@ -206,6 +206,42 @@ def test_q_truncation(admin_client, db, monkeypatch):
         assert m and m.group(1) == truncated, url
 
 
+def test_tags_lookup_runs_once_per_request(admin_client, seeded_library, monkeypatch):
+    """T6: the Browse list view's Tags column feeds every row's chips from
+    one `tags_svc.tags_for_items` call -- never a per-row `item_tags` query.
+    The wrapper counts calls; `item_row.html` makes none of its own, so one
+    call per request is the whole contract.
+    """
+    from app.routers import pages as pages_module
+    from app.services import tags as tags_svc
+
+    real_tags_for_items = tags_svc.tags_for_items
+    calls = []
+
+    def counting_wrapper(db, ids):
+        calls.append(list(ids))
+        return real_tags_for_items(db, ids)
+
+    monkeypatch.setattr(tags_svc, "tags_for_items", counting_wrapper)
+    # 9 rows seeded by seeded_library. `/browse` reads DEFAULT_PAGE_SIZE from
+    # the module at call time, so patching it here is enough; `search_items`'s
+    # `per_page` is a FastAPI parameter default bound once at def time (the
+    # "Config import trap" in CLAUDE.md), so /api/search gets an explicit
+    # per_page= instead -- either way, non-empty rows land on both pages.
+    monkeypatch.setattr(pages_module, "DEFAULT_PAGE_SIZE", 3)
+
+    for url in (
+        "/browse?view=list",
+        "/api/search?view=list&page=1&per_page=3",
+        "/api/search?view=list&page=2&per_page=3",
+    ):
+        calls.clear()
+        resp = admin_client.get(url)
+        assert resp.status_code == 200, url
+        assert len(calls) == 1, (url, calls)
+        assert calls[0], (url, "expected a non-empty id list")
+
+
 def test_no_duplicate_ids_on_initial_render(admin_client, seeded_library):
     html = admin_client.get("/browse").text
     for sel in SELECT_IDS:

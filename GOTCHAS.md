@@ -1751,6 +1751,12 @@ python -m pytest tests/e2e/test_responsive.py -m e2e -q
   entire defence; the numbers were then measured by hand at 320 px and 390 px
   rather than assumed. **When your element only exists after a click, the gate
   is not your gate — measure it yourself and put the numbers in the commit.**
+  Measure **element boxes**, not only `document.documentElement.scrollWidth`:
+  a child of a `position: fixed` bar (the Browse bulk bar) can stick out past
+  the viewport without widening the document at all. On
+  `feat/tags-manage-and-apply` (2026-09-23, `f10de5e`) the document reported
+  no overflow at 320 px while the Series group's Apply button already ended at
+  344 px (a pre-existing overflow, not introduced there).
 - **Status:** gated — `tests/e2e/test_responsive.py` (in `make test-e2e` and
   in CI), *for content in a page's default state only* (see above). The gate
   catches the *consequence*; the two rules above are how you fix it once it
@@ -5374,6 +5380,37 @@ grep -n 'type="submit" class="sr-only"' app/templates/scan.html app/templates/sh
   misses the persistent partial state — see
   `tests/test_tag_defaults.py::TestTagWriteFailureLeavesNoPartialItem`.
 - **Status:** documented; pinned for Scan, manual add and Photo Intake.
+
+## G119 — When adding a static path beside a dynamic one on a router included later
+
+- **Rule:** check the application's **final** route order, not the decorators
+  in the file you are editing. A path parameter's type annotation
+  (`item_id: int`) is validation that runs *after* Starlette has chosen the
+  route — it does not stop `/items/bulk-tags` from matching
+  `/items/{item_id}`. The first route whose path and method fully match wins,
+  and routers are matched in `app.include_router` order. Register the static
+  route first: move its router's `include_router` ahead of the dynamic
+  route's router, or put the route in the same router above the dynamic one.
+- **Why:** the match is decided before the parameter ever converts, so the
+  wrong handler answers — here with a 422 path-validation error, which reads
+  like a bad request body rather than a routing mistake. A request-level test
+  catches it but does not name the cause.
+- **Evidence:** `feat/tags-manage-and-apply`, 2026-09-23. `POST
+  /api/items/bulk-tags` was planned on `tags.router`, included after
+  `items.router`, whose `POST /items/{item_id}` took the path first (found by
+  the codex plan review, R1). Fixed in `265ae34` by including `tags.router`
+  before `items.router`; `tests/test_bulk_tags.py::test_route_order_reaches_the_bulk_tags_handler`
+  pins it.
+- **Verify:** build an HTTP scope for the method and path, walk
+  `app.router.routes`, and take the first `route.matches(scope)[0] ==
+  Match.FULL`; its endpoint must be the handler you meant.
+  ```bash
+  grep -n 'include_router' app/main.py
+  grep -n '@router\.\(get\|post\|put\|patch\|delete\)("/[a-z_-]*/{' app/routers/*.py
+  # a static sibling of any hit must be matched before it
+  ```
+- **Status:** active. Lint candidate: a test that walks every static route and
+  asserts no earlier route fully matches it.
 
 ## Graveyard
 

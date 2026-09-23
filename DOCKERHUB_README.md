@@ -147,15 +147,15 @@ key material.
 - Wishlist — a list of what you want, alongside your catalog; an item can also be neither owned nor wished for, keeping its reading history
 - Public share links — read-only wishlist or collection pages for gift ideas, revocable anytime
 - Goodreads & StoryGraph import — upload your export as-is; format auto-detected, covers fetched automatically
-- Custom tags — free-form tags (`signed`, `first-edition`, …) with a tag filter on Browse, and default tags for a scanning session on Scan, Shelf Fill or Photo Intake
-- Bulk editing — select items in Browse to move them, change type or reading status, add to or remove from the wishlist, or set and clear series in one go
+- Custom tags — free-form tags (`signed`, `first-edition`, …) on the item and edit pages or applied in bulk from Browse, with a tag filter and an optional Tags column on Browse, a tag manager in Settings (rename, scope, delete, counts), and default tags for a scanning session on Scan, Shelf Fill or Photo Intake
+- Bulk editing — select items in Browse to move them, change type or reading status, add to or remove from the wishlist, set and clear series, or add and remove a tag in one go
 - Valuation report — location-grouped, print-ready collection value report for insurance (via ISBNdb)
 - Display currency — 20 currencies for every value surface (formatting, not conversion)
 - CSV import/export, plus a portable archive — export the whole collection as one zip **including physical copies and cover art** and merge it into any Shelf instance without refetching a cover
 
 ### Multi-User
-- **Admin** — full control: settings, users, locations, sync, bulk ops, logs, delete permanently / empty Trash
-- **Editor** — add/edit items, delete to Trash and restore, scan, manage covers, checkout/checkin
+- **Admin** — full control: settings, users, locations, tag rename/scope/delete, sync, bulk ops, logs, delete permanently / empty Trash
+- **Editor** — add/edit items, delete to Trash and restore, scan, manage covers, apply tags, checkout/checkin
 - **Viewer** — browse, search, reading status, export, view stats
 
 ## Optional Integrations

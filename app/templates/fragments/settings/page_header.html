@@ -18,3 +18,19 @@
     {% endif %}
 </div>
 {% endif %}
+
+{% set tag_error = request.query_params.get('tag_error') %}
+{% if tag_error in ('blank', 'duplicate', 'missing', 'scope') %}
+<div data-testid="tag-error-banner"
+     class="bg-shelf-bg text-shelf-error border border-shelf-border rounded-lg px-4 py-2 text-sm mb-6">
+    {% if tag_error == 'blank' %}
+    Tag name is required.
+    {% elif tag_error == 'duplicate' %}
+    A tag with that name already exists — merging tags is not supported yet.
+    {% elif tag_error == 'missing' %}
+    That tag no longer exists.
+    {% else %}
+    Choose a media type from the list.
+    {% endif %}
+</div>
+{% endif %}

@@ -8,6 +8,7 @@ function browsePage() {
         bulkStatusVal: '',
         bulkWishlistVal: '',
         bulkSeriesVal: '',
+        bulkTagVal: '',
         filterPills: [],
         viewMode: localStorage.getItem('shelf-view') || 'grid',
         // viewMode is the only thing that decides whether the list view
@@ -64,6 +65,14 @@ function browsePage() {
             document.querySelector('[name="sort"]')?.addEventListener('change', function(e) {
                 localStorage.setItem('shelf-sort', e.target.value);
             });
+            try {
+                var flash = sessionStorage.getItem('shelf-bulk-flash');
+                if (flash) {
+                    sessionStorage.removeItem('shelf-bulk-flash');
+                    flash = JSON.parse(flash);
+                    showToast(flash.message, flash.type);
+                }
+            } catch (e) {}
             // Show keyboard shortcut hint on first visit
             if (!localStorage.getItem('shelf-shortcuts-seen')) {
                 localStorage.setItem('shelf-shortcuts-seen', '1');
@@ -449,6 +458,43 @@ function browsePage() {
                 }
             } catch (e) {
                 showToast('Update failed: ' + e.message, 'error');
+            }
+        },
+
+        async bulkTags(mode) {
+            // Capture both before the await -- selectedIds/bulkTagVal can
+            // change (or the component re-render) while the fetch is in
+            // flight (G2).
+            var name = (this.bulkTagVal || '').trim();
+            if (!name || !this.selectedIds.length) return;
+            var ids = this.selectedIds;
+            try {
+                var resp = await fetch('/api/items/bulk-tags', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken()},
+                    body: JSON.stringify({
+                        item_ids: ids,
+                        add: mode === 'add' ? [name] : [],
+                        remove: mode === 'remove' ? [name] : []
+                    })
+                });
+                var data = await resp.json();
+                if (data.ok) {
+                    // The reload below would wipe a toast shown now; init()
+                    // shows this one after the page comes back.
+                    try {
+                        sessionStorage.setItem('shelf-bulk-flash', JSON.stringify({
+                            message: data.message, type: data.updated ? 'success' : 'info'
+                        }));
+                    } catch (e) {}
+                    this.selectedIds = [];
+                    this.bulkTagVal = '';
+                    location.reload();
+                } else {
+                    showToast(data.message || 'Tag update failed', 'error');
+                }
+            } catch (e) {
+                showToast('Tag update failed: ' + e.message, 'error');
             }
         },
 

@@ -209,6 +209,62 @@ def test_item_edit_save(live_server, authed_page):
     expect(authed_page.locator("body")).to_contain_text("Updated Title")
 
 
+def test_edit_page_tag_island_adds_and_removes_without_reload(live_server, authed_page):
+    """The edit-page tag island (#item-tags) adds and removes a tag purely
+    via HTMX — no navigation — and adds no field of its own to the Save
+    form, so the rest of the edit still saves normally afterward."""
+    item_id = insert_item(
+        live_server["data_dir"],
+        title="Tag Island Probe",
+        media_type="book",
+        isbn="9780000091253",
+    )
+    tag_name = "E2E Island Tag 9f2"
+
+    authed_page.goto(f"{live_server['url']}/item/{item_id}/edit")
+    authed_page.wait_for_load_state("networkidle")
+
+    # A marker that only a full navigation would clear.
+    authed_page.evaluate("window.__e2eTagIslandMarker = 'still-here'")
+
+    name_input = authed_page.locator("#item-tags input[name=name]")
+    name_input.fill(tag_name)
+    with authed_page.expect_response(
+        lambda r: r.url.split("?")[0].endswith(f"/api/items/{item_id}/tags")
+        and r.request.method == "POST"
+    ):
+        name_input.press("Enter")
+
+    chip = authed_page.locator("#item-tags").get_by_text(tag_name, exact=True)
+    expect(chip).to_be_visible()
+    assert authed_page.evaluate("window.__e2eTagIslandMarker") == "still-here"
+    # The section heading names the island, so the fragment's own label is
+    # hidden — and stays hidden after the add swapped the fragment out.
+    label = authed_page.locator("#edit-tags [data-tags-label]")
+    expect(label).to_have_count(1)
+    expect(label).to_be_hidden()
+    remove_box = authed_page.locator("#item-tags button[title='Remove tag']").bounding_box()
+    assert remove_box["width"] >= 24 and remove_box["height"] >= 24, remove_box
+
+    with authed_page.expect_response(
+        lambda r: f"/api/items/{item_id}/tags/" in r.url.split("?")[0]
+        and r.request.method == "DELETE"
+    ):
+        authed_page.locator("#item-tags button[title='Remove tag']").click()
+
+    expect(
+        authed_page.locator("#item-tags").get_by_text(tag_name, exact=True)
+    ).to_have_count(0)
+    assert authed_page.evaluate("window.__e2eTagIslandMarker") == "still-here"
+
+    # The island added no field to the save form — the rest of the edit
+    # still saves normally.
+    authed_page.locator("input[name=title]").fill("Tag Island Probe Updated")
+    authed_page.locator("[data-testid=save-btn]").click()
+    authed_page.wait_for_url(f"{live_server['url']}/item/{item_id}", timeout=10_000)
+    expect(authed_page.locator("body")).to_contain_text("Tag Island Probe Updated")
+
+
 def test_owned_box_disables_and_clears_the_wishlist_box(live_server, authed_page):
     """#125: the two ownership boxes are independent, except that an owned
     item cannot be wishlisted — checking "I own this" clears and disables the
