@@ -1,5 +1,5 @@
 # UPGRADE V1 (by Chrisser73)
-[![CHANGELIST]([https://img.shields.io/github/license/dgahagan/shelf](https://github.com/Chrisser73/shelf/blob/feature/ui-improvements-upgrades-arm64build/CHANGES.md))](CHANGELIST)
+[CHANGELIST](https://github.com/Chrisser73/shelf/blob/feature/ui-improvements-upgrades-arm64build/CHANGES.md)
 
 # Shelf
 
