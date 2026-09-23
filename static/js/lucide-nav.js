@@ -18,6 +18,12 @@
                 Newspaper: window.lucide.Newspaper,
                 Compass: window.lucide.Compass,
                 ChartNoAxesColumn: window.lucide.ChartNoAxesColumn,
+                RefreshCw: window.lucide.RefreshCw,
+                PenLine: window.lucide.PenLine,
+                Heart: window.lucide.Heart,
+                Search: window.lucide.Search,
+                ListFilter: window.lucide.ListFilter,
+                ArrowDownUp: window.lucide.ArrowDownUp,
             },
             attrs: {width: 20, height: 20, 'stroke-width': 2},
         });
