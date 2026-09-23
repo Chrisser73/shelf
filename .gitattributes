@@ -1,0 +1,2 @@
+# Shelf wird in WSL/Linux/Docker gebaut: Textdateien immer mit LF speichern.
+* text=auto eol=lf
