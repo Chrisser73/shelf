@@ -9,6 +9,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY scripts/fetch_platform_logos.py ./scripts/fetch_platform_logos.py
+RUN python scripts/fetch_platform_logos.py
+
 COPY app/ ./app/
 COPY static/ ./static/
 COPY entrypoint.sh .
