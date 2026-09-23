@@ -1,6 +1,27 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(none);
+
+/* Shelf is server-rendered, so make its template and browser-side source
+   directories explicit instead of relying on framework-specific discovery. */
+@source "../../app/templates";
+@source "../js";
+
+/* Former tailwind.config.js theme, now expressed as native CSS theme tokens. */
+@theme {
+  --color-shelf-bg: #0f1117;
+  --color-shelf-card: #1a1d27;
+  --color-shelf-hover: #242836;
+  --color-shelf-accent: #6366f1;
+  --color-shelf-accent2: #818cf8;
+  --color-shelf-text: #e2e8f0;
+  --color-shelf-muted: #94a3b8;
+  --color-shelf-border: #2d3148;
+  --color-shelf-success: #22c55e;
+  --color-shelf-warning: #eab308;
+  --color-shelf-error: #ef4444;
+}
+
+/* Keep Shelf's existing class-based dark-mode contract. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* App-wide styles previously inlined in base.html */
 body { background-color: #0f1117; color: #e2e8f0; }
