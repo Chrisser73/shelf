@@ -4,6 +4,12 @@ export DATE
 DOCS  := reports
 MODEL ?= claude-sonnet-4-6
 MIN_TESTS ?= 880
+VENV ?= .venv
+PYTHON ?= $(VENV)/bin/python
+PIP ?= $(VENV)/bin/pip
+# WSL commonly exposes a Windows Node installation as node.exe while native
+# Linux/macOS setups expose it as node. Resolve either form for local helpers.
+NODE ?= $(shell command -v node 2>/dev/null || command -v node.exe 2>/dev/null)
 
 # Test invocation flags. Quiet by default: `make test` output is read far more
 # often by agents than by humans, and one PASSED line per test (917 and rising)
@@ -15,7 +21,7 @@ PYTEST_FLAGS ?= -q --tb=short --no-header
 # split. Never add -p no:cacheprovider here — test-fast's --lf needs the cache.
 PYTEST_PAR   ?= -n auto --dist loadfile
 
-.PHONY: setup platform-logos css test test-verbose test-fast test-e2e test-contract test-all \
+.PHONY: setup platform-logos lucide css test test-verbose test-fast test-e2e test-contract test-all \
         check-deps check-licenses check-secrets check-csrf check-alpine check-sw-version check-tests check-deleted \
         badges check-badges check-roadmap \
         checks checks-fast \
@@ -32,17 +38,22 @@ PYTEST_PAR   ?= -n auto --dist loadfile
 # ---------------------------------------------------------------------------
 
 setup:
-	pip install -r requirements-dev.txt
+	@test -x $(PYTHON) || python3 -m venv $(VENV)
+	$(PIP) install -r requirements-dev.txt
 	npm install
+	$(MAKE) lucide
 	$(MAKE) platform-logos
-	playwright install chromium
+	$(PYTHON) -m playwright install chromium
 	@echo "=== Setup complete ==="
 
 # The logos are a pinned, generated development dependency rather than files
 # carried in this fork. They are deliberately ignored by Git; rerun this target
 # to restore them after deleting static/icons/platforms or to refresh a clone.
 platform-logos:
-	.venv/bin/python scripts/fetch_platform_logos.py
+	$(PYTHON) scripts/fetch_platform_logos.py
+
+lucide:
+	"$(NODE)" scripts/copy_lucide.cjs
 
 # ---------------------------------------------------------------------------
 # Frontend assets
