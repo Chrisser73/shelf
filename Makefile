@@ -15,7 +15,7 @@ PYTEST_FLAGS ?= -q --tb=short --no-header
 # split. Never add -p no:cacheprovider here — test-fast's --lf needs the cache.
 PYTEST_PAR   ?= -n auto --dist loadfile
 
-.PHONY: setup css test test-verbose test-fast test-e2e test-contract test-all \
+.PHONY: setup platform-logos css test test-verbose test-fast test-e2e test-contract test-all \
         check-deps check-licenses check-secrets check-csrf check-alpine check-sw-version check-tests check-deleted \
         badges check-badges check-roadmap \
         checks checks-fast \
@@ -34,8 +34,15 @@ PYTEST_PAR   ?= -n auto --dist loadfile
 setup:
 	pip install -r requirements-dev.txt
 	npm install
+	$(MAKE) platform-logos
 	playwright install chromium
 	@echo "=== Setup complete ==="
+
+# The logos are a pinned, generated development dependency rather than files
+# carried in this fork. They are deliberately ignored by Git; rerun this target
+# to restore them after deleting static/icons/platforms or to refresh a clone.
+platform-logos:
+	.venv/bin/python scripts/fetch_platform_logos.py
 
 # ---------------------------------------------------------------------------
 # Frontend assets
