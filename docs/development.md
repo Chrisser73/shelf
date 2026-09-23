@@ -62,7 +62,7 @@ than on a push to `main`:
 | `restamp` | Push to `main` only. Rebuilds with `make css` and `make badges`, then commits **only the generated paths that actually changed** — any of `README.md`, `static/css/app.css`, `static/sw.js`, and never one already current — as `github-actions[bot]` (`Restamp generated output after merge`) and pushes to `main`. `test`, `css` and `e2e` below check out whatever this job produced (or the pushed commit unchanged, on a pull request or when nothing needed restamping) rather than the raw push |
 | `test` | `make test` and `make checks-fast` |
 | `e2e` | `make css`, then `make test-e2e` — the suite is always judged against a stylesheet rebuilt from the templates in that checkout |
-| `css` | Rebuilds with `make css`. The **rebuild** runs on every event, so a template or `tailwind.config.js` change that breaks compilation still fails cheaply. The **comparison** against the committed output fails on push to `main` and is advisory (a `::notice::`) on a pull request |
+| `css` | Rebuilds with `make css`. The **rebuild** runs on every event, so a template or `static/css/input.css` change that breaks compilation still fails cheaply. The **comparison** against the committed output fails on push to `main` and is advisory (a `::notice::`) on a pull request |
 | `generated-output` | Pull requests only. Fails if the merge result changes `static/css/app.css`, `sw.js`'s `SW_VERSION` or either README badge count, relative to the base branch |
 
 The split exists because **a pull request carries no generated output** — see
