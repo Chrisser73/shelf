@@ -1,5 +1,5 @@
-# UPGRADE V1 (by Chrisser73)
-[CHANGELIST](https://github.com/Chrisser73/shelf/blob/feature/ui-improvements-upgrades-arm64build/CHANGES.md)
+# [UPGRADE V1](https://github.com/Chrisser73/shelf/blob/feature/ui-improvements-upgrades-arm64build/CHANGES.md) (by Chrisser73)
+
 
 # Shelf
 
