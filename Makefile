@@ -42,15 +42,16 @@ setup:
 # ---------------------------------------------------------------------------
 
 # Rebuild the committed Tailwind stylesheet after changing templates,
-# static/js, or tailwind.config.js. Resolves tailwind from node_modules
+# static/js, or static/css/input.css. Resolves the dedicated v4 CLI from
+# node_modules
 # (version pinned in package.json) rather than re-fetching it over the network
 # on every invocation — run `npm install` / `make setup` first.
 # app.css is precached by the service worker, so a rebuild must rename its
 # cache or browsers keep serving the stale copy. Stamping SW_VERSION from the
 # precache digest here is what makes that automatic (scripts/stamp_sw_version.py).
 css:
-	npx tailwindcss -c tailwind.config.js -i static/css/input.css -o static/css/app.css --minify
-	python scripts/stamp_sw_version.py
+	npx @tailwindcss/cli -i static/css/input.css -o static/css/app.css --minify
+	.venv/bin/python scripts/stamp_sw_version.py
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -252,7 +253,15 @@ dev:
 	docker compose up -d --build
 
 dev-local:
-	DATA_DIR=./data-dev .venv/bin/uvicorn app.main:app --reload
+	@set -e; \
+		npx @tailwindcss/cli -i static/css/input.css -o static/css/app.css --minify --watch --poll & \
+		css_pid=$$!; \
+		WATCHFILES_FORCE_POLLING=true DATA_DIR=./data-dev .venv/bin/uvicorn app.main:app --reload & \
+		app_pid=$$!; \
+		npx browser-sync start --config scripts/browser-sync.cjs & \
+		sync_pid=$$!; \
+		trap 'kill $$css_pid $$app_pid $$sync_pid 2>/dev/null || true' EXIT INT TERM; \
+		wait $$app_pid
 
 dev-down:
 	docker compose down
