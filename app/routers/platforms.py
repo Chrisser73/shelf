@@ -15,10 +15,21 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+def _platform_name_and_slug(value: str) -> tuple[str, str]:
+    """Split ``Display name (slug)`` while preserving the legacy name-only form."""
+    value = value.strip()
+    explicit = re.fullmatch(r"(.+?)\s*\(([^()]+)\)\s*", value)
+    if explicit:
+        name, requested_slug = (part.strip() for part in explicit.groups())
+        slug = _slugify(requested_slug)
+        if name and slug:
+            return name, slug
+    return value, _slugify(value)
+
+
 @router.post("")
 async def create_platform(name: str = Form(...)):
-    name = name.strip()
-    slug = _slugify(name)
+    name, slug = _platform_name_and_slug(name)
     if not slug:
         return RedirectResponse(url="/settings", status_code=303)
     with get_db() as db:

@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 
-SVG_DIRECTORY = Path(__file__).resolve().parents[2] / "static" / "icons" / "svg"
-SVG_PREFIX = "icons/svg/"
+SVG_DIRECTORY = Path(__file__).resolve().parents[2] / "static" / "icons" / "platforms"
+SVG_PREFIX = "icons/platforms/"
+LEGACY_SVG_PREFIX = "icons/svg/"
 
 # First guesses only: a saved Settings mapping always takes precedence.
 DEFAULT_PLATFORM_LOGOS = {
@@ -49,6 +50,14 @@ def available_svg_paths() -> list[str]:
     return [SVG_PREFIX + path.name for path in sorted(SVG_DIRECTORY.glob("*.svg"))]
 
 
+def available_svg_choices() -> list[dict[str, str]]:
+    """Selectable paths with human-readable labels for the Settings control."""
+    return [
+        {"path": path, "name": Path(path).stem.replace("_", " ").replace("-", " ").title()}
+        for path in available_svg_paths()
+    ]
+
+
 def normalise_svg_path(value: str) -> str | None:
     """Accept only SVG files supplied by this application, never arbitrary URLs."""
     value = (value or "").strip().replace("\\", "/")
@@ -56,6 +65,10 @@ def normalise_svg_path(value: str) -> str | None:
         value = value.removeprefix("/static/")
     elif value.startswith("static/"):
         value = value.removeprefix("static/")
+    # Existing mappings created before the dependency moved remain valid as
+    # soon as the corresponding filename is installed in its new location.
+    if value.startswith(LEGACY_SVG_PREFIX):
+        value = SVG_PREFIX + value.removeprefix(LEGACY_SVG_PREFIX)
     return value if value in available_svg_paths() else None
 
 
