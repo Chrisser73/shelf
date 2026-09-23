@@ -15,7 +15,7 @@ from app.auth import require_role
 logger = logging.getLogger(__name__)
 from app.config import MEDIA_TYPES, HTTP_TIMEOUT, DEFAULT_PAGE_SIZE, canonical_media_type
 from app.database import (get_db, get_setting, gc_orphaned_series_meta,
-                          get_reading_history)
+                          get_reading_history, get_game_platforms)
 from app.routers.series import MAX_SERIES_NAME
 from app.routers import items_common
 from app.routers import items_scan_modes
@@ -681,6 +681,7 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
         pub_year = None
 
     platform = (form.get("platform") or "").strip() or None
+    collector_condition = (form.get("collector_condition") or "").strip() or None
     language = form.get("language", "").strip() or None
 
     # #19 "copy from" prefill: series_name + location_id are optional and
@@ -718,6 +719,7 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
                     publisher=form.get("publisher"),
                     publish_year=pub_year,
                     platform=platform,
+                    collector_condition=collector_condition,
                     series_name=series_name,
                     location_id=location_id,
                     language=language,
@@ -911,6 +913,19 @@ async def search_items(
         # an option says what selecting it would yield. Shared with /browse so
         # the two routes cannot disagree.
         counts = browse_counts.filter_counts(db, values, total) if page <= 1 else None
+        from app.services.user_preferences import get_preference
+        always_show_game_title = get_preference(
+            db, request.state.user["id"], "always_show_game_title"
+        ) == "1"
+        show_platform_logo_in_collection = get_preference(
+            db, request.state.user["id"], "show_platform_logo_in_collection"
+        ) == "1"
+        show_collector_condition_in_collection = get_preference(
+            db, request.state.user["id"], "show_collector_condition_in_collection"
+        ) == "1"
+        from app.services.user_preferences import platform_logo_map
+        platform_logo_paths = platform_logo_map(db, request.state.user["id"])
+        game_platforms = get_game_platforms(db)
 
     has_more = (offset + per_page) < total
 
@@ -936,6 +951,11 @@ async def search_items(
         "total": total,
         "has_filters": browse_filters.has_active_filters(values),
         "seven_days_ago": (datetime.now(tz=None) - timedelta(days=7)).strftime("%Y-%m-%d"),
+        "always_show_game_title": always_show_game_title,
+        "show_platform_logo_in_collection": show_platform_logo_in_collection,
+        "show_collector_condition_in_collection": show_collector_condition_in_collection,
+        "platform_logo_paths": platform_logo_paths,
+        "game_platforms": game_platforms,
     }
     if counts:
         ctx.update(counts)
@@ -1111,7 +1131,7 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
                     "publish_year", "page_count", "description", "series_name",
                     "series_position", "narrator", "duration_mins", "location_id", "notes",
                     "reading_status", "date_started", "date_finished", "owned", "wishlisted",
-                    "platform", "manual_value", "language"):
+                    "platform", "collector_condition", "manual_value", "language"):
             val = form.get(key)
             if val is not None:
                 if key == "wishlisted":
@@ -1562,5 +1582,3 @@ async def test_igdb_key(request: Request, _=Depends(require_role("admin"))):
         return {"ok": False, "message": "Both Client ID and Client Secret are required"}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         return await igdb.test_credentials(client_id, client_secret, client)
-
-

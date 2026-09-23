@@ -18,10 +18,29 @@ def test_settings_page_keeps_existing_setting_surfaces(admin_client):
     html = admin_client.get("/settings").text
     assert 'action="/api/settings/display"' in html
     assert 'action="/api/settings/nav"' in html
+    assert 'data-testid="settings-appearance"' in html
+    assert 'name="always_show_game_title"' in html
+    assert 'name="show_platform_logo_in_collection"' in html
     assert 'action="/api/settings"' in html
     assert "Audiobookshelf" in html
     assert "Portable archive" in html
     assert "Users" in html
+
+
+def test_platform_logo_appearance_checkbox_reflects_the_saved_user_preference(admin_client):
+    admin_client.post(
+        "/api/settings/appearance",
+        data={"show_platform_logo_in_collection": "1"},
+        follow_redirects=False,
+    )
+    html = admin_client.get("/settings").text
+    logo_input = html[html.index('name="show_platform_logo_in_collection"'):]
+    assert "checked" in logo_input[:200]
+
+    admin_client.post("/api/settings/appearance", data={}, follow_redirects=False)
+    html = admin_client.get("/settings").text
+    logo_input = html[html.index('name="show_platform_logo_in_collection"'):]
+    assert "checked" not in logo_input[:200]
 
 
 def test_admin_settings_entry_lives_in_account_menu(admin_client):
@@ -32,16 +51,15 @@ def test_admin_settings_entry_lives_in_account_menu(admin_client):
     assert 'data-nav-tab="settings"' in html
 
 
-def test_non_admin_account_menus_do_not_offer_admin_settings(editor_client, viewer_client):
+def test_non_admin_users_can_open_personal_settings(editor_client, viewer_client):
     for client in (editor_client, viewer_client):
         html = client.get("/browse").text
         assert 'data-testid="account-menu-button"' in html
-        assert 'data-testid="account-menu-settings"' not in html
-        # This mirrors the existing server contract: /settings itself has
-        # always required the admin role, so moving the link does not tighten
-        # editor/viewer access as a side effect of the layout change.
+        assert 'data-testid="account-menu-settings"' in html
         response = client.get("/settings", follow_redirects=False)
-        assert response.status_code in (302, 303, 401, 403)
+        assert response.status_code == 200
+        assert 'data-testid="settings-appearance"' in response.text
+        assert 'action="/api/settings/platform-logo"' in response.text
 
 
 def test_settings_is_not_rendered_in_primary_nav(admin_client):

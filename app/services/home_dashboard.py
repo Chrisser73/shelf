@@ -13,7 +13,7 @@ from app.services import lists
 from app.services.platform_logos import logo_path
 
 
-def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
+def dashboard_summary(db, *, recent_limit: int = 8, user_id: int | None = None) -> dict:
     """Return stable, presentation-neutral metrics for the Home page."""
     total = db.execute("SELECT COUNT(*) AS c FROM items_live").fetchone()["c"]
     owned = db.execute(
@@ -48,10 +48,11 @@ def dashboard_summary(db, *, recent_limit: int = 8) -> dict:
     platform_rows = db.execute(
         "SELECT p.slug, p.name, l.svg_path, COUNT(*) AS item_count "
         "FROM items_live i JOIN game_platforms p ON p.slug = i.platform "
-        "LEFT JOIN game_platform_logos l ON l.platform_slug = p.slug "
+        "LEFT JOIN user_platform_logos l ON l.platform_slug = p.slug AND l.user_id = ? "
         "WHERE i.media_type = 'video_game' "
         "GROUP BY p.slug, p.name, l.svg_path, p.sort_order "
-        "ORDER BY p.sort_order, p.name COLLATE NOCASE"
+        "ORDER BY p.sort_order, p.name COLLATE NOCASE",
+        (user_id,),
     ).fetchall()
     platforms = [
         {**dict(row), "logo_path": logo_path(row["slug"], row["svg_path"])}

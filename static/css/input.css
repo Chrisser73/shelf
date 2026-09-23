@@ -7,32 +7,85 @@
 
 /* Former tailwind.config.js theme, now expressed as native CSS theme tokens. */
 @theme {
-  --color-shelf-bg: #0f1117;
-  --color-shelf-card: #1a1d27;
-  --color-shelf-hover: #242836;
-  --color-shelf-accent: #6366f1;
-  --color-shelf-accent2: #818cf8;
-  --color-shelf-text: #e2e8f0;
-  --color-shelf-muted: #94a3b8;
-  --color-shelf-border: #2d3148;
-  --color-shelf-success: #22c55e;
-  --color-shelf-warning: #eab308;
-  --color-shelf-error: #ef4444;
+    --color-shelf-bg: #0f1117;
+    --color-shelf-card: #1a1d27;
+    --color-shelf-hover: #242836;
+    --color-shelf-accent: #6366f1;
+    --color-shelf-accent2: #818cf8;
+    --color-shelf-text: #e2e8f0;
+    --color-shelf-muted: #94a3b8;
+    --color-shelf-border: #2d3148;
+    --color-shelf-success: #22c55e;
+    --color-shelf-warning: #eab308;
+    --color-shelf-error: #ef4444;
 }
 
 /* Keep Shelf's existing class-based dark-mode contract. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* App-wide styles previously inlined in base.html */
-body { background-color: #0f1117; color: #e2e8f0; }
-.cover-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1.25rem; }
-.cover-card { aspect-ratio: 2/3; }
-.cover-card img { width: 100%; height: 100%; object-fit: cover; border-radius: 0.5rem; }
-.scan-result { animation: slideIn 0.3s ease-out; }
-@keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+body {
+    background-color: #0f1117;
+    color: #e2e8f0;
+}
+
+a, button, select { cursor: pointer; }
+button:disabled, select:disabled { cursor: not-allowed; }
+.nav-icon {
+    display: block;
+    width: 20px;
+    height: 20px;
+    flex: none;
+    stroke: currentColor;
+}
+
+.cover-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 1.25rem;
+}
+
+.cover-card {
+    aspect-ratio: 2/3;
+}
+
+.cover-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 0.5rem;
+}
+
+.scan-result {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 /* Scrollbar */
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #0f1117; }
-::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 4px; }
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0f1117;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #2d3148;
+    border-radius: 4px;
+}
+
 /* Hide Alpine-controlled elements until Alpine initializes */
-[x-cloak] { display: none !important; }
+[x-cloak] {
+    display: none !important;
+}

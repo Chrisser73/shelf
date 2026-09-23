@@ -15,6 +15,7 @@ from app.services import audiobookshelf
 from app.services.national import SEARCH_LANGS
 
 router = APIRouter(prefix="/api/settings", dependencies=[Depends(require_role("admin"))])
+personal_router = APIRouter(prefix="/api/settings", dependencies=[Depends(require_role("viewer"))])
 
 _INTEGRATION_KEYS = (
     "abs_url",
@@ -219,6 +220,43 @@ async def update_display_settings(request: Request):
         with get_db() as db:
             _upsert_setting(db, "metadata_search_lang", search_lang)
 
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@personal_router.post("/appearance")
+async def update_appearance_settings(request: Request):
+    """Save collection appearance preferences."""
+    form = await request.form()
+    always_show = "1" if form.get("always_show_game_title") in ("1", "on", "true") else "0"
+    show_platform_logo = "1" if form.get("show_platform_logo_in_collection") in ("1", "on", "true") else "0"
+    show_collector_condition = "1" if form.get("show_collector_condition_in_collection") in ("1", "on", "true") else "0"
+    with get_db() as db:
+        from app.services.user_preferences import set_preference
+        set_preference(db, request.state.user["id"], "always_show_game_title", always_show)
+        set_preference(db, request.state.user["id"], "show_platform_logo_in_collection", show_platform_logo)
+        set_preference(db, request.state.user["id"], "show_collector_condition_in_collection", show_collector_condition)
+        for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "media_types"):
+            set_preference(db, request.state.user["id"], f"home_tile:{key}",
+                           "1" if form.get(f"home_tile_{key}") in ("1", "on", "true") else "0")
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@personal_router.post("/platform-logo")
+async def update_platform_logo(request: Request):
+    form = await request.form()
+    platform = (form.get("platform") or "").strip()
+    from app.services.platform_logos import normalise_svg_path
+    from app.services.user_preferences import set_preference
+    path = normalise_svg_path(form.get("svg_path") or "")
+    with get_db() as db:
+        exists = db.execute("SELECT 1 FROM game_platforms WHERE slug = ?", (platform,)).fetchone()
+        if exists and path:
+            set_preference(db, request.state.user["id"], f"platform_logo:{platform}", path)
+            db.execute(
+                "INSERT INTO user_platform_logos (user_id, platform_slug, svg_path) VALUES (?, ?, ?) "
+                "ON CONFLICT(user_id, platform_slug) DO UPDATE SET svg_path = excluded.svg_path",
+                (request.state.user["id"], platform, path),
+            )
     return RedirectResponse(url="/settings", status_code=303)
 
 

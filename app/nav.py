@@ -21,19 +21,19 @@ logger = logging.getLogger(__name__)
 # — base.html used to skip `settings` with a hardcoded comparison in two
 # places, which is one place too many the moment a second tab moves.
 NAV_TABS = [
-    {"key": "browse", "label": "Browse", "path": "/browse"},
-    {"key": "scan", "label": "Scan", "path": "/scan", "roles": ("admin", "editor")},
+    {"key": "browse", "label": "Browse", "path": "/browse", "icon": "layers-2"},
+    {"key": "scan", "label": "Scan", "path": "/scan", "icon": "scan-line", "roles": ("admin", "editor")},
     {"key": "intake", "label": "Intake", "path": "/intake", "roles": ("admin", "editor"),
-     "requires": "vision"},
+     "requires": "vision", "icon": "camera"},
     {"key": "shelf-fill", "label": "Shelf Fill", "path": "/shelf-fill",
-     "roles": ("admin", "editor")},
-    {"key": "store", "label": "Store", "path": "/store"},
-    {"key": "series", "label": "Series", "path": "/series"},
-    {"key": "music", "label": "Music", "path": "/music"},
-    {"key": "periodicals", "label": "Periodicals", "path": "/periodicals"},
-    {"key": "discover", "label": "Discover", "path": "/discover", "requires": "hardcover"},
-    {"key": "stats", "label": "Stats", "path": "/stats"},
-    {"key": "settings", "label": "Settings", "path": "/settings", "roles": ("admin",),
+     "roles": ("admin", "editor"), "icon": "package-plus"},
+    {"key": "store", "label": "Store", "path": "/store", "icon": "shopping-bag"},
+    {"key": "series", "label": "Series", "path": "/series", "icon": "book-open"},
+    {"key": "music", "label": "Music", "path": "/music", "icon": "music"},
+    {"key": "periodicals", "label": "Periodicals", "path": "/periodicals", "icon": "newspaper"},
+    {"key": "discover", "label": "Discover", "path": "/discover", "requires": "hardcover", "icon": "compass"},
+    {"key": "stats", "label": "Stats", "path": "/stats", "icon": "chart-no-axes-column"},
+    {"key": "settings", "label": "Settings", "path": "/settings",
      "menu": "account"},
     {"key": "logs", "label": "Logs", "path": "/logs", "roles": ("admin",),
      "menu": "account"},
@@ -176,6 +176,7 @@ def visible_tabs(user: dict | None) -> list[dict]:
             "key": tab["key"],
             "label": tab["label"],
             "path": tab["path"],
+            "icon": tab.get("icon", ""),
             "menu": tab.get("menu", ""),
         })
     return tabs

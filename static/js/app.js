@@ -92,15 +92,68 @@ function scanCardToast(root) {
 // --- Toast notifications ---
 function showToast(message, type) {
     var container = document.getElementById('toast-container');
-    var colors = {success: 'bg-shelf-success', error: 'bg-shelf-error', warning: 'bg-shelf-warning', info: 'bg-shelf-accent'};
+    if (!container) return;
+    var variants = {
+        success: { title: 'Success', accent: 'border-l-shelf-success', icon: 'text-shelf-success', ring: 'border-shelf-success/35' },
+        error: { title: 'Error', accent: 'border-l-shelf-error', icon: 'text-shelf-error', ring: 'border-shelf-error/35' },
+        warning: { title: 'Warning', accent: 'border-l-shelf-warning', icon: 'text-shelf-warning', ring: 'border-shelf-warning/35' },
+        info: { title: 'Info', accent: 'border-l-shelf-accent', icon: 'text-shelf-accent2', ring: 'border-shelf-accent/35' }
+    };
+    var variant = variants[type] || variants.success;
     var el = document.createElement('div');
-    el.className = (colors[type] || 'bg-shelf-accent') + ' text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium transition-opacity duration-300';
+    el.setAttribute('role', type === 'error' || type === 'warning' ? 'alert' : 'status');
+    el.className = 'pointer-events-auto flex items-start gap-3 rounded-lg border border-l-4 bg-shelf-card p-4 shadow-xl transition-all duration-300 ease-out -translate-y-4 opacity-0 ' + variant.accent + ' ' + variant.ring;
+
+    var icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 20 20');
+    icon.setAttribute('fill', 'currentColor');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('class', 'mt-0.5 h-5 w-5 shrink-0 ' + variant.icon);
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    if (type === 'error') {
+        path.setAttribute('fill-rule', 'evenodd'); path.setAttribute('d', 'M10 18a8 8 0 100-16 8 8 0 000 16zm-1.06-10.94a1.5 1.5 0 112.12 2.12L10 10.24l1.06 1.06a1.5 1.5 0 11-2.12 2.12L7.88 12.36 6.82 13.42A1.5 1.5 0 114.7 11.3l1.06-1.06L4.7 9.18A1.5 1.5 0 116.82 7.06l1.06 1.06 1.06-1.06z');
+    } else if (type === 'warning') {
+        path.setAttribute('fill-rule', 'evenodd'); path.setAttribute('d', 'M8.257 3.099c.765-1.36 2.72-1.36 3.486 0l6.518 11.59C19.01 16.02 18.05 17.5 16.52 17.5H3.48c-1.53 0-2.49-1.48-1.74-2.81l6.517-11.59zM10 7a1 1 0 00-1 1v3a1 1 0 002 0V8a1 1 0 00-1-1zm0 7a1.125 1.125 0 100-2.25A1.125 1.125 0 0010 14z');
+    } else if (type === 'info') {
+        path.setAttribute('fill-rule', 'evenodd'); path.setAttribute('d', 'M18 10A8 8 0 112 10a8 8 0 0116 0zm-7-3a1 1 0 10-2 0 1 1 0 002 0zm-2 3a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-.5v-3a1 1 0 00-1-1H9z');
+    } else {
+        path.setAttribute('fill-rule', 'evenodd'); path.setAttribute('d', 'M16.707 5.293a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3.5-3.5a1 1 0 011.414-1.414l2.793 2.793 6.793-6.793a1 1 0 011.414 0z');
+    }
+    path.setAttribute('clip-rule', 'evenodd');
+    icon.appendChild(path);
+    el.appendChild(icon);
+
+    var copy = document.createElement('div');
+    copy.className = 'min-w-0 flex-1';
+    var heading = document.createElement('p');
+    heading.className = 'text-sm font-semibold text-shelf-text';
+    heading.textContent = variant.title;
+    copy.appendChild(heading);
+    var detail = document.createElement('p');
+    detail.className = 'mt-0.5 text-sm text-shelf-muted';
     // Structural, not belt-and-braces: makes a pill with nothing in it impossible from any caller.
     message = (message || '').toString().trim() || 'Done';
-    el.textContent = message;
+    detail.textContent = message;
+    copy.appendChild(detail);
+    el.appendChild(copy);
+
+    var dismiss = document.createElement('button');
+    dismiss.type = 'button'; dismiss.setAttribute('aria-label', 'Dismiss notification');
+    dismiss.className = 'shrink-0 rounded p-1 text-shelf-muted hover:bg-shelf-hover hover:text-shelf-text transition-colors';
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', function () { dismissToast(); });
+    el.appendChild(dismiss);
     container.appendChild(el);
-    setTimeout(function() { el.style.opacity = '0'; }, 2700);
-    setTimeout(function() { el.remove(); }, 3000);
+    requestAnimationFrame(function () { el.classList.remove('-translate-y-4', 'opacity-0'); });
+    var removed = false;
+    function dismissToast() {
+        if (removed) return;
+        removed = true;
+        el.classList.add('-translate-y-4', 'opacity-0');
+        setTimeout(function () { el.remove(); }, 300);
+    }
+    // A short entrance, 2.5 seconds of reading time, then a matching exit.
+    setTimeout(dismissToast, 2800);
 }
 
 // Listen for HX-Trigger showToast events from server
@@ -220,6 +273,9 @@ document.body.addEventListener('htmx:afterRequest', function (evt) {
         location.reload();
     } else if (action === 'goto-browse' && ok) {
         window.location = '/browse';
+    } else if (action === 'toast-reload' && ok) {
+        showToast('Details saved', 'success');
+        window.setTimeout(function () { window.location.reload(); }, 350);
     }
 });
 
@@ -229,4 +285,30 @@ document.body.addEventListener('htmx:configRequest', function (evt) {
     if (el && el.getAttribute && el.getAttribute('data-vals-scan-mode') !== null) {
         evt.detail.parameters.mode = localStorage.getItem('shelf_scan_mode') || 'add';
     }
+});
+
+document.addEventListener('click', function (evt) {
+    var button = evt.target.closest('[data-retry-missing-covers]');
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    var icon = button.querySelector('svg, i');
+    if (icon) icon.classList.add('animate-spin');
+    var es = new EventSource('/api/covers/bulk-retry/stream');
+    es.onmessage = function (event) {
+        var data = JSON.parse(event.data);
+        if (data.type === 'done') {
+            es.close();
+            showToast('Cover retry finished: ' + data.success + ' found, ' + data.failed + ' not found', data.failed ? 'warning' : 'success');
+            window.setTimeout(function () { window.location.reload(); }, 1000);
+        } else if (data.type === 'error') {
+            es.close(); button.disabled = false;
+            if (icon) icon.classList.remove('animate-spin');
+            showToast(data.message || 'Cover retry failed', 'error');
+        }
+    };
+    es.onerror = function () {
+        es.close(); button.disabled = false;
+        if (icon) icon.classList.remove('animate-spin');
+        showToast('Cover retry connection lost', 'error');
+    };
 });

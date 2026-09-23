@@ -48,8 +48,8 @@ class TestClean:
             "garbage",
         ]}
         assert vision._clean(raw) == [
-            {"title": "Dune", "authors": "Frank Herbert", "isbn": None, "source": "read"},
-            {"title": "Hobbit", "authors": None, "isbn": None, "source": "read"},
+            {"title": "Dune", "authors": "Frank Herbert", "isbn": None, "media_type": "book", "source": "read"},
+            {"title": "Hobbit", "authors": None, "isbn": None, "media_type": "book", "source": "read"},
         ]
 
     def test_non_dict(self):
@@ -90,6 +90,9 @@ class TestClean:
             "read", "read", "read", "read", "recognized",
         ]
 
+    def test_media_type_is_retained_when_recognized(self):
+        assert vision._clean({"books": [{"title": "Mario Kart 64", "media_type": "video_game"}]})[0]["media_type"] == "video_game"
+
 
 class TestCleanIsbn:
     def test_valid_forms_become_isbn13(self):
@@ -104,10 +107,11 @@ class TestCleanIsbn:
 
 
 class TestPromptAndSchema:
-    def test_schema_requires_all_four_keys(self):
+    def test_schema_requires_all_five_keys(self):
         items = vision.BOOKS_SCHEMA["properties"]["books"]["items"]
-        assert items["required"] == ["title", "authors", "isbn", "source"]
+        assert items["required"] == ["title", "authors", "isbn", "media_type", "source"]
         assert items["properties"]["isbn"]["type"] == ["string", "null"]
+        assert "video_game" in items["properties"]["media_type"]["enum"]
         assert items["properties"]["source"]["enum"] == ["read", "recognized"]
         assert items["additionalProperties"] is False
 
@@ -122,6 +126,10 @@ class TestPromptAndSchema:
         assert "null" in vision.JSON_ONLY_SUFFIX
         assert "read or recognized" not in vision.JSON_ONLY_SUFFIX
         assert "... or null" not in vision.JSON_ONLY_SUFFIX
+
+    def test_ollama_prompt_explicitly_keeps_recognized_games(self):
+        assert "media_type video_game" in vision.OLLAMA_RECOGNITION_SUFFIX
+        assert "empty books array" in vision.OLLAMA_RECOGNITION_SUFFIX
 
 
 ONE_IMAGE = [(FAKE_JPEG, "image/jpeg")]
@@ -653,7 +661,7 @@ class TestAnalyzeEndpoint:
             return []
         monkeypatch.setattr(vision, "detect_spines", fake_detect)
         resp = self._upload(admin_client)
-        assert resp.json() == {"ok": False, "message": "No books were recognized in this photo"}
+        assert resp.json() == {"ok": False, "message": "No catalog items were recognized in this photo"}
 
     def test_provider_message_reaches_the_response(self, admin_client, monkeypatch):
         async def fake_detect(images, settings):
@@ -1296,6 +1304,7 @@ class TestIntakePage:
         assert 'data-testid="intake-viewfinder"' in html
         assert 'data-testid="intake-low-res"' in html
         assert 'data-testid="intake-retake"' in html
+        assert 'data-testid="intake-try-anyway"' in html
 
     def test_exactly_one_read_photo_button(self, admin_client, db):
         """The e2e click target is `button` has_text "Read Photo" — a second

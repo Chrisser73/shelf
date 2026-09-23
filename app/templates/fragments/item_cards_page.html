@@ -2,8 +2,10 @@
 {% include "fragments/item_card.html" %}
 {% endfor %}
 {% if has_more is defined and has_more %}
-<div id="load-more" class="col-span-full text-center py-4"
+<div id="load-more" class="col-span-full relative min-h-14"
      hx-get="{{ load_more_url }}" hx-trigger="revealed" hx-swap="outerHTML" hx-include="[name='view']">
-    <div class="inline-block w-6 h-6 border-2 border-shelf-border border-t-shelf-accent rounded-full animate-spin"></div>
+    <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div class="w-6 h-6 border-2 border-shelf-border border-t-shelf-accent rounded-full animate-spin"></div>
+    </div>
 </div>
 {% endif %}

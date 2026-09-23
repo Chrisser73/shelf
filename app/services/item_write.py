@@ -89,6 +89,7 @@ from app.services.write_targets import (  # noqa: F401 — re-exported
 #: The reading-status domain. `items.py` and `reading_imports.py` used to each
 #: spell this out; it is declared once here and read from both.
 READING_STATUSES = ("want_to_read", "reading", "read")
+COLLECTOR_CONDITIONS = ("cib", "boxed", "loose")
 
 
 class InvalidIsbn(ItemValueError):
@@ -119,6 +120,11 @@ class InvalidOwned(ItemValueError):
 class InvalidWishlisted(ItemValueError):
     code = "invalid_wishlisted"
     field = "wishlisted"
+
+
+class InvalidCollectorCondition(ItemValueError):
+    code = "invalid_collector_condition"
+    field = "collector_condition"
 
 
 #: Columns a caller may never set on insert — the database owns them.
@@ -257,6 +263,16 @@ def validate_item_fields(db, fields: Mapping[str, Any]) -> dict[str, Any]:
                 f"Invalid reading status: {status!r}", value=status
             )
         out["reading_status"] = status
+
+    if "collector_condition" in out:
+        condition = out["collector_condition"]
+        if isinstance(condition, str):
+            condition = condition.strip().lower() or None
+        if condition is not None and condition not in COLLECTOR_CONDITIONS:
+            raise InvalidCollectorCondition(
+                f"Invalid collector condition: {condition!r}", value=condition
+            )
+        out["collector_condition"] = condition
 
     if "owned" in out:
         out["owned"] = _coerce_owned(out["owned"])

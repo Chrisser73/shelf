@@ -11,6 +11,7 @@ from app.currency import get_currency
 from app.services import browse_counts
 from app.services import lists
 from app.services import isbn as isbn_svc
+from app.services.item_write import COLLECTOR_CONDITIONS
 from app.services import upc as upc_svc
 from app.database import get_db, get_setting, get_game_platforms, get_reading_history
 from app.routers import items_common
@@ -18,7 +19,7 @@ from app.routers.items_common import SORT_OPTIONS
 from app.routers.series import find_gaps
 from app.services import item_copies, item_template
 from app.services.home_dashboard import dashboard_summary
-from app.services.platform_logos import available_svg_paths, logo_path
+from app.services.platform_logos import available_svg_choices, logo_path
 
 router = APIRouter()
 
@@ -30,7 +31,10 @@ async def index(
 ):
     """Render a collection overview while leaving Browse for exploration."""
     with get_db() as db:
-        summary = dashboard_summary(db, recent_limit=8)
+        summary = dashboard_summary(db, recent_limit=8, user_id=request.state.user["id"])
+        from app.services.user_preferences import get_preference
+        home_tiles = {key: get_preference(db, request.state.user["id"], f"home_tile:{key}", "1") == "1"
+                      for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "media_types")}
 
     return request.app.state.templates.TemplateResponse(
         request,
@@ -38,6 +42,7 @@ async def index(
         {
             **summary,
             "media_type_labels": MEDIA_TYPES,
+            "home_tiles": home_tiles,
         },
     )
 
@@ -114,6 +119,19 @@ async def browse(
         ]
 
         has_more = len(items) < total_filtered
+        from app.services.user_preferences import get_preference
+        always_show_game_title = get_preference(
+            db, request.state.user["id"], "always_show_game_title"
+        ) == "1"
+        show_platform_logo_in_collection = get_preference(
+            db, request.state.user["id"], "show_platform_logo_in_collection"
+        ) == "1"
+        show_collector_condition_in_collection = get_preference(
+            db, request.state.user["id"], "show_collector_condition_in_collection"
+        ) == "1"
+        from app.services.user_preferences import platform_logo_map
+        platform_logo_paths = platform_logo_map(db, request.state.user["id"])
+        game_platforms = get_game_platforms(db)
 
         load_more_url = "/api/search?" + browse_filters.querystring(
             values, extra=["page=2"]
@@ -132,6 +150,11 @@ async def browse(
         "seven_days_ago": (datetime.now(tz=None) - timedelta(days=7)).strftime("%Y-%m-%d"),
         "initial_query": values["q"],
         "initial_filters": {name: values[name] for name in browse_filters.FILTER_NAMES},
+        "always_show_game_title": always_show_game_title,
+        "show_platform_logo_in_collection": show_platform_logo_in_collection,
+        "show_collector_condition_in_collection": show_collector_condition_in_collection,
+        "platform_logo_paths": platform_logo_paths,
+        "game_platforms": game_platforms,
     }
     # `render_oob_counts` is deliberately NOT set: `browse.html` includes
     # `fragments/filter_counts_oob.html` via the item grid, and setting it
@@ -217,12 +240,21 @@ async def intake(request: Request, _=Depends(require_role("editor"))):
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
         app_settings = get_all_settings(db)
+        game_platforms = get_game_platforms(db)
     provider = app_settings.get("vision_provider") or ""
+    from app.services import vision
+    vision_model = app_settings.get({
+        "anthropic": "anthropic_vision_model", "openai": "openai_vision_model", "ollama": "ollama_model",
+    }.get(provider, "")) or {
+        "anthropic": vision.DEFAULT_ANTHROPIC_MODEL,
+        "openai": vision.DEFAULT_OPENAI_MODEL,
+        "ollama": vision.DEFAULT_OLLAMA_MODEL,
+    }.get(provider, "")
     return request.app.state.templates.TemplateResponse(
         request,
         "intake.html",
-        {"locations": locations, "vision_provider": provider,
-         "media_types": MEDIA_TYPES},
+        {"locations": locations, "vision_provider": provider, "vision_model": vision_model,
+         "media_types": MEDIA_TYPES, "game_platforms": game_platforms},
     )
 
 
@@ -403,6 +435,7 @@ async def item_edit(
         request,
         "item_edit.html",
         {"item": item, "back": back, "media_types": MEDIA_TYPES, "game_platforms": game_platforms,
+         "collector_conditions": COLLECTOR_CONDITIONS,
          "locations": locations, "error": error,
          "isbn_invalid": isbn_invalid, "upc_invalid": upc_invalid},
     )
@@ -586,7 +619,7 @@ BORROWER_ERROR_MESSAGES = {
 
 
 @router.get("/settings")
-async def settings(request: Request, _=Depends(require_role("admin"))):
+async def settings(request: Request, _=Depends(require_role("viewer"))):
     from app.config import SECRET_ENV_VARS, is_env_override
     from app.database import get_all_settings
     from app.nav import hideable_tab_states
@@ -595,6 +628,18 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
     borrower_error_message = BORROWER_ERROR_MESSAGES.get(request.query_params.get("borrower_error"))
     with get_db() as db:
         settings = get_all_settings(db)
+        from app.services.user_preferences import get_preference
+        settings["always_show_game_title"] = get_preference(
+            db, request.state.user["id"], "always_show_game_title"
+        )
+        settings["show_platform_logo_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_platform_logo_in_collection"
+        )
+        settings["show_collector_condition_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_collector_condition_in_collection"
+        )
+        for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "media_types"):
+            settings[f"home_tile:{key}"] = get_preference(db, request.state.user["id"], f"home_tile:{key}", "1")
         locations = db.execute(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
@@ -621,9 +666,9 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
         ).fetchall()
         game_platforms_list = db.execute(
             "SELECT p.*, l.svg_path FROM game_platforms p "
-            "LEFT JOIN game_platform_logos l ON l.platform_slug = p.slug "
+            "LEFT JOIN user_platform_logos l ON l.platform_slug = p.slug AND l.user_id = ? "
             "ORDER BY p.sort_order, p.name"
-        ).fetchall()
+        , (request.state.user["id"],)).fetchall()
         game_platform_logos = [
             {**dict(platform), "effective_svg_path": logo_path(platform["slug"], platform["svg_path"])}
             for platform in game_platforms_list
@@ -675,8 +720,9 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
          "secrets_present": secrets_present, "abs_url_present": abs_url_present,
          "game_platforms_list": game_platforms_list,
          "game_platform_logos": game_platform_logos,
-         "svg_logo_paths": available_svg_paths(),
+         "svg_logo_choices": available_svg_choices(),
          "hideable_nav_tab_states": hideable_nav_tab_states,
          "borrower_error_message": borrower_error_message,
+         "is_admin": request.state.user["role"] == "admin",
          "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats},
     )

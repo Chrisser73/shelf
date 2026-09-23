@@ -15,6 +15,7 @@ function intakePage() {
         result: false,
         locationId: '',
         owned: true,
+        collectorCondition: '',
         // High-res tiling: filled from POST /api/intake/plan when the photo
         // would be significantly downscaled by the provider.
         plan: emptyPlan(),
@@ -338,8 +339,11 @@ function intakePage() {
                 if (data.ok) {
                     this.needsChoice = false;
                     this.books = data.books.map(b => ({
-                        title: b.title, authors: b.authors || '', isbn: b.isbn || '',
-                        source: b.source || 'read', media_type: 'book', include: true,
+                        title: b.title, authors: b.authors || '', publisher: b.publisher || '', isbn: b.isbn || '',
+                        source: b.source || 'read', media_type: b.media_type || 'book',
+                        platform: b.platform || '', publish_year: b.publish_year || '',
+                        collector_condition: b.collector_condition || '', existing: b.existing || null,
+                        include: !b.existing,
                     }));
                 } else {
                     this.error = data.message || 'Analysis failed';
@@ -369,12 +373,29 @@ function intakePage() {
             this.books[i].authors = value;
         },
 
+        setBookPublisher(i, value) {
+            this.books[i].publisher = value;
+        },
+
+        setBookYear(i, value) {
+            this.books[i].publish_year = value;
+        },
+
+        setBookCollectorCondition(i, value) {
+            this.books[i].collector_condition = value;
+        },
+
         setBookIsbn(i, value) {
             this.books[i].isbn = value;
         },
 
         setBookMediaType(i, value) {
             this.books[i].media_type = value;
+            if (value !== 'video_game') this.books[i].platform = '';
+        },
+
+        setBookPlatform(i, value) {
+            this.books[i].platform = value;
         },
 
         selectAll() {
@@ -385,7 +406,7 @@ function intakePage() {
             this.books.forEach(b => b.include = false);
         },
 
-        async confirm() {
+        async confirm(skipMetadata) {
             this.confirming = true;
             this.error = false;
             try {
@@ -399,11 +420,15 @@ function intakePage() {
                         // `source` is deliberately not sent: it drives the
                         // review-row hint only, and the server has no use for it.
                         books: this.books.filter(b => b.include).map(b => ({
-                            title: b.title, authors: b.authors || null,
-                            isbn: b.isbn || null, media_type: b.media_type,
+                            title: b.title, authors: b.authors || null, publisher: b.publisher || null,
+                            publish_year: b.publish_year || null, isbn: b.isbn || null, media_type: b.media_type,
+                            platform: b.media_type === 'video_game' ? b.platform || null : null,
+                            collector_condition: b.media_type !== 'book' ? b.collector_condition || this.collectorCondition || null : null,
+                            existing_id: b.existing ? b.existing.id : null, replace_existing: !!b.existing,
                         })),
                         location_id: this.locationId ? parseInt(this.locationId) : null,
                         owned: this.owned,
+                        skip_metadata: !!skipMetadata,
                     }),
                 });
                 var data = await resp.json();

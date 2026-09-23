@@ -216,8 +216,8 @@ def test_capture_closes_viewfinder_plans_and_enables_read_photo(live_server, int
     assert isinstance(payloads[-1]["height"], int) and payloads[-1]["height"] > 0
 
 
-def test_low_res_advisory_is_non_blocking(live_server, intake_page):
-    """The advisory warns; it never gates. Read Photo still analyzes."""
+def test_low_res_advisory_try_anyway_analyzes(live_server, intake_page):
+    """Try anyway is an explicit escape hatch from the advisory."""
     page = intake_page
     page.route("**/api/intake/plan", lambda route: route.fulfill(json=PLAN_LOW))
     page.route("**/api/intake/analyze",
@@ -230,7 +230,8 @@ def test_low_res_advisory_is_non_blocking(live_server, intake_page):
     expect(advisory).to_be_visible()
     expect(advisory).to_contain_text("too small")
 
-    page.locator("button", has_text="Read Photo").click()
+    expect(page.locator("[data-testid=intake-try-anyway]")).to_be_visible()
+    page.locator("[data-testid=intake-try-anyway]").click()
     expect(page.locator("[data-testid=intake-row]")).to_have_count(2)
 
 

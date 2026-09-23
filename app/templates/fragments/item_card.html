@@ -1,5 +1,10 @@
 <div class="relative">
 <a href="/item/{{ item.id }}" class="group relative block" data-item-id="{{ item.id }}" @click.prevent="openOrToggle({{ item.id }}, '/item/{{ item.id }}', $event)">
+    {% if show_platform_logo_in_collection and item.platform and platform_logo_paths.get(item.platform) %}
+    <div class="absolute top-2 left-2 z-10 w-12 h-12 rounded bg-shelf-border/80 flex items-center justify-center shadow">
+        <img src="/static/{{ platform_logo_paths.get(item.platform) }}" alt="" class="p-2 w-12 h-12 object-contain">
+    </div>
+    {% endif %}
     <div class="cover-card bg-shelf-card rounded-lg overflow-hidden border border-shelf-border group-hover:border-shelf-accent/50 transition-colors shadow-lg"
          :class="selectedIds.includes({{ item.id }}) ? 'ring-2 ring-shelf-accent' : ''">
         {% if item.wishlisted %}
@@ -29,17 +34,18 @@
         {% if item.cover_path %}
         <img src="/{{ item.cover_path }}" alt="{{ item.title }}" loading="lazy">
         {% else %}
-        <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-gradient-to-br from-shelf-card to-shelf-hover">
+        <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-linear-to-br from-shelf-card to-shelf-hover">
             <p class="text-shelf-text text-sm font-medium leading-tight mb-1">{{ item.title[:60] }}</p>
             {% if item.authors %}<p class="text-shelf-muted text-xs">{{ item.authors[:40] }}</p>{% endif %}
         </div>
         {% endif %}
     </div>
     <!-- Hover overlay with title -->
-    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
+    <div class="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent rounded-lg transition-opacity flex items-end p-3 group-hover:ring-2 group-hover:ring-inset group-hover:ring-shelf-accent {% if not always_show_game_title %} opacity-0 group-hover:opacity-100{% endif %}">
         <div class="min-w-0">
             <p class="text-white text-sm font-medium truncate">{{ item.title }}</p>
             {% if item.authors %}<p class="text-gray-300 text-xs truncate">{{ item.authors }}</p>{% endif %}
+            {% if show_collector_condition_in_collection and item.collector_condition %}<p class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] mt-2 font-medium bg-shelf-card/80 text-white shadow inline-block">{{ item.collector_condition|upper }}</p>{% endif %}
         </div>
     </div>
 </a>

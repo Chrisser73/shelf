@@ -63,7 +63,7 @@
 
     <nav aria-label="Edit sections" data-testid="edit-section-nav" class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-6">
         <a href="#edit-general" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">General</a>
-        <a href="#edit-artwork" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Artwork</a>
+        <a href="#edit-artwork" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Cover</a>
         <a href="#edit-series" data-section-nav="series" data-media-types="book audiobook ebook comic manga" data-always-visible="{{ 'true' if item.series_name or item.series_position is not none or item.page_count is not none else 'false' }}" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Series</a>
         <a href="#edit-identifiers" data-section-nav="identifiers" data-media-types="book audiobook ebook comic manga dvd cd video_game" data-always-visible="{{ 'true' if item.isbn or item.upc else 'false' }}" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Identifiers</a>
         <a href="#edit-location" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Location</a>
@@ -151,7 +151,7 @@
         </section>
         <section id="edit-artwork" data-testid="edit-section-artwork" class="bg-shelf-card rounded-xl border border-shelf-border p-6 space-y-4">
             <div>
-                <h2 class="text-lg font-semibold">Artwork</h2>
+                <h2 class="text-lg font-semibold">Cover</h2>
                 <p class="text-sm text-shelf-muted mt-1">Preview the current cover, upload a replacement, or use a public image URL.</p>
             </div>
 
@@ -196,6 +196,15 @@
                 </div>
                 <p class="text-xs text-shelf-muted">Public HTTPS image links only. Use URL applies the cover immediately; your other edits are still saved with Save Changes.</p>
             </div>
+            <div class="border-t border-shelf-border pt-4 flex flex-wrap gap-2">
+                <button type="button" hx-get="/api/items/{{ item.id }}/cover-search" hx-target="#edit-cover-candidates" hx-swap="innerHTML"
+                        class="px-4 py-2 bg-shelf-hover text-shelf-text border border-shelf-border rounded-lg text-sm hover:border-shelf-accent/50 transition-colors">Find cover</button>
+                {% if item.cover_path %}
+                <button type="button" hx-post="/api/items/{{ item.id }}/cover-remove" hx-swap="none" data-after-request="reload"
+                        class="px-4 py-2 bg-shelf-error/10 text-shelf-error border border-shelf-error/30 rounded-lg text-sm hover:bg-shelf-error/20 transition-colors">Remove cover</button>
+                {% endif %}
+            </div>
+            <div id="edit-cover-candidates"></div>
         </section>
 
         <section id="edit-series" data-testid="edit-section-series" data-media-types="book audiobook ebook comic manga" data-always-visible="{{ 'true' if item.series_name or item.series_position is not none or item.page_count is not none else 'false' }}" class="bg-shelf-card rounded-xl border border-shelf-border p-6 space-y-4">
@@ -345,6 +354,17 @@
                     {% for key, label in game_platforms.items() %}
                     <option value="{{ key }}" {% if item.platform == key %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
+                </select>
+            </div>
+
+            <div data-media-types="video_game dvd cd vinyl cassette comic manga" data-always-visible="{{ 'true' if item.collector_condition else 'false' }}">
+                <label for="collector_condition" class="block text-sm font-medium text-shelf-muted mb-1">Collector state</label>
+                <select id="collector_condition" name="collector_condition"
+                        class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                    <option value="">Not specified</option>
+                    <option value="cib" {% if item.collector_condition == 'cib' %}selected{% endif %}>CIB — Complete in Box</option>
+                    <option value="boxed" {% if item.collector_condition == 'boxed' %}selected{% endif %}>Boxed</option>
+                    <option value="loose" {% if item.collector_condition == 'loose' %}selected{% endif %}>Loose</option>
                 </select>
             </div>
 

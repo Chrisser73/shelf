@@ -3,7 +3,7 @@
 {% block content %}
 <div class="max-w-3xl mx-auto" x-data="intakePage">
     <h1 class="text-2xl font-bold mb-1">Photo Intake</h1>
-    <p class="text-sm text-shelf-muted mb-6">Photograph books on a shelf, in a stack, or face-up &mdash; front cover is fine. The vision model reads spines and recognizes covers; a readable back-cover barcode gives exact-edition metadata. Review the list, then confirm.</p>
+    <p class="text-sm text-shelf-muted mb-6">Photograph items on a shelf, in a stack, or face-up &mdash; covers are fine. The vision model reads spines and recognizes covers; a readable barcode gives more precise metadata. Review the list, choose each media type, then confirm.</p>
 
     {% if not vision_provider %}
     <div class="bg-shelf-card rounded-xl border border-shelf-warning/30 p-6 text-sm">
@@ -49,9 +49,9 @@
                         class="px-4 py-2 bg-shelf-hover text-shelf-text rounded-lg text-sm hover:bg-shelf-border transition-colors whitespace-nowrap">Cancel</button>
             </div>
         </div>
-        <p class="text-xs text-shelf-muted mt-2">Provider: <span class="text-shelf-text">{{ {'anthropic': 'Anthropic API', 'openai': 'OpenAI-compatible', 'ollama': 'Ollama (local)'}.get(vision_provider, vision_provider) }}</span> &middot; photos are analyzed in memory and not stored.</p>
+        <p class="text-xs text-shelf-muted mt-2">Provider: <span class="text-shelf-text">{{ {'anthropic': 'Anthropic API', 'openai': 'OpenAI-compatible', 'ollama': 'Ollama (local)'}.get(vision_provider, vision_provider) }}{% if vision_model %} · {{ vision_model }}{% endif %}</span> &middot; photos are analyzed in memory and not stored.</p>
         <div class="flex flex-col sm:flex-row sm:items-center gap-3 mt-4 pt-3 border-t border-shelf-border">
-            <label class="text-sm text-shelf-muted whitespace-nowrap" for="intake-location">Add books to</label>
+            <label class="text-sm text-shelf-muted whitespace-nowrap" for="intake-location">Add items to</label>
             <select id="intake-location" x-model="locationId" x-ref="locationSelect" class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                 <option value="">No location</option>
                 {% for loc in locations %}
@@ -105,7 +105,7 @@
             <h2 class="text-lg font-semibold text-shelf-warning mb-1">This photo may be too small to read</h2>
             <p class="text-sm text-shelf-muted mb-3">
                 This photo is <span class="text-shelf-text font-medium" x-text="photoW"></span>&times;<span class="text-shelf-text font-medium" x-text="photoH"></span>.
-                Spines this small often don't read well &mdash; take or choose another photo, or click Read Photo anyway.
+                Spines this small often don't read well &mdash; take or choose another photo, or try it anyway.
             </p>
             <div class="flex flex-col sm:flex-row gap-3">
                 <button type="button" @click="takePhoto()" x-show="cameraAvailable" x-cloak data-testid="intake-retake"
@@ -114,6 +114,12 @@
                 <button type="button" @click="$refs.photoInput.click()" data-testid="intake-choose-another"
                         :disabled="viewfinder || analyzing"
                         class="px-4 py-2 bg-shelf-hover text-shelf-text rounded-lg text-sm hover:bg-shelf-border transition-colors disabled:opacity-50 whitespace-nowrap">Choose another photo</button>
+                <button type="button" @click="analyze(false)" data-testid="intake-try-anyway"
+                        :disabled="viewfinder || analyzing || planning"
+                        class="px-4 py-2 bg-shelf-warning text-shelf-bg rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 whitespace-nowrap">
+                    <span x-show="!analyzing">Try anyway</span>
+                    <span x-show="analyzing">Reading&hellip;</span>
+                </button>
             </div>
         </div>
     </template>
@@ -138,15 +144,15 @@
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
         </svg>
         <div>
-            <p class="text-sm font-medium">Adding books&hellip;</p>
-            <p class="text-xs text-shelf-muted">Looking up metadata for each selected book &mdash; a few seconds per book.</p>
+            <p class="text-sm font-medium">Adding items&hellip;</p>
+            <p class="text-xs text-shelf-muted">Looking up metadata for each selected item &mdash; a few seconds per item.</p>
         </div>
     </div>
 
     <!-- Step 2: review candidates -->
     <div x-show="books.length > 0" x-cloak class="bg-shelf-card rounded-xl border border-shelf-border p-6 mb-6">
         <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-semibold">Found <span x-text="books.length"></span> books</h2>
+            <h2 class="text-lg font-semibold">Found <span x-text="books.length"></span> items</h2>
             <div class="flex gap-2 text-xs">
                 <button @click="selectAll()" class="text-shelf-accent2 hover:text-shelf-accent">Select all</button>
                 <button @click="deselectAll()" class="text-shelf-muted hover:text-shelf-text">Deselect all</button>
@@ -154,7 +160,7 @@
         </div>
         <div class="space-y-2 mb-4">
             <template x-for="(book, i) in books" :key="i">
-                <div class="flex flex-wrap items-center gap-2" data-testid="intake-row">
+                <div class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 border-t border-shelf-border pt-3" data-testid="intake-row">
                     {# :checked/:value/@change + handler methods, not x-model="book.…"
                        (inputs AND the select): the Alpine CSP build cannot evaluate
                        nested-path assignments #}
@@ -177,18 +183,23 @@
                        ~446px max-content width, and the select would drop to a second
                        line on desktop (GOTCHAS G43). The select below does need it: it
                        has no lg:flex-* to reset basis-full. #}
-                    <div class="basis-full lg:flex-1 min-w-0 flex items-center gap-2">
-                        <input type="checkbox" :checked="book.include" @change="toggleInclude(i)"
-                               class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent shrink-0">
+                    <input type="checkbox" :checked="book.include" @change="toggleInclude(i)"
+                           class="mt-2 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                    <div class="min-w-0 flex items-center gap-2">
                         <input type="text" :value="book.title" @input="setBookTitle(i, $event.target.value)" placeholder="Title"
-                               class="flex-1 min-w-0 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
+                               :class="book.existing ? 'border-shelf-warning ring-1 ring-shelf-warning/50' : 'border-shelf-border'"
+                               class="flex-1 min-w-0 bg-shelf-bg border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
                         <span x-show="book.source === 'recognized'" x-cloak data-testid="intake-recognized"
                               title="Identified from the cover, not read — double-check"
                               class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-warning/90 text-black shrink-0">recognized</span>
+                        <span x-show="book.existing" x-cloak class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-warning/90 text-black shrink-0">exists</span>
                     </div>
-                    <input type="text" :value="book.authors" @input="setBookAuthors(i, $event.target.value)" placeholder="Author"
-                           class="flex-1 min-w-0 lg:flex-none lg:w-32 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
-                    <input type="text" :value="book.isbn" @input="setBookIsbn(i, $event.target.value)" placeholder="ISBN"
+                    <div class="col-start-2 flex flex-wrap gap-2">
+                    <input x-show="book.media_type !== 'video_game'" type="text" :value="book.authors" @input="setBookAuthors(i, $event.target.value)" placeholder="Author"
+                           class="flex-1 min-w-0 lg:flex-none lg:w-40 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
+                    <input x-show="book.media_type === 'video_game'" type="text" :value="book.publisher" @input="setBookPublisher(i, $event.target.value)" placeholder="Publisher"
+                           class="flex-1 min-w-0 lg:flex-none lg:w-40 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
+                    <input x-show="book.media_type !== 'video_game'" type="text" :value="book.isbn" @input="setBookIsbn(i, $event.target.value)" placeholder="ISBN"
                            inputmode="numeric" data-testid="intake-isbn"
                            class="flex-1 min-w-0 lg:flex-none lg:w-32 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
                     <select :value="book.media_type" @change="setBookMediaType(i, $event.target.value)"
@@ -196,25 +207,52 @@
                             class="basis-full lg:basis-auto bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
                         {% for key, label in media_types.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
                     </select>
+                    <select x-show="book.media_type === 'video_game'" :value="book.platform" @change="setBookPlatform(i, $event.target.value)"
+                            aria-label="Game platform" data-testid="intake-platform"
+                            class="basis-full lg:basis-auto bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
+                        <option value="">Platform (unknown)</option>
+                        {% for slug, name in game_platforms.items() %}<option value="{{ slug }}">{{ name }}</option>{% endfor %}
+                    </select>
+                    <input x-show="book.media_type === 'video_game'" type="number" :value="book.publish_year" @input="setBookYear(i, $event.target.value)" placeholder="Year"
+                           class="w-24 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
+                    <select x-show="book.media_type === 'video_game'" :value="book.collector_condition" @change="setBookCollectorCondition(i, $event.target.value)"
+                            aria-label="Collector state" class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
+                        <option value="">State</option><option value="cib">CIB</option><option value="boxed">Boxed</option><option value="loose">Loose</option>
+                    </select>
+                    </div>
+                    <p x-show="book.existing" class="col-start-2 text-xs text-shelf-warning">Already in collection — unchecked for safety. Select only if you want to replace it.</p>
                 </div>
             </template>
         </div>
-        <div class="flex flex-col sm:flex-row sm:items-center gap-3 pt-3 border-t border-shelf-border">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-3 py-3 border-t border-shelf-border">
             <select x-model="locationId" aria-label="Location" class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                 <option value="">No location</option>
                 {% for loc in locations %}
                 <option value="{{ loc.id }}">{{ loc.name }}</option>
                 {% endfor %}
             </select>
+            <select x-model="collectorCondition" aria-label="Collector state"
+                    class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <option value="">Collector state (optional)</option>
+                <option value="cib">CIB — Complete in Box</option>
+                <option value="boxed">Boxed</option>
+                <option value="loose">Loose</option>
+            </select>
             <label class="flex items-center gap-2 text-sm text-shelf-muted cursor-pointer">
                 <input type="checkbox" x-model="owned" class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
                 Owned (uncheck for wishlist)
             </label>
-            <button @click="confirm()" :disabled="confirming || selectedCount() === 0"
-                    class="sm:ml-auto px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors disabled:opacity-50">
-                <span x-show="!confirming">Add <span x-text="selectedCount()"></span> to Library</span>
-                <span x-show="confirming">Adding&hellip;</span>
-            </button>
+        </div>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-end gap-3 pt-3">
+                <button @click="confirm(false)" :disabled="confirming || selectedCount() === 0"
+                        class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors disabled:opacity-50">
+                    <span x-show="!confirming">Fetch &amp; Add <span x-text="selectedCount()"></span> <span x-text="selectedCount() === 1 ? 'Item' : 'Items'"></span></span>
+                    <span x-show="confirming">Fetching metadata &amp; adding&hellip;</span>
+                </button>
+                <button @click="confirm(true)" :disabled="confirming || selectedCount() === 0"
+                        class="px-4 py-2 bg-shelf-hover text-shelf-text rounded-lg text-sm hover:bg-shelf-border transition-colors disabled:opacity-50">
+                    Just add <span x-text="selectedCount()"></span> <span x-text="selectedCount() === 1 ? 'Item' : 'Items'"></span>
+                </button>
         </div>
     </div>
 

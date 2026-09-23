@@ -17,7 +17,7 @@ from app.config import (
     TILING_THRESHOLD,
     canonical_media_type,
 )
-from app.database import get_db, get_all_settings, get_setting
+from app.database import get_db, get_all_settings, get_game_platforms, get_setting
 from app.services import cover_queue, covers, openlibrary, tiling, title_lookup, vision
 from app.services import isbn as isbn_svc
 from app.services import authors as authors_svc
@@ -117,15 +117,35 @@ async def analyze_photo(photos: list[UploadFile] = File(...)):
         return {"ok": False, "message": str(e)}
 
     if not books:
-        return {"ok": False, "message": "No books were recognized in this photo"}
+        return {"ok": False, "message": "No catalog items were recognized in this photo"}
+    # Models naturally answer "Nintendo 64" while the select stores Shelf's
+    # slug ("n64"). Normalize before returning the review rows so the option
+    # is visibly selected, not merely repaired later during save.
+    with get_db() as db:
+        for book in books:
+            if book.get("media_type") == "video_game":
+                book["platform"] = _platform_slug(db, book.get("platform"))
+            existing = db.execute(
+                "SELECT id, title, platform, publish_year FROM items_live "
+                "WHERE title = ? COLLATE NOCASE AND media_type = ? LIMIT 1",
+                (book["title"], book.get("media_type", "book")),
+            ).fetchone()
+            if existing:
+                book["existing"] = dict(existing)
     return {"ok": True, "books": books}
 
 
 class IntakeBook(BaseModel):
     title: str
     authors: str | None = None
+    publisher: str | None = None
+    publish_year: int | None = None
     isbn: str | None = None  # parsed and carried only — T6 wires the cascade
     media_type: str = "book"
+    platform: str | None = None
+    collector_condition: str | None = None
+    existing_id: int | None = None
+    replace_existing: bool = False
 
     @field_validator("media_type")
     @classmethod
@@ -139,10 +159,44 @@ class IntakeBook(BaseModel):
         return v
 
 
+def _platform_slug(db, value: str | None) -> str | None:
+    """Resolve a model's platform label to Shelf's configured platform slug."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    platforms = get_game_platforms(db)
+    if value in platforms:
+        return value
+    folded = value.casefold()
+    compact = "".join(ch for ch in folded if ch.isalnum())
+    for slug, name in platforms.items():
+        if name.casefold() == folded or slug.casefold() == folded:
+            return slug
+        if "".join(ch for ch in name.casefold() if ch.isalnum()) == compact:
+            return slug
+    # A precise configured platform name is more useful than a finite list of
+    # console special cases: "Nintendo 64 DD" contains "Nintendo 64", and
+    # custom names work identically. Prefer the longest matching configured
+    # name/slug so "PlayStation 2" wins over a hypothetical "PlayStation".
+    matches = []
+    for slug, name in platforms.items():
+        for candidate in (slug, name):
+            key = "".join(ch for ch in candidate.casefold() if ch.isalnum())
+            if len(key) >= 3 and key in compact:
+                matches.append((len(key), slug))
+    if matches:
+        return max(matches)[1]
+    aliases = {"nintendo64": "n64", "nintendo643": "n64", "n64": "n64"}
+    if compact in aliases and aliases[compact] in platforms:
+        return aliases[compact]
+    return None
+
+
 class IntakeConfirm(BaseModel):
     books: list[IntakeBook]
     location_id: int | None = None
     owned: bool = True
+    skip_metadata: bool = False
 
 
 def _isbn_taken(isbn13: str, media_type: str) -> bool:
@@ -179,7 +233,7 @@ def _title_taken(db, title: str, authors: str, media_type: str) -> bool:
 async def _confirm_one(
     book: IntakeBook, client: httpx.AsyncClient, search_lang: str, preferred_marc: str,
     location_id: int | None, owned: bool, hc_token: str | None,
-    google_api_key: str | None, creds: dict[str, str | None],
+    google_api_key: str | None, creds: dict[str, str | None], skip_metadata: bool = False,
 ) -> tuple[str, dict, int | None]:
     """Resolve one confirmed row to an ``added``/``skipped`` entry.
 
@@ -190,6 +244,9 @@ async def _confirm_one(
     """
     title = book.title.strip()
     media_type = book.media_type
+    with get_db() as db:
+        platform = _platform_slug(db, book.platform) if media_type == "video_game" else None
+    replace_id = book.existing_id if book.replace_existing else None
 
     # 1. Title+authors pre-check, scoped to media type — and *only* a
     # pre-check. It exists to spare a plainly-owned row the two paced outbound
@@ -203,7 +260,7 @@ async def _confirm_one(
     # (G18). Do not collapse this into that one as a duplicate, and do not
     # promote it back into the decision.
     with get_db() as db:
-        if _title_taken(db, title, book.authors or "", media_type):
+        if not replace_id and _title_taken(db, title, book.authors or "", media_type):
             return "skipped", {"title": title, "reason": "already in library"}, None
 
     # 2. A printed ISBN, if one survives re-validation, buys the full scan
@@ -211,7 +268,7 @@ async def _confirm_one(
     # is editable and nothing about it is trusted.
     printed_isbn13 = vision.clean_isbn(book.isbn)
     if printed_isbn13:
-        if _isbn_taken(printed_isbn13, media_type):
+        if not replace_id and _isbn_taken(printed_isbn13, media_type):
             return "skipped", {"title": title, "reason": "ISBN already in library"}, None
 
         # Deferred import, the store.py precedent — the item routers never
@@ -242,6 +299,9 @@ async def _confirm_one(
                         return "skipped", {
                             "title": title, "reason": "ISBN already in library"}, None
                     raise
+                if platform:
+                    with get_db() as db:
+                        update_item_fields(db, item_id, {"platform": platform})
                 if not owned:
                     with get_db() as db:
                         update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
@@ -278,7 +338,7 @@ async def _confirm_one(
     # Set only on an accepted UPC_METADATA_PROVIDERS hit, below. Books keep
     # going through the cover queue (G29) — this is the disc/game path only.
     cover_url = None
-    if media_type in BOOK_SEARCH_MEDIA_TYPES:
+    if not skip_metadata and media_type in BOOK_SEARCH_MEDIA_TYPES:
         # Enrich via Open Library field-scoped search (same guard as
         # imports); prefer the configured search-language works so
         # translated editions don't win just by ranking first
@@ -292,12 +352,12 @@ async def _confirm_one(
                 meta = (preferred or matches)[0]
         except httpx.HTTPError:
             logger.debug("Intake metadata search failed for %r", title)
-    elif media_type in title_lookup.UPC_METADATA_PROVIDERS:
+    elif not skip_metadata and media_type in title_lookup.UPC_METADATA_PROVIDERS:
         # One paced request per row; no credentials means no call at all. The
         # helper never raises and never hands back a list (G45, G66), so there
         # is nothing to catch here and no 500 to make.
         result = await title_lookup.lookup_by_title(
-            title, media_type, client, creds=creds)
+            title, media_type, client, platform=platform, creds=creds)
         if result.outcome == "rejected":
             # Named provider and row title only — never a URL. TMDb's v3 key
             # rides in `?api_key=`, and this logger carries no redaction
@@ -364,12 +424,32 @@ async def _confirm_one(
         # download at 5b stays below the block.
         db.execute("BEGIN IMMEDIATE")
 
+        if replace_id:
+            existing = db.execute(
+                "SELECT id FROM items_live WHERE id = ? AND media_type = ?",
+                (replace_id, media_type),
+            ).fetchone()
+            if not existing:
+                return "skipped", {"title": title, "reason": "existing item changed"}, None
+            updates = {
+                "title": title,
+                "authors": book.authors or meta.get("authors"),
+                "publisher": book.publisher or meta.get("publisher"),
+                "publish_year": book.publish_year or meta.get("publish_year"),
+                "platform": platform,
+                "description": meta.get("description"),
+                "series_name": meta.get("series_name"),
+                "collector_condition": book.collector_condition,
+            }
+            update_item_fields(db, replace_id, {k: v for k, v in updates.items() if v is not None})
+            return "added", {"title": title, "id": replace_id, "matched": bool(meta), "replaced": True}, replace_id
+
         # 4-pre. Step 1's pre-check decided nothing, and it read before the
         # lock existed. Re-run it here, unconditionally, on the row's own
         # *read* title — a rival that committed during the lookup window is
         # visible to this query and was not visible to that one. This is the
         # guard that decides.
-        if _title_taken(db, book.title.strip(), book.authors or "", media_type):
+        if not replace_id and _title_taken(db, book.title.strip(), book.authors or "", media_type):
             return "skipped", {
                 "title": book.title.strip(), "reason": "already in library"}, None
 
@@ -380,7 +460,7 @@ async def _confirm_one(
         # row's authors. Mirrors `_isbn_taken`, which the printed-ISBN path
         # already calls twice for this reason. Skipped when nothing moved,
         # where it would repeat step 1 verbatim.
-        if title != book.title.strip():
+        if not replace_id and title != book.title.strip():
             resolved_dupe = db.execute(
                 "SELECT id FROM items_live WHERE title = ? COLLATE NOCASE AND media_type = ?",
                 (title, media_type),
@@ -406,16 +486,14 @@ async def _confirm_one(
                 authors=book.authors or meta.get("authors"),
                 isbn=isbn13,
                 media_type=media_type,
-                publisher=meta.get("publisher"),
-                publish_year=meta.get("publish_year"),
+                publisher=book.publisher or meta.get("publisher"),
+                publish_year=book.publish_year or meta.get("publish_year"),
                 page_count=meta.get("page_count"),
-                # Absent from Open Library's weak-path result, so the book path
-                # is unchanged; a TMDb or IGDB hit carries both. `authors` keeps
-                # the row's own value above — IGDB's `developer` is not an
-                # author — and `platform` is not written at all: `_parse_game`
-                # answers `platform_names`, IGDB's own names, which is not the
-                # `game_platforms` slug vocabulary the item edit page validates
-                # against (G57).
+                # A reviewed photo-intake platform is normalized above against
+                # Shelf's own slug vocabulary, instead of trusting IGDB's
+                # display-only platform names.
+                platform=platform,
+                collector_condition=(book.collector_condition if media_type != "book" else None),
                 description=meta.get("description"),
                 series_name=meta.get("series_name"),
                 location_id=location_id,
@@ -490,7 +568,7 @@ async def confirm_books(payload: IntakeConfirm):
             try:
                 status, entry, item_id = await _confirm_one(
                     book, client, search_lang, preferred_marc, location_id,
-                    payload.owned, hc_token, google_api_key, creds)
+                    payload.owned, hc_token, google_api_key, creds, payload.skip_metadata)
             except ItemValueError as e:
                 # A stale location is caught by the boundary check above and
                 # never reaches here; this guards a field _confirm_one has

@@ -27,6 +27,14 @@ async function postJSON(url, opts) {
     }
 }
 
+// Settings cards keep their detailed inline result for longer-running work,
+// while this gives every completed action the same immediate feedback.
+function notifySettingsResult(result, successMessage) {
+    var failed = !result || result.ok === false || !!result.error;
+    var message = result && (result.message || result.error);
+    showToast(failed ? (message || 'Action failed') : successMessage, failed ? 'error' : 'success');
+}
+
 document.addEventListener('alpine:init', function () {
 
     // settings.html — tab bar (persists active tab in localStorage)
@@ -40,6 +48,17 @@ document.addEventListener('alpine:init', function () {
                 this.tab = name;
                 localStorage.setItem('shelf_settings_tab', name);
             }
+        };
+    });
+
+    // Native selects do not expose an "opened" event. Track the interaction
+    // state solely for the decorative chevron; selection and focus loss reset
+    // it immediately, without a transition animation.
+    Alpine.data('logoSelect', function () {
+        return {
+            isOpen: false,
+            toggle() { this.isOpen = !this.isOpen; },
+            close() { this.isOpen = false; }
         };
     });
 
@@ -59,8 +78,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ url: this.$refs.notifyUrl.value, format: this.$refs.notifyFormat.value })
                 }).then(r => r.json())
-                  .then(d => { this.ntStatus = d; this.ntTesting = false; })
-                  .catch(() => { this.ntStatus = { ok: false, message: 'Request failed' }; this.ntTesting = false; });
+                  .then(d => { this.ntStatus = d; this.ntTesting = false; notifySettingsResult(d, 'Notification sent'); })
+                  .catch(() => { this.ntStatus = { ok: false, message: 'Request failed' }; this.ntTesting = false; notifySettingsResult(this.ntStatus, ''); });
             }
         };
     });
@@ -107,8 +126,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ url: this.absUrl, token: this.absToken })
                 }).then(r => r.json())
-                  .then(d => { this.absStatus = d; this.absTesting = false; })
-                  .catch(() => { this.absStatus = { ok: false, message: 'Connection failed' }; this.absTesting = false; });
+                  .then(d => { this.absStatus = d; this.absTesting = false; notifySettingsResult(d, 'Audiobookshelf connection verified'); })
+                  .catch(() => { this.absStatus = { ok: false, message: 'Connection failed' }; this.absTesting = false; notifySettingsResult(this.absStatus, ''); });
             },
             startSync() {
                 if (!this.absSyncReady) return;
@@ -124,12 +143,12 @@ document.addEventListener('alpine:init', function () {
                         self.syncLastTitle = d.title;
                         self.syncLog.push({i: d.current, t: d.title, s: d.status});
                     } else if (d.type === 'done') {
-                        self.result = d; self.syncing = false; es.close();
+                        self.result = d; self.syncing = false; es.close(); notifySettingsResult(d, 'Audiobookshelf sync finished');
                     } else if (d.type === 'error') {
-                        self.result = {error: d.message}; self.syncing = false; es.close();
+                        self.result = {error: d.message}; self.syncing = false; es.close(); notifySettingsResult(self.result, '');
                     }
                 };
-                es.onerror = function () { self.result = {error: 'Connection lost'}; self.syncing = false; es.close(); };
+                es.onerror = function () { self.result = {error: 'Connection lost'}; self.syncing = false; es.close(); notifySettingsResult(self.result, ''); };
             }
         };
     });
@@ -166,7 +185,7 @@ document.addEventListener('alpine:init', function () {
                 fetch('/api/sync/audiobookshelf/libraries', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken()}, body: JSON.stringify({excluded: this.excludedIds()})})
                     .then(() => fetch('/api/sync/audiobookshelf/libraries/cleanup', {method: 'POST', headers: {'X-CSRF-Token': window.csrfToken()}}))
                     .then(r => r.json())
-                    .then(d => { this.cleaning = false; this.cleanResult = d; if (d.ok) showToast('Removed ' + d.deleted + ' items') })
+                    .then(d => { this.cleaning = false; this.cleanResult = d; notifySettingsResult(d, d.ok ? 'Removed ' + d.deleted + ' items' : ''); })
                     .catch(() => { this.cleaning = false; showToast('Cleanup failed', 'error') });
             }
         };
@@ -201,8 +220,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ token: this.hcToken })
                 }).then(r => r.json())
-                  .then(d => { this.hcStatus = d; this.hcTesting = false; })
-                  .catch(() => { this.hcStatus = { ok: false, message: 'Connection failed' }; this.hcTesting = false; });
+                  .then(d => { this.hcStatus = d; this.hcTesting = false; notifySettingsResult(d, 'Hardcover connection verified'); })
+                  .catch(() => { this.hcStatus = { ok: false, message: 'Connection failed' }; this.hcTesting = false; notifySettingsResult(this.hcStatus, ''); });
             },
             startExport() {
                 this.exporting = true; this.exportResult = false;
@@ -219,12 +238,12 @@ document.addEventListener('alpine:init', function () {
                         self.exportLastTitle = d.title;
                         self.exportLog.push({i: d.current, t: d.title, s: d.status});
                     } else if (d.type === 'done') {
-                        self.exportResult = d; self.exporting = false; es.close();
+                        self.exportResult = d; self.exporting = false; es.close(); notifySettingsResult(d, 'Hardcover export finished');
                     } else if (d.type === 'error') {
-                        self.exportResult = {error: d.message}; self.exporting = false; es.close();
+                        self.exportResult = {error: d.message}; self.exporting = false; es.close(); notifySettingsResult(self.exportResult, '');
                     }
                 };
-                es.onerror = function () { self.exportResult = {error: 'Connection lost'}; self.exporting = false; es.close(); };
+                es.onerror = function () { self.exportResult = {error: 'Connection lost'}; self.exporting = false; es.close(); notifySettingsResult(self.exportResult, ''); };
             },
             startImport() {
                 this.importing = true; this.importResult = false;
@@ -245,12 +264,12 @@ document.addEventListener('alpine:init', function () {
                             self.importLog.push({i: d.current, t: d.title, s: d.status});
                         }
                     } else if (d.type === 'done') {
-                        self.importResult = d; self.importing = false; es.close();
+                        self.importResult = d; self.importing = false; es.close(); notifySettingsResult(d, 'Hardcover import finished');
                     } else if (d.type === 'error') {
-                        self.importResult = {error: d.message}; self.importing = false; es.close();
+                        self.importResult = {error: d.message}; self.importing = false; es.close(); notifySettingsResult(self.importResult, '');
                     }
                 };
-                es.onerror = function () { self.importResult = {error: 'Connection lost'}; self.importing = false; es.close(); };
+                es.onerror = function () { self.importResult = {error: 'Connection lost'}; self.importing = false; es.close(); notifySettingsResult(self.importResult, ''); };
             }
         };
     });
@@ -273,8 +292,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ key: this.apiKey })
                 }).then(r => r.json())
-                  .then(d => { this.keyStatus = d; this.testing = false; })
-                  .catch(() => { this.keyStatus = { ok: false, message: 'Connection failed' }; this.testing = false; });
+                  .then(d => { this.keyStatus = d; this.testing = false; notifySettingsResult(d, 'ISBNdb key verified'); })
+                  .catch(() => { this.keyStatus = { ok: false, message: 'Connection failed' }; this.testing = false; notifySettingsResult(this.keyStatus, ''); });
             },
             startValuation() {
                 this.valuating = true; this.valResult = false; this.valCurrent = 0; this.valTotal = 0;
@@ -288,12 +307,12 @@ document.addEventListener('alpine:init', function () {
                         self.valLastTitle = d.title;
                         self.valLog.push({i: d.current, t: d.title, s: d.status, p: !!d.priced});
                     } else if (d.type === 'done') {
-                        self.valResult = d; self.valuating = false; es.close();
+                        self.valResult = d; self.valuating = false; es.close(); notifySettingsResult(d, 'Collection valuation finished');
                     } else if (d.type === 'error') {
-                        self.valResult = {message: d.message}; self.valuating = false; es.close();
+                        self.valResult = {error: d.message}; self.valuating = false; es.close(); notifySettingsResult(self.valResult, '');
                     }
                 };
-                es.onerror = function () { self.valResult = {message: 'Connection lost'}; self.valuating = false; es.close(); };
+                es.onerror = function () { self.valResult = {error: 'Connection lost'}; self.valuating = false; es.close(); notifySettingsResult(self.valResult, ''); };
             }
         };
     });
@@ -315,8 +334,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ api_key: this.googleBooksKey })
                 }).then(r => r.json())
-                  .then(d => { this.googleBooksStatus = d; this.googleBooksTesting = false; })
-                  .catch(() => { this.googleBooksStatus = { ok: false, message: 'Connection failed' }; this.googleBooksTesting = false; });
+                  .then(d => { this.googleBooksStatus = d; this.googleBooksTesting = false; notifySettingsResult(d, 'Google Books key verified'); })
+                  .catch(() => { this.googleBooksStatus = { ok: false, message: 'Connection failed' }; this.googleBooksTesting = false; notifySettingsResult(this.googleBooksStatus, ''); });
             }
         };
     });
@@ -337,8 +356,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ key: this.tmdbKey })
                 }).then(r => r.json())
-                  .then(d => { this.tmdbStatus = d; this.tmdbTesting = false; })
-                  .catch(() => { this.tmdbStatus = { ok: false, message: 'Connection failed' }; this.tmdbTesting = false; });
+                  .then(d => { this.tmdbStatus = d; this.tmdbTesting = false; notifySettingsResult(d, 'TMDb key verified'); })
+                  .catch(() => { this.tmdbStatus = { ok: false, message: 'Connection failed' }; this.tmdbTesting = false; notifySettingsResult(this.tmdbStatus, ''); });
             }
         };
     });
@@ -359,8 +378,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ client_id: this.igdbId, client_secret: this.igdbSecret })
                 }).then(r => r.json())
-                  .then(d => { this.igdbStatus = d; this.igdbTesting = false; })
-                  .catch(() => { this.igdbStatus = { ok: false, message: 'Connection failed' }; this.igdbTesting = false; });
+                  .then(d => { this.igdbStatus = d; this.igdbTesting = false; notifySettingsResult(d, 'IGDB credentials verified'); })
+                  .catch(() => { this.igdbStatus = { ok: false, message: 'Connection failed' }; this.igdbTesting = false; notifySettingsResult(this.igdbStatus, ''); });
             }
         };
     });
@@ -386,12 +405,12 @@ document.addEventListener('alpine:init', function () {
                         self.retryLastTitle = d.title;
                         self.retryLog.push({i: d.current, t: d.title, s: d.status});
                     } else if (d.type === 'done') {
-                        self.retryResult = d; self.retrying = false; es.close();
+                        self.retryResult = d; self.retrying = false; es.close(); notifySettingsResult(d, 'Cover retry finished');
                     } else if (d.type === 'error') {
-                        self.retryResult = {error: d.message}; self.retrying = false; es.close();
+                        self.retryResult = {error: d.message}; self.retrying = false; es.close(); notifySettingsResult(self.retryResult, '');
                     }
                 };
-                es.onerror = function () { self.retryResult = {error: 'Connection lost'}; self.retrying = false; es.close(); };
+                es.onerror = function () { self.retryResult = {error: 'Connection lost'}; self.retrying = false; es.close(); notifySettingsResult(self.retryResult, ''); };
             },
             startSynopses() {
                 this.synFetching = true; this.synResult = false; this.synCurrent = 0; this.synTotal = 0;
@@ -405,12 +424,12 @@ document.addEventListener('alpine:init', function () {
                         self.synLastTitle = d.title;
                         self.synLog.push({i: d.current, t: d.title, s: d.status});
                     } else if (d.type === 'done') {
-                        self.synResult = d; self.synFetching = false; es.close();
+                        self.synResult = d; self.synFetching = false; es.close(); notifySettingsResult(d, 'Synopsis backfill finished');
                     } else if (d.type === 'error') {
-                        self.synResult = {error: d.message}; self.synFetching = false; es.close();
+                        self.synResult = {error: d.message}; self.synFetching = false; es.close(); notifySettingsResult(self.synResult, '');
                     }
                 };
-                es.onerror = function () { self.synResult = {error: 'Connection lost'}; self.synFetching = false; es.close(); };
+                es.onerror = function () { self.synResult = {error: 'Connection lost'}; self.synFetching = false; es.close(); notifySettingsResult(self.synResult, ''); };
             }
         };
     });
@@ -423,8 +442,8 @@ document.addEventListener('alpine:init', function () {
                 this.importing = true; this.importResult = false;
                 fetch('/api/import/csv', { method: 'POST', body: new FormData(e.target), headers: { 'X-CSRF-Token': window.csrfToken() } })
                     .then(r => r.json())
-                    .then(d => { this.importResult = d; this.importing = false; })
-                    .catch(() => { this.importResult = { error: 'Import failed' }; this.importing = false; });
+                    .then(d => { this.importResult = d; this.importing = false; notifySettingsResult(d, 'CSV import finished'); })
+                    .catch(() => { this.importResult = { error: 'Import failed' }; this.importing = false; notifySettingsResult(this.importResult, ''); });
             }
         };
     });
@@ -478,16 +497,18 @@ document.addEventListener('alpine:init', function () {
                     .then(function (r) { return r.json(); })
                     .then(function (d) {
                         self.planning = false;
-                        if (d.error) { self.errorMessage = d.error; return; }
+                        if (d.error) { self.errorMessage = d.error; notifySettingsResult(d, ''); return; }
                         self.plan = d.plan;
                         self.planMode = d.plan.mode;
                         self.uploadId = d.upload_id;
                         self.resetSelection();
                         self.step = 2;
+                        showToast('Archive preview is ready');
                     })
                     .catch(function () {
                         self.planning = false;
                         self.errorMessage = 'Preview failed';
+                        showToast(self.errorMessage, 'error');
                     });
             },
 
@@ -516,12 +537,14 @@ document.addEventListener('alpine:init', function () {
                         self.importResult = d;
                         self.deselectedLines = self.buildDeselectedLines(d);
                         self.step = 3;
+                        notifySettingsResult(d, 'Archive import finished');
                     })
                     .catch(function () {
                         self.importing = false;
                         self.importResult = { error: 'Import failed' };
                         self.deselectedLines = [];
                         self.step = 3;
+                        showToast('Import failed', 'error');
                     });
             },
 
@@ -647,8 +670,8 @@ document.addEventListener('alpine:init', function () {
                 this.restoring = true; this.restoreResult = false;
                 fetch('/api/settings/restore', { method: 'POST', headers: { 'X-CSRF-Token': window.csrfToken() }, body: new FormData(e.target) })
                     .then(r => r.json())
-                    .then(d => { this.restoreResult = d; this.restoring = false; })
-                    .catch(() => { this.restoreResult = { error: 'Restore failed' }; this.restoring = false; });
+                    .then(d => { this.restoreResult = d; this.restoring = false; notifySettingsResult(d, 'Backup restored'); })
+                    .catch(() => { this.restoreResult = { error: 'Restore failed' }; this.restoring = false; notifySettingsResult(this.restoreResult, ''); });
             }
         };
     });
@@ -726,4 +749,25 @@ document.addEventListener('submit', function (e) {
     if (!form || !form.getAttribute) return;
     const msg = form.getAttribute('data-confirm');
     if (msg && !confirm(msg)) e.preventDefault();
+
+    // Plain Settings forms intentionally keep their normal POST/redirect flow.
+    // Carry a success toast across that redirect; Alpine's fetch forms opt out.
+    if (e.defaultPrevented || !form.closest('[data-settings-page]') ||
+        form.hasAttribute('@submit.prevent') || form.action.endsWith('/api/settings/backup')) return;
+    try {
+        sessionStorage.setItem('shelf_settings_toast', JSON.stringify({
+            message: 'Changes saved', type: 'success'
+        }));
+    } catch (_) { /* private browsing may disable session storage */ }
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    if (!document.querySelector('[data-settings-page]')) return;
+    try {
+        var stored = sessionStorage.getItem('shelf_settings_toast');
+        if (!stored) return;
+        sessionStorage.removeItem('shelf_settings_toast');
+        var toast = JSON.parse(stored);
+        showToast(toast.message, toast.type);
+    } catch (_) { /* a malformed or unavailable entry should never break Settings */ }
 });

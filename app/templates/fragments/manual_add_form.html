@@ -144,6 +144,15 @@
                 </select>
             </div>
             {% endif %}
+            <div{% if manual_host == 'panel' %} x-show="['video_game', 'dvd', 'cd', 'vinyl', 'cassette', 'comic', 'manga'].includes(mediaType)"{% endif %}>
+                <select name="collector_condition"{% if manual_host == 'panel' %} :disabled="!['video_game', 'dvd', 'cd', 'vinyl', 'cassette', 'comic', 'manga'].includes(mediaType)"{% endif %}
+                        class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                    <option value="">Collector state (optional)</option>
+                    <option value="cib">CIB — Complete in Box</option>
+                    <option value="boxed">Boxed</option>
+                    <option value="loose">Loose</option>
+                </select>
+            </div>
             <div class="grid grid-cols-2 gap-3">
                 {# Short placeholders to match the fields above ("Publisher",
                    "Year") — only Title is marked required. "Location

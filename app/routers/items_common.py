@@ -44,6 +44,7 @@ SORT_OPTIONS = {
     "title_asc": ("Title A\u2013Z", "i.title COLLATE NOCASE ASC"),
     "title_desc": ("Title Z\u2013A", "i.title COLLATE NOCASE DESC"),
     "author": ("Author", "i.authors COLLATE NOCASE ASC, i.title COLLATE NOCASE ASC"),
+    "platform": ("Platform", "i.platform COLLATE NOCASE ASC, i.title COLLATE NOCASE ASC"),
     "year_desc": ("Year (Newest)", "(i.publish_year IS NULL), i.publish_year DESC, i.title COLLATE NOCASE ASC"),
     "year_asc": ("Year (Oldest)", "(i.publish_year IS NULL), i.publish_year ASC, i.title COLLATE NOCASE ASC"),
 }
@@ -815,4 +816,3 @@ def _manual_form_locations():
     """
     with get_db() as db:
         return db.execute("SELECT id, name FROM locations ORDER BY sort_order, name").fetchall()
-

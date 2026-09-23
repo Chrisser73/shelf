@@ -125,6 +125,22 @@ def _platform(value):
     return "i.platform = ? AND i.media_type = 'video_game'", [value]
 
 
+def _missing_cover(value):
+    if value != "1":
+        return None
+    return "(i.cover_path IS NULL OR TRIM(i.cover_path) = '') AND i.cover_review_dismissed = 0", []
+
+
+def _collector_condition(value):
+    values = [part.strip().lower() for part in value.split(",") if part.strip()]
+    allowed = {"cib", "boxed", "loose"}
+    values = [value for value in values if value in allowed]
+    if not values:
+        return _NEVER
+    placeholders = ", ".join("?" for _ in values)
+    return f"i.collector_condition IN ({placeholders})", values
+
+
 @dataclass(frozen=True)
 class BrowseFilter:
     """One Browse filter, in every form the app needs it.
@@ -188,6 +204,8 @@ FILTERS: tuple[BrowseFilter, ...] = (
     BrowseFilter("owned", condition=_owned),
     BrowseFilter("lent_out", condition=_lent_out),
     BrowseFilter("platform_filter", prefix="Platform", condition=_platform),
+    BrowseFilter("cover_missing", prefix="Missing cover", condition=_missing_cover),
+    BrowseFilter("collector_condition", prefix="Condition", condition=_collector_condition),
     BrowseFilter("tag", prefix="Tag", condition=_tag, quote_in_qs=True),
     BrowseFilter("language", prefix="Language", condition=_column("i.language")),
     # `view` is the odd one: client-owned state (localStorage) that is sent to

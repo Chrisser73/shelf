@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Settings — Shelf{% endblock %}
 {% block content %}
-<div class="max-w-7xl mx-auto" x-data="settingsTabs">
+<div class="max-w-7xl mx-auto" x-data="settingsTabs" data-settings-page>
     {% include "fragments/settings/page_header.html" %}
 
     <div class="flex flex-col lg:flex-row gap-6 lg:gap-8 items-start">
@@ -12,8 +12,10 @@
             {% include "fragments/settings/integrations.html" %}
             {% include "fragments/settings/romm.html" %}
             {% include "fragments/settings/komga.html" %}
+            {% if is_admin %}
             {% include "fragments/settings/data.html" %}
             {% include "fragments/settings/users.html" %}
+            {% endif %}
         </div>
     </div>
 </div>

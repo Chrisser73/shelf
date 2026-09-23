@@ -62,7 +62,7 @@
     </div>
 
     <!-- Header + Filters -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
         <!-- flex-wrap: the h1 is whitespace-nowrap and carries the item count,
              so this row's width grows with the number of digits in it -- a
              4-digit collection overflowed a 320px viewport while a 1-digit one
@@ -142,21 +142,60 @@
                 <span x-show="filterPills.length > 0" class="bg-shelf-accent text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center" x-text="filterPills.length"></span>
             </button>
             <!-- Search always visible on mobile -->
-            <input type="search" name="q" data-testid="search-input" placeholder="Search..." value="{{ initial_query or '' }}"
-                   x-model="searchQuery"
-                   hx-get="/api/search" hx-trigger="keyup changed delay:300ms" hx-target="#item-grid"
-                   hx-include="{{ filter_includes('q') }}"
-                   class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50 flex-1 min-w-0">
+            <div class="relative flex-1 min-w-0">
+                <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-shelf-muted pointer-events-none" aria-hidden="true"></i>
+                <input type="search" name="q" data-testid="search-input" placeholder="Search..." value="{{ initial_query or '' }}"
+                       x-model="searchQuery"
+                       hx-get="/api/search" hx-trigger="keyup changed delay:300ms" hx-target="#item-grid"
+                       hx-include="{{ filter_includes('q') }}"
+                       class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 pl-10 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50 w-full">
+            </div>
         </div>
         <div :class="filtersOpen ? 'flex' : 'hidden sm:flex'" class="flex-wrap items-center gap-3">
             <!-- Search (hidden on mobile since it's shown above) -->
-            <input type="search" name="q" data-testid="search-input" placeholder="Search..." value="{{ initial_query or '' }}"
-                   x-model="searchQuery"
-                   hx-get="/api/search" hx-trigger="keyup changed delay:300ms" hx-target="#item-grid"
-                   hx-include="{{ filter_includes('q') }}"
-                   class="hidden sm:block bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50 w-48">
+            <div class="hidden sm:block basis-full relative">
+                <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-shelf-muted pointer-events-none" aria-hidden="true"></i>
+                <input type="search" name="q" data-testid="search-input" placeholder="Search..." value="{{ initial_query or '' }}"
+                       x-model="searchQuery"
+                       hx-get="/api/search" hx-trigger="keyup changed delay:300ms" hx-target="#item-grid"
+                       hx-include="{{ filter_includes('q') }}"
+                       class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 pl-10 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50 w-full">
+            </div>
 
             {% set f = initial_filters or {} %}
+            <input type="hidden" name="cover_missing" value="{{ f.cover_missing or '' }}">
+            <div class="basis-full flex flex-col lg:flex-row gap-6">
+                <div class="shrink-0">
+                    <span class="mb-2 flex items-center gap-2 text-sm font-medium text-shelf-muted"><i data-lucide="arrow-down-up" class="w-4 h-4" aria-hidden="true"></i>Sort by</span>
+                    <select name="sort"
+                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+                    hx-include="{{ filter_includes('sort') }}"
+                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <option value="newest" {{ 'selected' if f.sort == 'newest' or not f.sort else '' }}>Most Recent</option>
+                <option value="oldest" {{ 'selected' if f.sort == 'oldest' else '' }}>Oldest First</option>
+                <option value="title_asc" {{ 'selected' if f.sort == 'title_asc' else '' }}>Title A–Z</option>
+                <option value="title_desc" {{ 'selected' if f.sort == 'title_desc' else '' }}>Title Z–A</option>
+                <option value="author" {{ 'selected' if f.sort == 'author' else '' }}>Author</option>
+                <option value="platform" {{ 'selected' if f.sort == 'platform' else '' }}>Platform</option>
+                <option value="year_desc" {{ 'selected' if f.sort == 'year_desc' else '' }}>Year (Newest)</option>
+                <option value="year_asc" {{ 'selected' if f.sort == 'year_asc' else '' }}>Year (Oldest)</option>
+                    </select>
+                </div>
+                <div class="min-w-0 flex-1">
+                    <span class="mb-2 flex items-center gap-2 text-sm font-medium text-shelf-muted"><i data-lucide="list-filter" class="w-4 h-4" aria-hidden="true"></i>Filter</span>
+                    <div class="flex flex-wrap items-center gap-3">
+            <!-- Collector state is intentionally separate from tags: it is one
+                 physical packaging attribute, and applies only to items for
+                 which it was explicitly set. -->
+            <select id="collector-condition-filter" name="collector_condition"
+                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+                    hx-include="{{ filter_includes('collector_condition') }}"
+                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <option value="" {{ 'selected' if not f.collector_condition else '' }}>All collector states</option>
+                <option value="cib" {{ 'selected' if f.collector_condition == 'cib' else '' }}>CIB — Complete in Box</option>
+                <option value="boxed" {{ 'selected' if f.collector_condition == 'boxed' else '' }}>Boxed</option>
+                <option value="loose" {{ 'selected' if f.collector_condition == 'loose' else '' }}>Loose</option>
+            </select>
             <!-- Media Type Filter -->
             <select id="type-filter" name="media_type_filter"
                     hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
@@ -188,19 +227,18 @@
                     hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
                     hx-include="{{ filter_includes('owned') }}"
                     class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
-                <option value="" {{ 'selected' if not f.owned else '' }}>All ({{ owned_count + wishlist_count + neither_count }})</option>
+                <option value="" {{ 'selected' if not f.owned else '' }}>Lists (all) ({{ owned_count + wishlist_count + neither_count }})</option>
                 <option value="1" {{ 'selected' if f.owned == '1' else '' }}>Owned ({{ owned_count }})</option>
                 <option value="0" {{ 'selected' if f.owned == '0' else '' }}>Wishlist ({{ wishlist_count }})</option>
                 <option value="none" {{ 'selected' if f.owned == 'none' else '' }}>Not owned or wishlisted ({{ neither_count }})</option>
             </select>
 
-            <!-- Lent Out Filter -->
-            <select name="lent_out"
+            <select id="lent-out-filter" name="lent_out"
                     hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
                     hx-include="{{ filter_includes('lent_out') }}"
                     class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
-                <option value="" {{ 'selected' if not f.lent_out else '' }}>All Items</option>
-                <option value="1" {{ 'selected' if f.lent_out == '1' else '' }}>Lent Out{% if lent_out_count %} ({{ lent_out_count }}){% endif %}</option>
+                <option value="" {{ 'selected' if not f.lent_out else '' }}>All items</option>
+                <option value="1" {{ 'selected' if f.lent_out == '1' else '' }}>Lent out{% if lent_out_count %} ({{ lent_out_count }}){% endif %}</option>
             </select>
 
             <!-- Reading Status Filter -->
@@ -271,20 +309,9 @@
                 <option value="{{ f.source_filter }}" selected>{{ source_labels.get(f.source_filter, f.source_filter | replace('_', ' ') | title) }} (0)</option>
                 {% endif %}
             </select>
-
-            <!-- Sort -->
-            <select name="sort"
-                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
-                    hx-include="{{ filter_includes('sort') }}"
-                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
-                <option value="newest" {{ 'selected' if f.sort == 'newest' or not f.sort else '' }}>Most Recent</option>
-                <option value="oldest" {{ 'selected' if f.sort == 'oldest' else '' }}>Oldest First</option>
-                <option value="title_asc" {{ 'selected' if f.sort == 'title_asc' else '' }}>Title A–Z</option>
-                <option value="title_desc" {{ 'selected' if f.sort == 'title_desc' else '' }}>Title Z–A</option>
-                <option value="author" {{ 'selected' if f.sort == 'author' else '' }}>Author</option>
-                <option value="year_desc" {{ 'selected' if f.sort == 'year_desc' else '' }}>Year (Newest)</option>
-                <option value="year_asc" {{ 'selected' if f.sort == 'year_asc' else '' }}>Year (Oldest)</option>
-            </select>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

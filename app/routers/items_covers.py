@@ -347,23 +347,49 @@ async def cover_remove(item_id: int, _=Depends(require_role("editor"))):
 # Pinned by test_cover_review.py::TestRetryMissingCoversStaysDismissalBlind.
 # Revisit when un-dismissing from the UI ships.
 #
-# Bulk cover retry is restricted to book media types for the same reason the
-# startup requeue is (GOTCHAS G29): items_common.resolve_missing_cover's fallback is a
-# book-catalogue title search that accepts the first Open Library hit when the
-# item has no authors, then writes that book's ISBN onto the row. Sweeping a
-# cover-less DVD or video game through it attaches a novel's cover and ISBN to
-# the disc. Non-book cover misses are re-fetched from the item page instead.
+# Books use the existing Open Library retry. DVDs and games use their own
+# configured providers (TMDb and IGDB), never the book fallback: otherwise a
+# game could be given a novel cover and ISBN. The title is the primary query;
+# the item's platform and year travel with the row to IGDB/TMDb as tie-breakers.
 _COVER_RETRY_PLACEHOLDERS = ", ".join(
     "?" for _ in cover_queue.COVER_REQUEUE_MEDIA_TYPES
 )
 
+
+async def _retry_missing_cover(item, client: httpx.AsyncClient) -> str | None:
+    """Fetch one missing cover through the provider appropriate to its type."""
+    media_type = item["media_type"]
+    if media_type in cover_queue.COVER_REQUEUE_MEDIA_TYPES:
+        return await items_common.resolve_missing_cover(item["id"], client)
+    if media_type not in covers.MEDIA_TYPE_PROVIDERS:
+        return None
+    with get_db() as db:
+        creds = _cover_search_credentials(db, media_type)
+    result = await covers.search_covers(item, item["title"], client, creds=creds)
+    candidates = result.payload or []
+    if not candidates:
+        return None
+    cover_path = await covers._download_to_item(item["id"], candidates[0]["url"], client)
+    if cover_path:
+        with get_db() as db:
+            db.execute("UPDATE items SET cover_path = ?, updated_at = datetime('now') WHERE id = ?",
+                       (cover_path, item["id"]))
+    return cover_path
+
+
+_COVER_RETRY_SELECT = (
+    "SELECT id, title, authors, media_type, publish_year, platform FROM items_live "
+    "WHERE (cover_path IS NULL OR TRIM(cover_path) = '') AND cover_review_dismissed = 0 "
+    "AND (media_type IN (" + _COVER_RETRY_PLACEHOLDERS + ") "
+    "OR media_type IN ('video_game', 'dvd'))"
+)
+
 @router.post("/covers/bulk-retry")
 async def bulk_retry_covers(request: Request, _=Depends(require_role("admin"))):
-    """Retry downloading covers for all book items missing them."""
+    """Retry missing covers through each item's appropriate metadata provider."""
     with get_db() as db:
         items = db.execute(
-            f"SELECT id FROM items_live WHERE cover_path IS NULL "
-            f"AND media_type IN ({_COVER_RETRY_PLACEHOLDERS})",
+            _COVER_RETRY_SELECT,
             cover_queue.COVER_REQUEUE_MEDIA_TYPES,
         ).fetchall()
 
@@ -372,7 +398,7 @@ async def bulk_retry_covers(request: Request, _=Depends(require_role("admin"))):
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         for item in items:
             try:
-                if await items_common.resolve_missing_cover(item["id"], client):
+                if await _retry_missing_cover(item, client):
                     results["success"] += 1
                 else:
                     results["failed"] += 1
@@ -391,8 +417,7 @@ async def bulk_retry_covers_stream(request: Request, _=Depends(require_role("adm
     """SSE endpoint for bulk cover retry with progress updates."""
     with get_db() as db:
         items = db.execute(
-            f"SELECT id, isbn, title FROM items_live WHERE cover_path IS NULL "
-            f"AND media_type IN ({_COVER_RETRY_PLACEHOLDERS})",
+            _COVER_RETRY_SELECT,
             cover_queue.COVER_REQUEUE_MEDIA_TYPES,
         ).fetchall()
 
@@ -409,7 +434,7 @@ async def bulk_retry_covers_stream(request: Request, _=Depends(require_role("adm
             async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
                 for i, item in enumerate(items, 1):
                     try:
-                        if await items_common.resolve_missing_cover(item["id"], client):
+                        if await _retry_missing_cover(item, client):
                             results["success"] += 1
                             status = "found"
                         else:
@@ -426,7 +451,7 @@ async def bulk_retry_covers_stream(request: Request, _=Depends(require_role("adm
 
                     await queue.put({
                         "type": "progress", "current": i, "total": len(items),
-                        "title": item["title"] or item["isbn"], "status": status,
+                        "title": item["title"], "status": status,
                     })
 
             await queue.put({"type": "done", **results})

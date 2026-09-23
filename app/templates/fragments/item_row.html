@@ -17,6 +17,7 @@
     'value': 'text-shelf-success text-sm',
     'series': 'text-shelf-muted text-xs truncate max-w-[200px]',
     'publisher': 'text-shelf-muted text-xs truncate max-w-[200px]',
+    'collector_condition': '',
     'identifier': 'text-shelf-muted text-xs font-mono',
 } %}
 <tr class="border-b border-shelf-border hover:bg-shelf-hover/50 transition-colors cursor-pointer"
@@ -90,7 +91,8 @@
         {%- elif col.name == 'pages' %}{{ item.page_count or '—' }}
         {%- elif col.name == 'language' %}{{ item.language or '—' }}
         {%- elif col.name == 'added' %}{{ item.created_at[:10] if item.created_at else '—' }}
-        {%- elif col.name == 'platform' %}{{ item.platform or '—' }}
+        {%- elif col.name == 'platform' %}{{ game_platforms.get(item.platform, item.platform) if item.platform else '—' }}
+        {%- elif col.name == 'collector_condition' %}{% if item.collector_condition %}<span class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] mt-2 font-medium bg-shelf-card/80 text-white shadow inline-block">{{ item.collector_condition|upper }}</span>{% else %}—{% endif %}
         {%- elif col.name == 'identifier' %}{{ item.isbn or item.upc or '—' }}
         {%- endif %}
     </td>

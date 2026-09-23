@@ -1,4 +1,4 @@
-"""Vision-based shelf-photo intake: read book spines and recognize covers.
+"""Vision-based photo intake: read item spines and recognize covers.
 
 Three backends, selected by the `vision_provider` setting:
 - "anthropic": Claude vision via the official SDK (best spine accuracy).
@@ -9,7 +9,8 @@ Three backends, selected by the `vision_provider` setting:
   vision-capable model such as gemma3).
 
 All return the same shape: a list of
-{"title": str, "authors": str|None, "isbn": str|None, "source": "read"|"recognized"}.
+{"title": str, "authors": str|None, "isbn": str|None, "media_type": str,
+ "source": "read"|"recognized"}.
 `isbn` is a checksum-validated ISBN-13 transcribed from the photo (never
 recalled from the model's knowledge); `source` says whether the row was
 read off the item or recognized from its cover art.
@@ -29,7 +30,7 @@ import re
 
 import httpx
 
-from app.config import MAX_TILES_PER_REQUEST
+from app.config import MAX_TILES_PER_REQUEST, MEDIA_TYPES, canonical_media_type
 from app.services import isbn as isbn_svc
 
 logger = logging.getLogger(__name__)
@@ -44,30 +45,36 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 PROMPT = (
-    "This photo shows books — on a shelf, in a stack, or laid out face-up with "
+    "This photo shows catalog items — books, audiobooks, movies, music, comics, "
+    "or video games — on a shelf, in a stack, or laid out face-up with "
     "the front or back cover showing. Text on spines may run vertically or "
     "horizontally, and a cover may be rotated or upside down. Examine the image "
-    "carefully, section by section, and list EVERY distinct book you can "
-    "identify — do not stop after the most obvious ones. For each book: "
+    "carefully, section by section, and list EVERY distinct item you can "
+    "identify — do not stop after the most obvious ones. For each item: "
     "(1) If the text is legible, transcribe it exactly — the title as printed, "
-    'the author if readable (null if not) — and set "source" to "read". '
+    'the creator if readable (use the authors field; null if not) — and set "source" to "read". '
     "(2) If the text is absent, illegible, or too partial to stand on its own "
-    "but you recognize the book from its cover — artwork, design, typography, "
-    "stylized or partial text — give its canonical title and author and set "
+    "but you recognize the item from its cover — artwork, design, typography, "
+    "stylized or partial text — give its canonical title and creator and set "
     '"source" to "recognized". Prefer "read" whenever the full title is legible, '
-    "and never replace a legible title with a different book's. "
+    "and never replace a legible title with a different item's. "
     '(3) Give "isbn" only if the ISBN digits are actually printed and readable '
     "in the photo, usually beside the back-cover barcode, and transcribe those "
     "digits exactly. Never supply an ISBN from memory or from what you know "
-    "about the book — use null whenever the digits are not visible. "
-    "(4) Skip objects that are not books."
+    "about the item — use null whenever the digits are not visible. "
+    f"(4) Set media_type to one of: {', '.join(MEDIA_TYPES)}. For video games, "
+    "also provide the console or platform name in platform, the publisher and release year when recognizable, "
+    "and collector_condition as one of cib, boxed or loose when the physical packaging makes it clear; otherwise use null. "
+    "(5) The response property is named books for backward compatibility, but "
+    "it must contain every catalog item, not only books. "
+    "(6) Skip objects that are not catalog items."
 )
 
 TILED_PROMPT_SUFFIX = (
     " IMPORTANT: these {n} images are overlapping tiles of ONE photograph, "
     "ordered left-to-right then top-to-bottom. Adjacent tiles share an "
-    "overlap region, so the same book may appear in two tiles — merge such "
-    "duplicates and list each distinct book exactly once."
+    "overlap region, so the same item may appear in two tiles — merge such "
+    "duplicates and list each distinct item exactly once."
 )
 
 # Appended for providers without a schema-enforced output mode (Ollama, and
@@ -78,8 +85,20 @@ JSON_ONLY_SUFFIX = (
     # copies "... or null" and "read or recognized" through verbatim, and
     # _clean would coerce the latter to "read", silently dropping the badge.
     ' Respond with JSON only. Each "source" must be exactly "read" or '
-    '"recognized"; use JSON null for an unread author or ISBN. Example: '
-    '{"books": [{"title": "Dune", "authors": null, "isbn": null, "source": "read"}]}'
+    '"recognized"; use JSON null for an unread creator or ISBN. Example: '
+    '{"books": [{"title": "Dune", "authors": null, "publisher": null, "publish_year": null, "isbn": null, "media_type": "book", "platform": null, "collector_condition": null, "source": "read"}]}'
+)
+
+# Local models can recognize a cover or cartridge yet return an empty list when
+# they infer that the legacy output key "books" excludes games. State the
+# crucial distinction in short, concrete language directly before the JSON
+# contract, where it has the most influence on smaller vision models.
+OLLAMA_RECOGNITION_SUFFIX = (
+    " IMPORTANT: recognizable game cartridges, discs, box art, and covers are "
+    "catalog items even when no barcode or full spine text is visible. Return "
+    "each recognizable game with media_type video_game and source recognized; "
+    "only return an empty books array when you genuinely recognize no catalog "
+    "item at all."
 )
 
 # Fuzzy-title similarity at or above which two tile results are the same book
@@ -95,10 +114,15 @@ BOOKS_SCHEMA = {
                 "properties": {
                     "title": {"type": "string"},
                     "authors": {"type": ["string", "null"]},
+                    "publisher": {"type": ["string", "null"]},
+                    "publish_year": {"type": ["integer", "null"]},
                     "isbn": {"type": ["string", "null"]},
+                    "media_type": {"type": "string", "enum": list(MEDIA_TYPES)},
+                    "platform": {"type": ["string", "null"]},
+                    "collector_condition": {"type": ["string", "null"], "enum": ["cib", "boxed", "loose", None]},
                     "source": {"type": "string", "enum": ["read", "recognized"]},
                 },
-                "required": ["title", "authors", "isbn", "source"],
+                "required": ["title", "authors", "isbn", "media_type", "source"],
                 "additionalProperties": False,
             },
         }
@@ -166,6 +190,11 @@ def _clean(raw: object) -> list[dict]:
             if not isinstance(entry, dict):
                 continue
             title = (entry.get("title") or "").strip()
+            # Vision/OCR frequently returns an otherwise correct title in
+            # all caps. Preserve normal mixed case verbatim, but make the
+            # all-caps transcription readable before it reaches review.
+            if title and any(ch.isalpha() for ch in title) and title.upper() == title:
+                title = title.title()
             if not title:
                 continue
             authors = entry.get("authors")
@@ -173,12 +202,27 @@ def _clean(raw: object) -> list[dict]:
             if authors and authors.lower() in ("null", "none", "n/a", "unknown"):
                 authors = None
             source = entry.get("source")
-            books.append({
+            media_type = canonical_media_type(entry.get("media_type"))
+            cleaned = {
                 "title": title,
                 "authors": authors or None,
                 "isbn": clean_isbn(entry.get("isbn")),
+                "media_type": media_type if media_type in MEDIA_TYPES else "book",
                 "source": source if source in ("read", "recognized") else "read",
-            })
+            }
+            publisher = entry.get("publisher")
+            if isinstance(publisher, str) and publisher.strip():
+                cleaned["publisher"] = publisher.strip()
+            platform = entry.get("platform")
+            if isinstance(platform, str) and platform.strip():
+                cleaned["platform"] = platform.strip()
+            year = entry.get("publish_year")
+            if isinstance(year, int) and 1900 <= year <= 2100:
+                cleaned["publish_year"] = year
+            condition = entry.get("collector_condition")
+            if isinstance(condition, str) and condition.strip().lower() in ("cib", "boxed", "loose"):
+                cleaned["collector_condition"] = condition.strip().lower()
+            books.append(cleaned)
     return books
 
 
@@ -420,7 +464,7 @@ async def _detect_ollama(image_bytes: bytes, settings: dict) -> list[dict]:
         "format": "json",
         "messages": [{
             "role": "user",
-            "content": PROMPT + JSON_ONLY_SUFFIX,
+            "content": PROMPT + OLLAMA_RECOGNITION_SUFFIX + JSON_ONLY_SUFFIX,
             "images": [base64.standard_b64encode(image_bytes).decode()],
         }],
     }

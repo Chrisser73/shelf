@@ -3,7 +3,8 @@
 import pytest
 
 from app.database import get_db
-from app.routers.platforms import _slugify
+from app.routers.platforms import _platform_name_and_slug, _slugify
+from app.services import platform_logos
 
 
 class TestSlugify:
@@ -18,6 +19,12 @@ class TestSlugify:
 
     def test_empty_after_strip(self):
         assert _slugify("---") == ""
+
+    def test_explicit_slug_keeps_display_name_separate(self):
+        assert _platform_name_and_slug("Testconsole (blubb)") == ("Testconsole", "blubb")
+
+    def test_empty_parentheses_keep_the_existing_name_only_behavior(self):
+        assert _platform_name_and_slug("Testconsole ()") == ("Testconsole ()", "testconsole")
 
 
 class TestCreatePlatform:
@@ -35,6 +42,15 @@ class TestCreatePlatform:
         with get_db() as db:
             count = db.execute("SELECT COUNT(*) as c FROM game_platforms WHERE slug = 'neogeo'").fetchone()["c"]
         assert count == 1
+
+    def test_create_uses_explicit_slug_in_parentheses(self, admin_client):
+        admin_client.post("/api/platforms", data={"name": "Testconsole (blubb)"}, follow_redirects=False)
+        with get_db() as db:
+            row = db.execute(
+                "SELECT slug, name FROM game_platforms WHERE slug = 'blubb'"
+            ).fetchone()
+        assert row is not None
+        assert row["name"] == "Testconsole"
 
     def test_create_empty_name_rejected(self, admin_client):
         resp = admin_client.post("/api/platforms", data={"name": "---"}, follow_redirects=False)
@@ -75,19 +91,22 @@ class TestDeletePlatform:
 
 
 class TestPlatformLogos:
-    def test_save_custom_logo_mapping(self, admin_client, db):
+    def test_save_custom_logo_mapping(self, admin_client, db, monkeypatch, tmp_path):
+        monkeypatch.setattr(platform_logos, "SVG_DIRECTORY", tmp_path)
+        (tmp_path / "nintendo_switch_tall.svg").touch()
         resp = admin_client.post(
             "/api/platforms/logos",
-            data={"platform": "switch", "svg_path": "icons/svg/nintendo_switch_tall.svg"},
+            data={"platform": "switch", "svg_path": "icons/platforms/nintendo_switch_tall.svg"},
             follow_redirects=False,
         )
         assert resp.status_code == 303
         row = db.execute(
             "SELECT svg_path FROM game_platform_logos WHERE platform_slug = 'switch'"
         ).fetchone()
-        assert row["svg_path"] == "icons/svg/nintendo_switch_tall.svg"
+        assert row["svg_path"] == "icons/platforms/nintendo_switch_tall.svg"
 
-    def test_rejects_paths_outside_the_bundled_svg_directory(self, admin_client, db):
+    def test_rejects_paths_outside_the_bundled_svg_directory(self, admin_client, db, monkeypatch, tmp_path):
+        monkeypatch.setattr(platform_logos, "SVG_DIRECTORY", tmp_path)
         admin_client.post(
             "/api/platforms/logos",
             data={"platform": "switch", "svg_path": "https://example.com/logo.svg"},
@@ -95,3 +114,10 @@ class TestPlatformLogos:
         assert db.execute(
             "SELECT 1 FROM game_platform_logos WHERE platform_slug = 'switch'"
         ).fetchone() is None
+
+    def test_legacy_mapping_path_is_migrated_to_the_new_directory(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(platform_logos, "SVG_DIRECTORY", tmp_path)
+        (tmp_path / "nintendo_switch.svg").touch()
+        assert platform_logos.normalise_svg_path("icons/svg/nintendo_switch.svg") == (
+            "icons/platforms/nintendo_switch.svg"
+        )
