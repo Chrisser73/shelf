@@ -18,30 +18,38 @@
     </div>
 
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8" data-testid="home-summary">
-        <a href="/browse" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
-            <p class="text-shelf-muted text-sm">Catalogue</p>
+        {% if home_tiles.catalogue %}<a href="/browse" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="layers-2" class="w-4 h-4" aria-hidden="true"></i>Catalogue</p>
             <p class="text-3xl font-bold">{{ total_count }}</p>
-        </a>
-        <a href="/browse?owned=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
-            <p class="text-shelf-muted text-sm">Owned</p>
+        </a>{% endif %}
+        {% if home_tiles.owned %}<a href="/browse?owned=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="package-plus" class="w-4 h-4" aria-hidden="true"></i>Owned</p>
             <p class="text-3xl font-bold">{{ owned_count }}</p>
-        </a>
-        <a href="/browse?owned=0" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
-            <p class="text-shelf-muted text-sm">Wishlist</p>
+        </a>{% endif %}
+        {% if home_tiles.wishlist %}<a href="/browse?owned=0" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="heart" class="w-4 h-4" aria-hidden="true"></i>Wishlist</p>
             <p class="text-3xl font-bold">{{ wishlist_count }}</p>
-        </a>
-        <a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
-            <p class="text-shelf-muted text-sm">Lent out</p>
+        </a>{% endif %}
+        {% if home_tiles.lent_out %}<a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="compass" class="w-4 h-4" aria-hidden="true"></i>Lent out</p>
             <p class="text-3xl font-bold">{{ lent_out_count }}</p>
-        </a>
-        <div class="bg-shelf-card border border-shelf-border rounded-lg p-5">
-            <p class="text-shelf-muted text-sm">Missing covers</p>
-            <p class="text-3xl font-bold">{{ missing_cover_count }}</p>
-        </div>
-        <div class="bg-shelf-card border border-shelf-border rounded-lg p-5">
-            <p class="text-shelf-muted text-sm">Media types</p>
+        </a>{% endif %}
+        {% if home_tiles.missing_covers %}<div class="relative bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+            <a href="/browse?cover_missing=1" class="block pr-8">
+                <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="camera" class="w-4 h-4" aria-hidden="true"></i>Missing covers</p>
+                <p class="text-3xl font-bold">{{ missing_cover_count }}</p>
+            </a>
+            {% if user and user.role == 'admin' and missing_cover_count %}
+            <button type="button" data-retry-missing-covers title="Retry missing covers"
+                    class="absolute bottom-1 right-2 p-1.5 rounded-lg text-shelf-muted hover:bg-shelf-hover hover:text-shelf-accent2 transition-colors">
+                <i data-lucide="refresh-cw" class="w-5 h-5" aria-hidden="true"></i>
+            </button>
+            {% endif %}
+        </div>{% endif %}
+        {% if home_tiles.media_types %}<div class="bg-shelf-card border border-shelf-border rounded-lg p-5">
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="book-open" class="w-4 h-4" aria-hidden="true"></i>Media types</p>
             <p class="text-3xl font-bold">{{ media_types|length }}</p>
-        </div>
+        </div>{% endif %}
     </div>
 
     {% if platforms %}
@@ -133,7 +141,7 @@
                     {% if item.cover_path %}
                     <img src="/{{ item.cover_path }}" alt="{{ item.title }}" loading="lazy">
                     {% else %}
-                    <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-gradient-to-br from-shelf-card to-shelf-hover">
+                    <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-linear-to-br from-shelf-card to-shelf-hover">
                         <p class="text-shelf-text text-sm font-medium leading-tight mb-1">{{ item.title[:60] }}</p>
                         {% if item.authors %}<p class="text-shelf-muted text-xs">{{ item.authors[:40] }}</p>{% endif %}
                     </div>
