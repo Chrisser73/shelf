@@ -10,7 +10,7 @@ module.exports = {
     "app/**/*.py",
     "static/css/app.css",
     "static/js/**/*.js",
-    "static/icons/svg/**/*.svg",
+    "static/icons/platforms/**/*.svg",
   ],
   watchOptions: {
     // The project lives on /mnt/e under WSL, where native file events are
