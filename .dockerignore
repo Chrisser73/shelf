@@ -16,6 +16,7 @@ reports/
 tests/
 screenshots/
 docs/
-scripts/
+scripts/*
+!scripts/fetch_platform_logos.py
 node_modules/
 *.md
