@@ -1,7 +1,6 @@
 services:
   shelf:
-    build:
-      context: ./
+    image: ghcr.io/chrisser73/shelf:latest
     platform: linux/arm64
     container_name: shelf
     ports:
