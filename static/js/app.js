@@ -185,6 +185,23 @@ document.body.addEventListener('htmx:afterSwap', function() {
             el.value = plat.value;
         });
     }
+    syncDefaultTags();
+});
+
+// The default-tags field can change after the results are on screen, so it is
+// mirrored on its own input/change too, not only on swap. A disabled field
+// (a mode that takes no tags) mirrors as empty.
+function syncDefaultTags() {
+    var tags = document.getElementById('default-tags');
+    var value = tags && !tags.disabled ? tags.value : '';
+    document.querySelectorAll('.tags-sync').forEach(function(el) {
+        el.value = value;
+    });
+}
+['input', 'change'].forEach(function(type) {
+    document.body.addEventListener(type, function(e) {
+        if (e.target && e.target.id === 'default-tags') syncDefaultTags();
+    });
 });
 
 // CSP: hx-on:: attributes and hx-vals='js:...' need unsafe-eval, which the CSP

@@ -87,6 +87,12 @@
            the panel lives in its own x-data scope, and a cross-scope Alpine
            read under the CSP build fails silently. #}
         <input type="hidden" id="scan-mode" name="mode" :value="mode">
+        {# A default button, visually hidden: Enter in the barcode field submits a
+           form implicitly only while it has a single text field or has a
+           submit button. The Default tags field is a second text field, so
+           without this Enter would do nothing (tag-suggest.js stops Enter in
+           the tags field itself from submitting a blank scan). #}
+        <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Scan</button>
         <div class="bg-shelf-card rounded-xl border border-shelf-border p-6 mb-6">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
@@ -161,6 +167,22 @@
                            :placeholder="['lend','return','move','inventory','lookup','quick_rate'].includes(mode) ? 'Scan barcode...' : mediaType === 'auto' ? 'Scan any barcode...' : mediaType === 'video_game' ? 'Scan UPC barcode...' : 'Scan or type ISBN...'"
                            class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2.5 text-shelf-text text-lg font-mono focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50">
                 </div>
+            </div>
+
+            <!-- Default tags (add/wishlist only) -->
+            {# Sticky per device; tag-suggest.js restores it and fills the
+               datalist from GET /api/tags. :disabled, not only x-show, keeps it
+               out of other modes' submissions (G90). No x-model: every reader
+               reads the DOM value (G91). #}
+            <div x-show="mode === 'add' || mode === 'wishlist'" x-transition class="mt-4">
+                <label for="default-tags" class="block text-sm font-medium text-shelf-muted mb-1">Default tags</label>
+                <input type="text" id="default-tags" name="tags" list="tag-suggestions"
+                       data-tag-suggest data-storage-key="shelf_tags" data-type-source="#media-type"
+                       :disabled="mode !== 'add' && mode !== 'wishlist'" autocomplete="off"
+                       placeholder="e.g. Cookbook; Signed"
+                       class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2.5 text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50">
+                <datalist id="tag-suggestions"></datalist>
+                <p class="text-xs text-shelf-muted mt-1">Added to every new item. Separate several with <code>;</code>.</p>
             </div>
 
             <!-- Validation warnings -->
@@ -252,4 +274,5 @@
 
 <script src="/static/js/scanner-engine.js"></script>
 <script src="/static/js/scan.js"></script>
+<script src="/static/js/tag-suggest.js"></script>
 {% endblock %}

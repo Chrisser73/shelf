@@ -10,9 +10,16 @@ one of its own — callers already hold one, often inside a write
 transaction, so nothing in this module logs (a second connection opened to
 write a log record would block on the caller's in-flight write until
 SQLite's busy timeout).
+
+Add-time default tags ride the item's own transaction: an add route wraps
+its body in `default_tags(raw)`, and `item_write.insert_item` calls
+`attach_pending` on the connection that inserted or restored the row. The
+item and its tags commit together or not at all (G118).
 """
 
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from app import config
 
@@ -177,7 +184,8 @@ def suggestions_for(db, media_type: str) -> list:
     to this media type, no starters are offered at all — a deliberate
     scoped tag means the user has taken charge of that type's vocabulary.
 
-    No caller today — the scan-defaults plan wires this in.
+    `suggestion_payload` calls this once per configured type for the
+    starter half of `GET /api/tags`.
     """
     user_tags = get_all_tags(db, media_type=media_type)
     seen = {row["name"].casefold() for row in user_tags}
@@ -191,3 +199,54 @@ def suggestions_for(db, media_type: str) -> list:
                 out.append({"name": name, "starter": True})
                 seen.add(name.casefold())
     return out
+
+
+def suggestion_payload(db) -> list:
+    """The `GET /api/tags` rows every tag datalist is built from.
+
+    The user's own tags come first, NOCASE-ordered, each with its own
+    `media_type` (None for a global tag). The starters follow: for each type
+    in `config.TAG_SUGGESTIONS`, in order, the `starter` rows of
+    `suggestions_for`, stamped with that type — so a type's starters vanish
+    once the user has a tag scoped to it. The client filters by type.
+    """
+    out = [
+        {"name": row["name"], "media_type": row["media_type"], "starter": False}
+        for row in db.execute(
+            "SELECT name, media_type FROM tags ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+    ]
+    for media_type in config.TAG_SUGGESTIONS:
+        out.extend(
+            {"name": row["name"], "media_type": media_type, "starter": True}
+            for row in suggestions_for(db, media_type) if row["starter"]
+        )
+    return out
+
+
+_pending: ContextVar = ContextVar("pending_default_tags", default=None)
+
+
+@contextmanager
+def default_tags(raw):
+    """Within this block, every item `insert_item` files takes the tags in
+    `raw` (`;`-separated) in the same transaction.
+
+    The holder is emptied on exit, not only unset: a task spawned inside the
+    block copies the context, and must not tag what it inserts later.
+    """
+    holder = {"names": parse_tag_list(raw)}
+    token = _pending.set(holder)
+    try:
+        yield
+    finally:
+        holder["names"] = []
+        _pending.reset(token)
+
+
+def attach_pending(db, item_id: int) -> None:
+    """Attach the enclosing `default_tags` block's names to `item_id` on the
+    caller's connection. A no-op outside a block."""
+    holder = _pending.get()
+    if holder and holder["names"]:
+        attach_tags(db, int(item_id), holder["names"])

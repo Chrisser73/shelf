@@ -90,8 +90,10 @@ session.
 ## Tags
 
 Tags are free-form labels you invent: `signed`, `first-edition`, `book-club`,
-`to-sell`. Add them as chips on the item page; filter by them here. Tags are
-yours alone — they aren't synced anywhere.
+`to-sell`. Add them as chips on the item page, or set
+[default tags](scanning.md#default-tags) while scanning so each new item
+arrives tagged; filter by them here. Tags are yours alone — they aren't
+synced anywhere.
 
 ## Bulk editing
 

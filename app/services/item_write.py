@@ -80,6 +80,7 @@ from app.database import get_game_platforms
 from app.services import isbn as isbn_svc
 from app.services import item_copies
 from app.services import lists
+from app.services import tags
 from app.services import trash
 from app.services.write_targets import (  # noqa: F401 — re-exported
     IdentifierInTrash,
@@ -562,6 +563,7 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, *,
             )
         if restore_item(db, row["id"]):
             _apply_restored_ownership(db, row["id"], values, wishlisted)
+            tags.attach_pending(db, row["id"])
             return ItemId(row["id"], restored=True)
         # The row stopped being trashed between the lookup and the write —
         # most add routes hold no `BEGIN IMMEDIATE` around their insert, so
@@ -578,6 +580,7 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, *,
     if "location_id" in values:
         item_copies.sync_primary_location(db, item_id, values["location_id"])
     _apply_membership(db, [item_id], wishlisted, values)
+    tags.attach_pending(db, item_id)
     return item_id
 
 

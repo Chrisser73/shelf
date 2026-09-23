@@ -23,6 +23,7 @@ from app.services import isbn as isbn_svc
 from app.services import authors as authors_svc
 from app.services import national
 from app.services import item_write
+from app.services import tags as tags_svc
 from app.services.title_match import titles_agree, titles_match_exactly
 from app.services.item_write import ItemValueError, insert_item
 from app.services.write_targets import UnknownLocationError, validated_location_id
@@ -144,6 +145,7 @@ class IntakeConfirm(BaseModel):
     books: list[IntakeBook]
     location_id: int | None = None
     owned: bool = True
+    tags: list[str] = []
 
 
 def _isbn_taken(isbn13: str, media_type: str) -> bool:
@@ -493,27 +495,28 @@ async def confirm_books(payload: IntakeConfirm):
         }
     preferred_marc = national.iso_to_marc(search_lang)
 
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        for book in payload.books:
-            title = book.title.strip()
-            if not title:
-                continue
+    with tags_svc.default_tags(";".join(payload.tags)):
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            for book in payload.books:
+                title = book.title.strip()
+                if not title:
+                    continue
 
-            try:
-                status, entry, item_id = await _confirm_one(
-                    book, client, search_lang, preferred_marc, location_id,
-                    payload.owned, hc_token, google_api_key, creds)
-            except ItemValueError as e:
-                # A stale location is caught by the boundary check above and
-                # never reaches here; this guards a field _confirm_one has
-                # not yet boundary-checked (G47 — see the forced-raise pin).
-                skipped.append({"title": title, "reason": str(e)})
-                continue
-            if status == "added":
-                added.append(entry)
-                new_item_ids.append(item_id)
-            else:
-                skipped.append(entry)
+                try:
+                    status, entry, item_id = await _confirm_one(
+                        book, client, search_lang, preferred_marc, location_id,
+                        payload.owned, hc_token, google_api_key, creds)
+                except ItemValueError as e:
+                    # A stale location is caught by the boundary check above and
+                    # never reaches here; this guards a field _confirm_one has
+                    # not yet boundary-checked (G47 — see the forced-raise pin).
+                    skipped.append({"title": title, "reason": str(e)})
+                    continue
+                if status == "added":
+                    added.append(entry)
+                    new_item_ids.append(item_id)
+                else:
+                    skipped.append(entry)
 
     if new_item_ids and not os.environ.get("SHELF_DISABLE_COVER_ENRICH"):
         from app.routers import items_common

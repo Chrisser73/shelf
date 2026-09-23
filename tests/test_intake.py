@@ -923,6 +923,102 @@ class TestConfirmEndpoint:
         assert resp.status_code in (401, 403)
 
 
+class TestConfirmDefaultTags:
+    @respx.mock
+    def test_tags_every_confirmed_row(self, admin_client, db):
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [
+                {"title": "Cookbook One", "authors": None},
+                {"title": "Cookbook Two", "authors": None},
+            ],
+            "tags": ["Cookbook"],
+        })
+        data = resp.json()
+        assert len(data["added"]) == 2
+        for entry in data["added"]:
+            row = db.execute(
+                "SELECT t.name FROM tags t JOIN item_tags it ON it.tag_id = t.id "
+                "WHERE it.item_id = ?", (entry["id"],)
+            ).fetchall()
+            assert [r["name"] for r in row] == ["Cookbook"]
+
+    @respx.mock
+    def test_skipped_duplicate_is_not_tagged(self, admin_client, db):
+        _insert_item(db, title="Dune", isbn="9780441172719", authors="Frank Herbert")
+        db.execute("COMMIT")
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [{"title": "dune", "authors": "frank herbert"}],
+            "tags": ["Cookbook"],
+        })
+        data = resp.json()
+        assert data["added"] == []
+        assert data["skipped"][0]["reason"] == "already in library"
+        row = db.execute("SELECT id FROM tags WHERE name = 'Cookbook'").fetchone()
+        assert row is None
+
+    @respx.mock
+    def test_omitted_tags_creates_no_tag(self, admin_client, db):
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [{"title": "No Tags Here", "authors": None}],
+        })
+        assert len(resp.json()["added"]) == 1
+        assert db.execute("SELECT id FROM tags").fetchall() == []
+
+    @respx.mock
+    def test_empty_tags_list_creates_no_tag(self, admin_client, db):
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [{"title": "Empty Tags List", "authors": None}],
+            "tags": [],
+        })
+        assert len(resp.json()["added"]) == 1
+        assert db.execute("SELECT id FROM tags").fetchall() == []
+
+    @respx.mock
+    def test_case_variant_tags_dedupe_to_one(self, admin_client, db):
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [{"title": "Dedupe Me", "authors": None}],
+            "tags": ["Cookbook", "cookbook "],
+        })
+        assert len(resp.json()["added"]) == 1
+        assert len(db.execute("SELECT id FROM tags").fetchall()) == 1
+
+    @respx.mock
+    def test_tag_write_failure_commits_no_untagged_row_and_retry_files_it(
+            self, admin_client, db):
+        # G118: each row and its tags commit together, so a failed tag write
+        # leaves no untagged row for the retry to skip as a duplicate.
+        from unittest.mock import patch
+
+        from app.services import tags as tags_svc
+
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        payload = {"books": [{"title": "Atomic Intake", "authors": None}],
+                   "tags": ["Cookbook"]}
+        with patch.object(tags_svc, "attach_tags",
+                          side_effect=RuntimeError("simulated tag write failure")):
+            try:
+                resp = admin_client.post("/api/intake/confirm", json=payload)
+                assert resp.status_code >= 500
+            except RuntimeError:
+                pass
+        assert db.execute(
+            "SELECT COUNT(*) FROM items WHERE title = 'Atomic Intake'"
+        ).fetchone()[0] == 0
+
+        data = admin_client.post("/api/intake/confirm", json=payload).json()
+        assert len(data["added"]) == 1
+        row = db.execute(
+            "SELECT t.name FROM tags t JOIN item_tags it ON it.tag_id = t.id "
+            "WHERE it.item_id = ?", (data["added"][0]["id"],)
+        ).fetchall()
+        assert [r["name"] for r in row] == ["Cookbook"]
+
+
 ISBN13 = "9780441172719"
 ISBN10 = "0441172717"
 
@@ -1276,6 +1372,21 @@ class TestIntakePage:
         for key in MEDIA_TYPES:
             assert f'<option value="{key}">' in html
         assert 'data-testid="intake-no-metadata"' in html
+
+    def test_confirm_row_renders_default_tags_control(self, admin_client, db):
+        import re
+
+        db.execute("INSERT INTO settings (key, value) VALUES ('vision_provider', 'ollama')")
+        db.execute("COMMIT")
+        html = admin_client.get("/intake").text
+        tag = re.search(r'<input[^>]*id="default-tags"[^>]*>', html, re.S).group(0)
+        assert 'name="tags"' in tag
+        assert 'list="tag-suggestions"' in tag
+        assert 'data-storage-key="shelf.intake.tags"' in tag
+        # Decision 7: no type source — Intake's type is per row.
+        assert 'data-type-source' not in tag
+        assert '<datalist id="tag-suggestions">' in html
+        assert '/static/js/tag-suggest.js' in html
 
     def test_chooser_renders_two_inputs_and_two_buttons(self, admin_client, db):
         db.execute("INSERT INTO settings (key, value) VALUES ('vision_provider', 'ollama')")

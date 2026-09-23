@@ -388,6 +388,9 @@ function intakePage() {
         async confirm() {
             this.confirming = true;
             this.error = false;
+            // Read synchronously, before the await, so a re-render mid-request
+            // cannot leave this stale (G2).
+            var tags = ((document.getElementById('default-tags') || {}).value || '').split(';');
             try {
                 var resp = await fetch('/api/intake/confirm', {
                     method: 'POST',
@@ -404,6 +407,7 @@ function intakePage() {
                         })),
                         location_id: this.locationId ? parseInt(this.locationId) : null,
                         owned: this.owned,
+                        tags: tags,
                     }),
                 });
                 var data = await resp.json();

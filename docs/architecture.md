@@ -861,6 +861,16 @@ must be simple, which is why the lint exists. Tailwind compiled locally to
 (`static/js/scanner-engine.js`) choosing ZXing on iOS Safari and
 html5-qrcode elsewhere.
 
+**`GET /api/tags` is the one source for every tag datalist** on the add
+surfaces (Scan, Shelf Fill, Photo Intake). `static/js/tag-suggest.js` — a
+plain script, not an Alpine component — fetches it once per page, fills the
+input's `<datalist>` filtered by the media-type select the input names in
+`data-type-source`, re-filters on a type change without refetching, and keeps
+the field's value in `localStorage` under the input's `data-storage-key`. The
+field carries no `x-model`, so every reader — htmx, `FormData`, the catalog
+results' `.tags-sync` mirror in `app.js` — reads the DOM value. The item
+page's tag chips still server-render their own list.
+
 **The script load order is a stated invariant, and `make check-alpine`
 enforces it.** Eight files under `static/js/` register Alpine components; every
 one of them is a **classic** script, and Alpine's own tag is the only one that
@@ -1076,6 +1086,18 @@ collection, a grouped `tags_for_items` for export paths, and the scoped
 suggestion list. Every function runs in the caller's transaction, opens no
 connection of its own and logs nothing, because callers may hold a write lock
 around it.
+
+**Default tags ride the insert funnel's transaction.** An add route wraps
+its insert in `tags_svc.default_tags(raw)`, and `insert_item` attaches the add
+form's `tags` to the row it inserts or restores, on the same connection, so the
+item and its tags commit together or not at all (G118). Only a row the funnel
+files takes them — a `duplicate`, `promoted` or `in_trash` result never
+reaches the funnel. `POST /api/scan` (a thin wrapper over `_scan_isbn_inner`,
+which is also what Shelf Fill's scan reaches), the three catalog adds,
+`POST /api/items/manual` and Photo Intake's confirm loop each open the block.
+The block empties itself on exit, so a background task spawned inside it does
+not inherit the tags. The scan's two legacy-barcode continuation forms echo
+`tags` as a hidden input, so the item that finally lands still carries it.
 
 **Wishlist membership is a list, not a column.** All three funnels accept a
 virtual `wishlisted: bool` field, popped before the name check so it never

@@ -248,6 +248,7 @@ async def shelf_fill_scan(
     platform: str = Form(""),
     legacy_confirm_isbn13: str = Form(""),
     legacy_supplement: str = Form(""),
+    tags: str = Form(""),
     _=Depends(require_role("editor")),
 ):
     """Resolve one barcode and place its physical copy at ``location_id``."""
@@ -299,6 +300,7 @@ async def shelf_fill_scan(
         borrower_id=None,
         legacy_confirm_isbn13=legacy_confirm_isbn13,
         legacy_supplement=legacy_supplement,
+        tags=tags,
         _=_,
     )
     context = getattr(response, "context", None) or {}

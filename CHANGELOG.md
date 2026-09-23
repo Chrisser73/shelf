@@ -6,6 +6,58 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-09-22
+
+Tagging a pile of new items used to mean opening every item after it was added
+and tagging it there. Now you set **Default tags** once before a scanning
+session, and every item you add is tagged as it arrives.
+
+This release also carries two community contributions, both from
+[@sudo-rpaisley](https://github.com/sudo-rpaisley): exact Discogs pressings for
+Music items, and saved covers for magazine issues found by search.
+
+### Added
+
+- **Default tags on Scan, Shelf Fill and Photo Intake.** Type one or more tags
+  (`;` between several) in the new **Default tags** field, and every item those
+  pages add from then on carries them. This covers barcode scans, title search,
+  **Add by hand**, the Shelf Fill card and every row a Photo Intake confirm
+  adds.
+  - A tag name you have not used before is created on the first successful add.
+  - The field remembers its value on this device until you clear it. A phone
+    and a laptop keep their own.
+  - Suggestions match the selected media type, with a few starter ideas
+    (Cookbook, Signed, First edition… for books) until you have tags of your own
+    for that type.
+  - An item brought back from Trash by the add is tagged too. A duplicate is not
+    tagged, and neither is a wishlist item that a scan marks as owned: Shelf
+    would be editing an item you did not just file.
+  - The item and its tags are saved together. If the tag write fails, nothing is
+    added, so a retry files the item already tagged.
+- **Discogs exact pressing on Music items.** With a Discogs token configured, an
+  editor can search Discogs from a Music item by title, artist, barcode or
+  catalogue number, pick the exact pressing, load its details fresh, and change
+  or clear the choice. Shelf keeps only the Discogs release ID; MusicBrainz
+  stays the release's identity, and viewers see the saved pressing and its
+  Discogs link without spending the token. Contributed by
+  [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#142](https://github.com/dgahagan/shelf/pull/142).
+
+### Changed
+
+- **Assisted magazine issues now keep their cover.** In 0.47.0 a Google Books
+  result's cover showed only in the result list. Now choosing a Google Books
+  match for a magazine issue saves that cover to the new issue. If the image
+  cannot be downloaded, Shelf leaves the issue without a cover rather than
+  guessing a book cover by title. Contributed by
+  [@sudo-rpaisley](https://github.com/sudo-rpaisley) in
+  [#144](https://github.com/dgahagan/shelf/pull/144).
+
+### Fixed
+
+- A plain form inside a section the page loads after it opens now carries its
+  CSRF token. Before, such a form was refused with a 403.
+
 ## [0.47.0] - 2026-09-22
 
 A magazine's 977 barcode does not always lead to a usable publication. The ISSN
@@ -4098,6 +4150,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.48.0]: https://github.com/dgahagan/shelf/releases/tag/v0.48.0
 [0.47.0]: https://github.com/dgahagan/shelf/releases/tag/v0.47.0
 [0.46.0]: https://github.com/dgahagan/shelf/releases/tag/v0.46.0
 [0.45.1]: https://github.com/dgahagan/shelf/releases/tag/v0.45.1

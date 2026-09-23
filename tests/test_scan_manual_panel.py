@@ -11,6 +11,7 @@ panel — is in `tests/e2e/test_scan.py` and
 `tests/e2e/test_component_load_guard.py`.
 """
 
+import re
 import pytest
 
 from app.config import MEDIA_TYPES
@@ -93,10 +94,42 @@ class TestPanelFields:
         panel = self._panel(admin_client)
         assert 'hx-target="#scan-results"' in panel
         assert 'hx-swap="afterbegin"' in panel
-        assert 'hx-include="#scan-mode"' in panel
+        assert 'hx-include="#scan-mode, #default-tags"' in panel
 
     def test_the_page_supplies_the_included_mode_input(self, admin_client):
         assert 'id="scan-mode"' in admin_client.get("/scan").text
+
+    def test_the_page_supplies_the_included_default_tags_input(self, admin_client):
+        page = admin_client.get("/scan").text
+        tag = re.search(r'<input[^>]*id="default-tags"[^>]*>', page, re.S).group(0)
+        assert 'name="tags"' in tag
+        assert 'list="tag-suggestions"' in tag
+        assert 'data-storage-key="shelf_tags"' in tag
+        # G90: x-show alone would still submit it in lend/move/... modes.
+        assert ":disabled=" in tag
+        assert '<datalist id="tag-suggestions">' in page
+        assert '/static/js/tag-suggest.js' in page
+
+    def test_not_found_card_form_includes_default_tags(self, admin_client):
+        """Decision 6: the manual add a failed scan offers carries the
+        session tag, by hx-include — the card has no tags control of its own."""
+        from unittest.mock import AsyncMock, patch
+
+        from app.services import provider_result
+
+        with patch(
+            "app.routers.items_common._lookup_metadata",
+            new=AsyncMock(return_value=(None, "", {}, provider_result.no_match("openlibrary"))),
+        ), patch(
+            "app.routers.items_common._fetch_preview_cover", new=AsyncMock(return_value=None)
+        ):
+            resp = admin_client.post(
+                "/api/scan",
+                data={"isbn": "9780000999931", "media_type": "book", "mode": "add"},
+            )
+        form = re.search(r'<form hx-post="/api/items/manual"[^>]*>', resp.text, re.S).group(0)
+        assert 'hx-include="#default-tags"' in form
+        assert 'name="tags"' not in resp.text
 
     def test_panel_has_no_skip_button(self, admin_client):
         """"Skip" sets showForm = false, which on the panel would hide the

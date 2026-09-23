@@ -22,7 +22,7 @@ The add-on is **not automatically treated as an issue number**. Publishers use s
 
 If the ISSN metadata source is unavailable, the barcode identity is still retained and you can enter the publication title manually instead of receiving a generic `Magazine` result.
 
-If the publication title is missing or wrong, expand **Wrong or missing publication? Search magazines** and search Google Books by magazine title. Choosing a result only refills the confirmation card; Shelf does not add the issue until you review the concrete issue details and submit **Add confirmed issue**.
+If the publication title is missing or wrong, expand **Wrong or missing publication? Search magazines** and search Google Books by magazine title. Choosing a result only refills the confirmation card; Shelf does not add the issue until you review the concrete issue details and submit **Add confirmed issue**. When you do, the chosen result's cover is saved to the new issue. If that image cannot be downloaded, the issue is added without a cover; Shelf does not fall back to a book cover found by title.
 
 ## Barcode identity
 

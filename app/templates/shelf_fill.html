@@ -43,6 +43,19 @@
                 </select>
             </div>
         </div>
+        <!-- Default tags (Shelf Fill only adds, so no :disabled is needed) -->
+        {# Sticky per device; tag-suggest.js restores it and fills the
+           datalist from GET /api/tags. No x-model: every reader reads the
+           DOM value (G91). #}
+        <div class="mt-4">
+            <label for="default-tags" class="block text-sm font-medium text-shelf-muted mb-1">Default tags</label>
+            <input type="text" id="default-tags" name="tags" list="tag-suggestions" form="shelf-fill-form"
+                   data-tag-suggest data-storage-key="shelf_fill_tags" data-type-source="#shelf-fill-media-type"
+                   autocomplete="off" placeholder="e.g. Cookbook; Signed"
+                   class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2.5 text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50">
+            <datalist id="tag-suggestions"></datalist>
+            <p class="text-xs text-shelf-muted mt-1">Added to every item filed this session. Separate several with <code>;</code>.</p>
+        </div>
         <p x-show="!location" class="text-xs text-shelf-warning mt-3" style="display:none">Choose a physical location before scanning.</p>
         {% include "fragments/shelf_fill_summary.html" %}
     </div>
@@ -67,6 +80,12 @@
     </div>
 
     <form id="shelf-fill-form" hx-post="/api/shelf-fill/scan" hx-target="#shelf-fill-results" hx-swap="afterbegin" data-after-request="clear-scan-input">
+        {# A default button, visually hidden: Enter in the barcode field submits a
+           form implicitly only while it has a single text field or has a
+           submit button. The Default tags field is a second text field, so
+           without this Enter would do nothing (tag-suggest.js stops Enter in
+           the tags field itself from submitting a blank scan). #}
+        <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Scan</button>
         <div class="bg-shelf-card rounded-xl border border-shelf-border p-6 mb-6">
             <label for="shelf-fill-barcode" class="block text-sm font-medium text-shelf-muted mb-1">ISBN / UPC / copy barcode</label>
             <input type="text" id="shelf-fill-barcode" name="isbn" autofocus autocomplete="off" placeholder="Scan or type a barcode…"
@@ -79,4 +98,5 @@
 </div>
 <script src="/static/js/scanner-engine.js"></script>
 <script src="/static/js/shelf-fill.js"></script>
+<script src="/static/js/tag-suggest.js"></script>
 {% endblock %}

@@ -8,6 +8,7 @@ import pytest
 from playwright.sync_api import expect
 
 from tests.e2e.conftest import (
+    _run_setup_wizard,
     assert_page_clean,
     attach_page_guard,
     insert_item,
@@ -2218,4 +2219,210 @@ def test_look_it_up_refuses_an_empty_supplement_without_posting(
         "() => document.querySelector('input[name=\"legacy_supplement\"]')"
         ".checkValidity()"
     ) is False
+    assert_page_clean(authed_page)
+
+
+# --- T7: default tags — persistence, manual-add wiring, datalist re-filter -
+
+
+def _insert_tag(data_dir: Path, name: str, media_type: "str | None" = None) -> int:
+    """Insert a tag row directly into the E2E SQLite DB; return its id.
+
+    There is no HTTP route that sets a tag's scope — inline creation via
+    `attach_tags` is always global — so a scoped tag for case 3 below has to
+    be seeded this way, mirroring `_insert_location`/`_insert_borrower` above.
+    """
+    db_path = data_dir / "shelf.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cur = conn.execute(
+            "INSERT INTO tags (name, media_type) VALUES (?, ?)", (name, media_type)
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def _item_tag_names(data_dir: Path, item_id: int) -> list:
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        rows = conn.execute(
+            "SELECT t.name FROM item_tags it JOIN tags t ON it.tag_id = t.id "
+            "WHERE it.item_id = ? ORDER BY t.name COLLATE NOCASE",
+            (item_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r[0] for r in rows]
+
+
+def test_default_tags_input_persists_across_reload(live_server, authed_page):
+    """Case 1: the sticky value survives a reload with no localStorage seeding
+    needed — `fill()` fires a real `input` event, which is what
+    tag-suggest.js saves on. Add mode is the fresh-context default, so the
+    field is already visible and enabled."""
+    authed_page.goto(f"{live_server['url']}/scan")
+    authed_page.wait_for_load_state("networkidle")
+    expect(authed_page.locator("#default-tags")).to_be_visible()
+
+    authed_page.fill("#default-tags", "Cookbook")
+    authed_page.reload()
+    authed_page.wait_for_load_state("networkidle")
+
+    expect(authed_page.locator("#default-tags")).to_have_value("Cookbook")
+    assert_page_clean(authed_page)
+
+
+def test_manual_add_panel_attaches_default_tags_to_the_new_item(
+    live_server, authed_page
+):
+    """Case 2: the manual-add panel's `hx-include="#scan-mode, #default-tags"`
+    actually reaches `/api/items/manual` in a real browser — the only test in
+    this file that exercises that include."""
+    data_dir = live_server["data_dir"]
+    title = "T7 Manual Wiring Subject"
+
+    authed_page.goto(f"{live_server['url']}/scan")
+    authed_page.wait_for_load_state("networkidle")
+
+    authed_page.fill("#default-tags", "Cookbook")
+
+    authed_page.click("button[data-manual-toggle]")
+    panel = authed_page.locator('[data-manual-host="panel"]')
+    expect(panel).to_be_visible()
+    panel.locator("input[name=title]").fill(title)
+
+    # G83: arm the waiter before the click — the assertion below reads the
+    # DB the response wrote to, not merely the swapped fragment.
+    with authed_page.expect_response(
+        lambda r: "/api/items/manual" in r.url and r.ok
+    ):
+        panel.locator("form button[type=submit]").click()
+
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        row = conn.execute(
+            "SELECT id FROM items WHERE title = ?", (title,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "manual add did not create the item"
+    assert _item_tag_names(data_dir, row[0]) == ["Cookbook"]
+    assert_page_clean(authed_page)
+
+
+def _tag_suggestion_names(page) -> list:
+    return page.evaluate(
+        "() => Array.from(document.querySelectorAll("
+        "'#tag-suggestions option')).map(o => o.value)"
+    )
+
+
+def _wait_for_tag_names(page, predicate, timeout_ms: int = 10_000) -> list:
+    """G21 — poll from Python, never `page.wait_for_function` (the CSP
+    refuses its eval()). Returns the names seen once `predicate` is true."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    names = []
+    while time.monotonic() < deadline:
+        names = _tag_suggestion_names(page)
+        if predicate(names):
+            return names
+        page.wait_for_timeout(100)
+    raise AssertionError(
+        f"tag datalist never satisfied the expected condition; last saw {names}"
+    )
+
+
+def test_default_tags_datalist_refilters_by_media_type(server_factory, browser):
+    """Case 3 (rev 1 — codex-R2): its own server.
+
+    `live_server` is session-scoped, and the previous test above creates
+    `Cookbook` as a *global* tag on it — a global tag is offered for every
+    type, so asserting "dvd excludes Cookbook" against the shared server
+    would be G34's second face (a page whose datalist is built from the
+    whole table). A throwaway `server_factory` server with a `dvd`-scoped
+    `Movie` tag seeded directly (no HTTP route sets a tag's scope) and
+    `Cookbook` relied on only as the `book` starter (config.TAG_SUGGESTIONS)
+    keeps the two branches genuinely distinguishable.
+    """
+    server = server_factory()
+    base = server["url"]
+    credentials = _run_setup_wizard(browser, base)
+    _insert_tag(server["data_dir"], "Movie", media_type="dvd")
+
+    ctx = browser.new_context()
+    try:
+        pg = attach_page_guard(ctx.new_page())
+        csp_violations = _watch_csp_violations(pg)
+
+        pg.goto(f"{base}/login")
+        pg.fill("input[name=username]", credentials["username"])
+        pg.fill("input[name=password]", credentials["password"])
+        pg.click("button[type=submit]")
+        pg.wait_for_url(f"{base}/", timeout=10_000)
+
+        pg.goto(f"{base}/scan")
+        pg.wait_for_load_state("networkidle")
+        expect(pg.locator("#default-tags")).to_be_visible()
+
+        pg.select_option("#media-type", "book")
+        book_names = _wait_for_tag_names(pg, lambda names: "Cookbook" in names)
+        assert "Movie" not in book_names, book_names
+
+        pg.select_option("#media-type", "dvd")
+        dvd_names = _wait_for_tag_names(pg, lambda names: "Movie" in names)
+        assert "Cookbook" not in dvd_names, dvd_names
+
+        assert csp_violations == [], csp_violations
+        assert_page_clean(pg)
+    finally:
+        ctx.close()
+
+
+def test_enter_in_default_tags_does_not_submit_a_scan(live_server, authed_page):
+    """The scan form carries a hidden default button so Enter in the barcode
+    field still submits with the tags field beside it; Enter in the tags
+    field itself must not post a blank scan."""
+    posts = []
+    authed_page.on(
+        "request",
+        lambda r: posts.append(r.url) if r.method == "POST" and "/api/scan" in r.url else None,
+    )
+    authed_page.goto(f"{live_server['url']}/scan")
+    authed_page.wait_for_load_state("networkidle")
+
+    authed_page.fill("#default-tags", "Cookbook")
+    authed_page.press("#default-tags", "Enter")
+    authed_page.wait_for_timeout(500)
+
+    assert posts == []
+    assert_page_clean(authed_page)
+
+
+def test_shelf_fill_enter_submits_with_default_tags(live_server, authed_page):
+    """Shelf Fill's Default tags field is form-associated with the scan form,
+    making it the form's second text field — without the hidden default
+    button, Enter in the barcode field would submit nothing. The typed post
+    carries the tags; an item already in the library is placed, not tagged."""
+    data_dir = live_server["data_dir"]
+    loc_id = _insert_location(data_dir, "T7 Enter Shelf")
+    isbn = "9780000777775"
+    item_id = insert_item(data_dir, title="Shelf Fill Enter Subject", isbn=isbn)
+
+    authed_page.goto(f"{live_server['url']}/shelf-fill")
+    authed_page.wait_for_load_state("networkidle")
+    authed_page.select_option("#shelf-fill-location", str(loc_id))
+    authed_page.fill("#default-tags", "Cookbook")
+    authed_page.fill("#shelf-fill-barcode", isbn)
+
+    with authed_page.expect_response(
+        lambda r: "/api/shelf-fill/scan" in r.url
+    ) as resp_info:
+        authed_page.press("#shelf-fill-barcode", "Enter")
+    resp = resp_info.value
+    assert resp.ok
+    assert "tags=Cookbook" in (resp.request.post_data or "")
+
+    assert _item_tag_names(data_dir, item_id) == []
     assert_page_clean(authed_page)

@@ -65,6 +65,34 @@ A book with only one copy still relocates on a scan, as it always has — there
 is only one object the scan can mean. **Lookup** mode names every room a copy
 is in, for the same reason.
 
+## Default tags
+
+To file a whole pile under one heading — a stack of cookbooks, a box of
+signed copies — type it once in **Default tags** before you start. The field
+sits below the barcode field in **Add** and **Wishlist** modes, and every item
+those modes file from then on gets the tag.
+
+- **Several tags:** separate them with `;` — `Cookbook; Signed`.
+- **New names are fine.** A tag that does not exist yet is created, as a
+  global tag, on the first successful add. There is no trip to Settings.
+- **It is sticky per device**, like the mode and location: it is still there
+  after a reload, until you clear it. A phone and a laptop keep their own.
+- **Suggestions follow the media type.** The field suggests your own tags
+  that suit the selected type, plus a few starter ideas for it (Cookbook,
+  Signed, First edition… for books). A type's starters stop showing once you
+  have a tag of your own scoped to that type. With **Auto**, everything is
+  suggested.
+- **Only an item filed now is tagged:** a new item, a wishlist add, or an
+  item a scan brings back from Trash. A duplicate is never tagged — Shelf
+  would be editing an item you did not just file. Nor is a wishlist item a
+  scan marks as owned.
+- It carries through everywhere an Add can finish: the [legacy-barcode
+  follow-up](#legacy-price-point-book-barcodes), [title search](#title-search-no-barcode),
+  and the [Add by hand](#add-by-hand) form — including the one a failed scan
+  offers.
+
+Tags are managed from the item page; see [Items](items.md).
+
 ## Title search (no barcode)
 
 Below the barcode field, **Title search** covers the things barcodes miss —

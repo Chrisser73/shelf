@@ -90,6 +90,9 @@ its home.
   not formats are recorded: a kids' book is a **book tagged `Kids`**, not a
   media type of its own. The `Kids` tag is global, so it can sit on anything;
   a later release lets you scope a tag to one media type if you want to.
+  Tags can also be set as items arrive: **Default tags** on Scan, Shelf Fill
+  and Photo Intake tags everything a session adds (see
+  [Default tags](scanning.md#default-tags)).
 - **Related Media** — the other items this one belongs with: another format of
   the same work, an adaptation of it, or something simply related. The panel
   shows the whole connected group, so an item reached only through a third item

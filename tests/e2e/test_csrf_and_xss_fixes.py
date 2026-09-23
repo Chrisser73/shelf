@@ -2,6 +2,7 @@
 
 Covers flows that unit tests cannot see because the bugs lived in template JS:
 - Raw fetch() calls previously missing the X-CSRF-Token header (403 in prod)
+- Plain POST forms inside an HTMX-swapped fragment missing the _csrf field
 - Stored XSS via borrower name in the Loaned badge (Alpine x-text JS context)
 """
 import re
@@ -95,3 +96,47 @@ def test_loaned_badge_borrower_name_is_not_executed(live_server, authed_page):
     # The borrower name must now be shown verbatim as text
     expect(authed_page.locator(f"text=To: {payload}")).to_be_visible()
     assert dialogs == [], f"XSS executed: alert fired with {dialogs}"
+
+
+def test_plain_form_in_lazy_loaded_fragment_carries_csrf(live_server, authed_page):
+    """A plain POST form swapped in by HTMX must still get the _csrf field.
+
+    The Discogs panel on a Music item arrives via hx-trigger="load", after
+    DOMContentLoaded, so csrf.js has to inject on htmx:load too — without it
+    "Clear selection" is a 403 that no TestClient test can see.
+    """
+    data_dir = live_server["data_dir"]
+    item_id = insert_item(data_dir, title="CSRF Pressing", media_type="vinyl", source="musicbrainz")
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        conn.execute(
+            "INSERT INTO music_releases (item_id, musicbrainz_release_id) VALUES (?, ?)",
+            (item_id, f"mb-csrf-{item_id}"),
+        )
+        conn.execute(
+            "INSERT INTO music_identifiers (item_id, identifier_type, value) "
+            "VALUES (?, 'discogs_release_id', '123456')",
+            (item_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    authed_page.goto(f"{live_server['url']}/music/item/{item_id}")
+    authed_page.wait_for_load_state("networkidle")
+    clear = authed_page.locator("#discogs-panel button:has-text('Clear selection')")
+    expect(clear).to_be_visible()
+    expect(authed_page.locator("#discogs-panel input[name='_csrf']")).to_have_count(1)
+
+    with authed_page.expect_response(lambda r: "/discogs/clear" in r.url) as resp_info:
+        clear.click()
+    assert resp_info.value.status == 303, f"clear returned {resp_info.value.status}"
+
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        left = conn.execute(
+            "SELECT COUNT(*) FROM music_identifiers WHERE item_id = ?", (item_id,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert left == 0

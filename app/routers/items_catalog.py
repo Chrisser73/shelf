@@ -18,6 +18,7 @@ from app.config import BOOK_MEDIA_TYPES, HTTP_TIMEOUT, MEDIA_TYPES, canonical_me
 from app.database import get_db, get_game_platforms, get_setting
 from app.routers import items_common
 from app.services import covers, igdb, openlibrary, restore_report, scan_outcome, tmdb
+from app.services import tags as tags_svc
 from app.services import isbn as isbn_svc
 from app.services import upc as upc_svc
 from app.services.item_write import ItemValueError, insert_item, validated_location_id
@@ -73,6 +74,7 @@ async def add_game_from_search(
     igdb_id: int = Form(...),
     platform: str = Form(""),
     location_id: int | None = Form(None),
+    tags: str = Form(""),
     _=Depends(require_role("editor")),
 ):
     """Add a video game to the collection from an IGDB search result."""
@@ -130,18 +132,19 @@ async def add_game_from_search(
             # ItemValueError and the card carries its message. Rendered after
             # the block so nothing runs under the write.
             try:
-                item_id = insert_item(
-                    db,
-                    title=metadata["title"],
-                    description=metadata.get("description"),
-                    media_type="video_game",
-                    publisher=metadata.get("publisher"),
-                    publish_year=metadata.get("publish_year"),
-                    series_name=metadata.get("series_name"),
-                    platform=platform_val,
-                    location_id=loc_id,
-                    source="igdb",
-                )
+                with tags_svc.default_tags(tags):
+                    item_id = insert_item(
+                        db,
+                        title=metadata["title"],
+                        description=metadata.get("description"),
+                        media_type="video_game",
+                        publisher=metadata.get("publisher"),
+                        publish_year=metadata.get("publish_year"),
+                        series_name=metadata.get("series_name"),
+                        platform=platform_val,
+                        location_id=loc_id,
+                        source="igdb",
+                    )
             except ItemValueError as e:
                 value_error = str(e)
 
@@ -246,6 +249,7 @@ async def add_book_from_search(
     isbn: str = Form(...),
     media_type: str = Form("book"),
     location_id: int | None = Form(None),
+    tags: str = Form(""),
     _=Depends(require_role("editor")),
 ):
     """Add a book to the collection from a title search result (by ISBN)."""
@@ -310,7 +314,8 @@ async def add_book_from_search(
                 {"status": "error", "isbn": isbn13, "message": "Could not fetch metadata for this ISBN"},
             )
 
-        item_id = items_common._save_item(metadata, isbn13, media_type, location_id, source, hc_ids)
+        with tags_svc.default_tags(tags):
+            item_id = items_common._save_item(metadata, isbn13, media_type, location_id, source, hc_ids)
 
         # Cover kept: skip the download entirely on a restored row that
         # already has one — a skipped download is also a skipped outbound
@@ -388,6 +393,7 @@ async def add_dvd_from_search(
     publish_year: str = Form(""),
     cover_url: str = Form(""),
     location_id: int | None = Form(None),
+    tags: str = Form(""),
     _=Depends(require_role("editor")),
 ):
     """Add a DVD/Blu-ray to the collection from a TMDb search result."""
@@ -436,15 +442,16 @@ async def add_dvd_from_search(
             # ItemValueError and the card carries its message. Rendered after
             # the block so nothing runs under the write.
             try:
-                item_id = insert_item(
-                    db,
-                    title=title,
-                    description=description or None,
-                    media_type="dvd",
-                    publish_year=year,
-                    location_id=loc_id,
-                    source="tmdb",
-                )
+                with tags_svc.default_tags(tags):
+                    item_id = insert_item(
+                        db,
+                        title=title,
+                        description=description or None,
+                        media_type="dvd",
+                        publish_year=year,
+                        location_id=loc_id,
+                        source="tmdb",
+                    )
             except ItemValueError as e:
                 value_error = str(e)
 

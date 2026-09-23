@@ -278,6 +278,15 @@ grep -n "htmx.process" static/js/browse.js                  # expect >= 1, in th
   `grep -n "str(resp.url)" app/services/covers.py` (expect ≥ 1, inside
   `_download`).
 - **Status:** documented.
+- **Watch — provider placeholder images (open, 2026-09-22).** `_download`
+  rejects only files under `MIN_COVER_SIZE` (100 bytes) and Open Library's
+  1×1 pixel. Google Books serves a generic "image not available" picture for
+  some volumes, and it is large enough to be saved as a real cover. The book
+  path (`googlebooks.py`) has always had this gap. #144 extends it
+  to magazine issues through the assisted periodical flow. No bad cover has
+  been reported yet. If one is, detect the placeholder in `_download` (a
+  content hash or known dimensions), so that every source gets the fix, not
+  only the one that was reported.
 
 ## G12 — When security-reviewing user-supplied integration URLs
 
@@ -5163,6 +5172,9 @@ grep -rn "ci_context" scripts/ tests/ .github/workflows/
 - **Evidence:** `feat/soft-delete-collisions`, 2026-09-21 (`080db1e`) — caught
   in orchestrator review before the first run, not by a test; the archive reads
   `cover_path` on `db` with a comment saying why.
+  `tags_svc.attach_defaults` (`f6e03f1`, 2026-09-22) was briefly a third,
+  writing one; it was removed the same day because a second transaction after
+  the item's commit could fail and leave an untagged item (G118).
 - **Verify:** for a helper under `app/services/` that opens `get_db()`, grep
   its callers for ones inside a `with get_db() as db:` block —
 
@@ -5259,6 +5271,93 @@ grep -rn "scan\.item_id\|sl\.item_id" app/templates/ app/routers/
 - **Status:** documented. Lint candidate in part — a raising stub in a test
   whose target module contains `except Exception` is findable, but whether the
   frame is on the path is not.
+
+## G116 — When adding a text field to a form that has no submit button
+
+- **Rule:** check whether the form relies on **implicit submission** — Enter in
+  its one text field submitting it. A form with no submit button submits on
+  Enter only while it has **exactly one** field that blocks implicit submission
+  (text, search, email, number, …). Add a second — including one outside the
+  form but associated with `form="…"` — and Enter silently does nothing. Give
+  the form a default button (`<button type="submit" class="sr-only"
+  tabindex="-1" aria-hidden="true">`, not `display:none`), and stop Enter in
+  the new field if Enter there should not submit.
+- **Why:** nothing errors and nothing posts, so the break is invisible to the
+  unit suite (it posts directly) and to any E2E test that clicks rather than
+  presses Enter. The Scan and Shelf Fill barcode forms are exactly this shape:
+  a USB scanner types the code and sends Enter, so the primary intake path
+  depends on it.
+- **Evidence:** `feat/tags-scan-defaults`, 2026-09-22. T5 added
+  `#default-tags` inside the scan form and T6 added it to Shelf Fill via
+  `form="shelf-fill-form"`. 17 E2E tests went red, all timing out after
+  `press("#isbn-input", "Enter")`, and none of them tests tags. The plan's
+  only mid-run E2E pass sat at the Phase 1 boundary, *before* the frontend
+  tasks, so the break surfaced only in T7's run. Fixed in `dc571c4`; pinned
+  by `test_shelf_fill_enter_submits_with_default_tags` and
+  `test_enter_in_default_tags_does_not_submit_a_scan`, both mutation-checked.
+  Shelf Fill had no E2E coverage at all until then.
+- **And for plans:** a task that adds a control to a page an E2E suite drives
+  should run that page's E2E file in its own gate, not wait for a phase
+  boundary placed before it.
+- **Verify:** every `hx-post` form with more than one text-like control has a
+  submit button:
+
+```bash
+grep -n 'type="submit" class="sr-only"' app/templates/scan.html app/templates/shelf_fill.html   # expect 1 each
+```
+
+- **Status:** documented. Lint candidate: "a `<form>` whose text-like
+  controls, counting `form=`-associated ones, number two or more has a submit
+  button" is mechanically checkable per template, except for controls that
+  Alpine adds at runtime.
+
+## G117 — When a plan or test expects an anonymous `/api/` request to get a 401
+
+- **Rule:** it gets a **303 to `/login`**. `AuthMiddleware` (`app/main.py`)
+  redirects any request without a session before the route's
+  `require_role` dependency runs, so `_raise_auth_required`'s `/api/` 401 is
+  reached only when a session exists but no longer resolves to a user. Pin it
+  with `follow_redirects=False` and assert on `location`. Otherwise TestClient
+  follows the redirect and the test reads the login page's **200**.
+- **Why:** `auth.py`'s own branches say 401 for `/api/`, so reading the
+  dependency alone gives the wrong answer. A test that asserts only "not 200"
+  misses it too, while one that asserts 401 fails with a confusing `200 == 401`.
+  Every new role-checked route asks this question, so the risk-floor item of
+  every such plan hits it.
+- **Evidence:** `feat/tags-scan-defaults` T1 (`f6e03f1`, 2026-09-22). The
+  impl plan specified "Unauthenticated gets 401" for `GET /api/tags`; the
+  first run of the test read 200.
+- **Verify:** `grep -n "not user" -A3 app/main.py` still shows the
+  `RedirectResponse(url="/login", status_code=303)` branch ahead of
+  `call_next`.
+- **Status:** documented.
+
+## G118 — When a response-required write runs after the primary row commits
+
+- **Rule:** if the response promises that two writes happened as one user
+  action, commit them on the same connection and in the same transaction. A
+  post-response hook is fine only for optional enrichment whose failure is
+  surfaced, or when the first transaction writes a durable, idempotent
+  recovery record.
+- **Why:** a second transaction can fail after the first is permanent. The
+  request answers 500 over data that exists in a narrower state than promised,
+  and the natural retry rarely replays the second write: duplicate detection
+  returns early, an importer skips rows it already has, and an identifier-less
+  add files a second row.
+- **Evidence:** `feat/tags-scan-defaults` diff review (codex, 2026-09-22).
+  `tags_svc.attach_defaults` opened its own connection after Scan, manual and
+  catalog adds committed, and Photo Intake tagged in one block after every
+  row's commit. A real SQLite writer lock produced `first_status=500
+  item_committed=True tag_rows_after_failure=0`; retrying a title-only manual
+  add made two items. Fixed by `tags_svc.default_tags(raw)`: an add route
+  wraps its insert in the block and `insert_item` attaches the tags on the
+  inserting connection.
+- **Verify:** force the second write to raise, then inspect the database and
+  retry the same action. Neither the row nor the association may have
+  committed, and the retry must file both. Asserting only the response status
+  misses the persistent partial state — see
+  `tests/test_tag_defaults.py::TestTagWriteFailureLeavesNoPartialItem`.
+- **Status:** documented; pinned for Scan, manual add and Photo Intake.
 
 ## Graveyard
 

@@ -35,6 +35,7 @@ from app.services import legacy_book
 from app.services import scan_outcome
 from app.services import item_merge
 from app.services import restore_report
+from app.services import tags as tags_svc
 from app.services import item_template
 from app.services import upc as upc_svc, tmdb, igdb
 from app.services import synopsis as synopsis_svc
@@ -241,8 +242,17 @@ async def scan_isbn(
     mode: str = Form("add"), borrower_id: int | None = Form(None),
     legacy_confirm_isbn13: str = Form(""),
     legacy_supplement: str = Form(""),
+    tags: str = Form(""),
     _=Depends(require_role("editor")),
 ):
+    """Thin wrapper: whatever `_scan_isbn_inner` files takes the default tags in its own transaction (G118)."""
+    with tags_svc.default_tags(tags):
+        return await _scan_isbn_inner(request, isbn, media_type, location_id, platform, mode,
+                                      borrower_id, legacy_confirm_isbn13, legacy_supplement, tags)
+
+
+async def _scan_isbn_inner(request, isbn, media_type, location_id, platform, mode, borrower_id,
+                            legacy_confirm_isbn13, legacy_supplement, tags):
     """Scan a barcode: mode-aware dispatch for add, lend, return, move, inventory, lookup, quick_rate."""
     templates = request.app.state.templates
     raw = isbn.strip()
@@ -313,6 +323,7 @@ async def scan_isbn(
                         "platform": platform,
                         "mode": mode,
                         "borrower_id": borrower_id,
+                        "tags": tags,
                     },
                 )
 
@@ -433,6 +444,7 @@ async def scan_isbn(
                     "platform": platform,
                     "mode": mode,
                     "borrower_id": borrower_id,
+                    "tags": tags,
                 },
             )
 
@@ -716,22 +728,23 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
             # replaced also sat outside the lock above.
             wishlist = {"owned": 0, "wishlisted": True} if mode == "wishlist" else {}
             try:
-                item_id = insert_item(
-                    db,
-                    **wishlist,
-                    title=title,
-                    authors=form.get("authors"),
-                    isbn=isbn13,
-                    upc=upc_code,
-                    media_type=media_type,
-                    publisher=form.get("publisher"),
-                    publish_year=pub_year,
-                    platform=platform,
-                    series_name=series_name,
-                    location_id=location_id,
-                    language=language,
-                    source="manual",
-                )
+                with tags_svc.default_tags(form.get("tags") or ""):
+                    item_id = insert_item(
+                        db,
+                        **wishlist,
+                        title=title,
+                        authors=form.get("authors"),
+                        isbn=isbn13,
+                        upc=upc_code,
+                        media_type=media_type,
+                        publisher=form.get("publisher"),
+                        publish_year=pub_year,
+                        platform=platform,
+                        series_name=series_name,
+                        location_id=location_id,
+                        language=language,
+                        source="manual",
+                    )
             except ItemValueError as e:
                 value_error = str(e)
             except sqlite3.IntegrityError:

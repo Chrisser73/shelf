@@ -105,6 +105,7 @@ function shelfFillPage() {
             formData.set('location_id', this.location);
             formData.set('media_type', this.mediaType);
             formData.set('platform', this.platform);
+            formData.set('tags', (document.getElementById('default-tags') || {}).value || '');
             try {
                 var resp = await fetch('/api/shelf-fill/scan', {
                     method: 'POST',

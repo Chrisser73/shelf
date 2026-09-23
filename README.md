@@ -3,8 +3,8 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-3983%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![E2E tests](https://img.shields.io/badge/e2e%20tests-262%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-4025%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![E2E tests](https://img.shields.io/badge/e2e%20tests-268%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
 A self-hosted home library catalog with barcode scanning, multi-mode scanning workflows, automatic metadata lookup, cover art, and collection management — all in a single Docker container.
@@ -181,7 +181,7 @@ each option before anything is sent.
 - **Home overview** — Shelf opens on a page that answers "what is happening in my library?": catalogue, owned and wishlist totals, what is lent out, missing covers, a media-type breakdown and recent additions. Browse stays the place for searching, filtering and bulk editing. See [Home](docs/user-guide/home.md)
 - **Filter and search** — by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), and free text
 - **Reading tracking** — want-to-read, reading, and read with start/finish dates
-- **Custom tags** — free-form tags (`signed`, `first-edition`, whatever you like) as chips on the item page, with a tag filter on Browse
+- **Custom tags** — free-form tags (`signed`, `first-edition`, whatever you like) as chips on the item page, with a tag filter on Browse. Set **default tags** for a scanning session on Scan, Shelf Fill or Photo Intake and every item you add is tagged as it arrives, with suggestions for the media type you are scanning
 - **Synopses** — item descriptions fetched automatically on add, plus a one-click backfill for your existing catalog (Open Library, Google Books, Hardcover)
 - **Stats dashboard** — books read per year, collection growth, top authors, and value-over-time charts (server-rendered SVG, no JS)
 - **Locations** — organize by room, shelf, or any system you like, and nest them: a shelf inside a bookcase inside a room. Rename or move a location and everything beneath it follows. See [Locations](docs/user-guide/locations.md)
@@ -284,7 +284,7 @@ Shelf queries free, public APIs to look up book and game information — no API 
 | [Deutsche Nationalbibliothek](https://portal.dnb.de) | German (978-3) ISBNs, consulted before the rest: title, author, publisher, year, language; cover art | No |
 | [Servizio Bibliotecario Nazionale](https://opac.sbn.it) | Italian (978-88, 979-12) ISBNs, consulted before the rest: title, subtitle, author, publisher, year, language | No |
 | [Open Library](https://openlibrary.org) | Title, author, description, cover art, publish info, title search | No |
-| [Google Books](https://books.google.com) | Fallback metadata and cover art; magazine title search when a 977 barcode does not resolve | No (optional key supported) |
+| [Google Books](https://books.google.com) | Fallback metadata and cover art; magazine title search (and the chosen result's cover) when a 977 barcode does not resolve | No (optional key supported) |
 | [Amazon Images](https://www.amazon.com) | Fallback cover art via ISBN | No |
 | [UPC Item DB](https://www.upcitemdb.com) | Title lookup from UPC barcodes (games, DVDs) | No |
 | [MusicBrainz](https://musicbrainz.org) | Music releases by title, artist, barcode or catalogue number: pressing details, track lists, release groups | No |
@@ -301,6 +301,7 @@ Configure in Settings to unlock additional features:
 | **Hardcover** | Reading status sync, richer metadata, import/export, Discover page | [hardcover.app](https://hardcover.app) |
 | **Google Books** | Optional credentialed metadata, synopsis, and cover requests; anonymous access remains available | [Google Books API](https://developers.google.com/books) |
 | **IGDB** (Twitch) | Video game metadata, cover art, and platform info — on UPC scan, title search, and Photo Intake confirm | [dev.twitch.tv/console](https://dev.twitch.tv/console) |
+| **Discogs** | Pick the exact pressing of a Music item; Shelf keeps only the Discogs release ID | [discogs.com/settings/developers](https://www.discogs.com/settings/developers) |
 | **ISBNdb** | Collection valuation with market prices | [isbndb.com](https://isbndb.com) |
 | **TMDb** | DVD/Blu-ray metadata — on UPC scan, title search, and Photo Intake confirm | [themoviedb.org](https://www.themoviedb.org) |
 | **Anthropic** | Photo Intake — reads spines and recognizes covers (best accuracy) | [console.anthropic.com](https://console.anthropic.com) |

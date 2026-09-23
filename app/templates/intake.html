@@ -206,6 +206,15 @@
                 <option value="{{ loc.id }}">{{ loc.name }}</option>
                 {% endfor %}
             </select>
+            {# Sticky per device; tag-suggest.js restores it and fills the
+               datalist from GET /api/tags. No data-type-source: the type is
+               per row here, so every tag is offered (decision 7). No
+               x-model: every reader reads the DOM value (G91). #}
+            <input type="text" id="default-tags" name="tags" list="tag-suggestions" aria-label="Default tags"
+                   data-tag-suggest data-storage-key="shelf.intake.tags"
+                   autocomplete="off" placeholder="Default tags — e.g. Cookbook; Signed"
+                   class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none placeholder-shelf-muted/50">
+            <datalist id="tag-suggestions"></datalist>
             <label class="flex items-center gap-2 text-sm text-shelf-muted cursor-pointer">
                 <input type="checkbox" x-model="owned" class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
                 Owned (uncheck for wishlist)
@@ -252,4 +261,5 @@
 
 <script src="/static/js/intake-capture.js"></script>
 <script src="/static/js/intake.js"></script>
+<script src="/static/js/tag-suggest.js"></script>
 {% endblock %}

@@ -147,7 +147,7 @@ key material.
 - Wishlist — a list of what you want, alongside your catalog; an item can also be neither owned nor wished for, keeping its reading history
 - Public share links — read-only wishlist or collection pages for gift ideas, revocable anytime
 - Goodreads & StoryGraph import — upload your export as-is; format auto-detected, covers fetched automatically
-- Custom tags — free-form tags (`signed`, `first-edition`, …) with a tag filter on Browse
+- Custom tags — free-form tags (`signed`, `first-edition`, …) with a tag filter on Browse, and default tags for a scanning session on Scan, Shelf Fill or Photo Intake
 - Bulk editing — select items in Browse to move them, change type or reading status, add to or remove from the wishlist, or set and clear series in one go
 - Valuation report — location-grouped, print-ready collection value report for insurance (via ISBNdb)
 - Display currency — 20 currencies for every value surface (formatting, not conversion)

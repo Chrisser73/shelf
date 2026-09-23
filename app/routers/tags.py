@@ -31,6 +31,13 @@ def _render_fragment(request: Request, db, item_id: int):
     )
 
 
+@router.get("/tags")
+async def list_tags(_=Depends(require_role("editor"))):
+    """The one JSON source for every tag datalist (Scan, Shelf Fill, Intake)."""
+    with get_db() as db:
+        return {"tags": tags_svc.suggestion_payload(db)}
+
+
 @router.post("/items/{item_id}/tags")
 async def add_tag(request: Request, item_id: int, name: str = Form(...),
                   _=Depends(require_role("editor"))):
