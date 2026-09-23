@@ -253,6 +253,22 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
             platform_slug TEXT PRIMARY KEY REFERENCES game_platforms(slug) ON DELETE CASCADE,
             svg_path TEXT NOT NULL
         )"""),
+    (41, "Add per-user appearance and platform logo settings",
+     """CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY(user_id, key)
+        )"""),
+    (42, "Add per-user platform logo mappings",
+     """CREATE TABLE IF NOT EXISTS user_platform_logos (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            platform_slug TEXT NOT NULL REFERENCES game_platforms(slug) ON DELETE CASCADE,
+            svg_path TEXT NOT NULL,
+            PRIMARY KEY(user_id, platform_slug)
+        )"""),
+    (43, "Add collector packaging state",
+     "ALTER TABLE items ADD COLUMN collector_condition TEXT DEFAULT NULL"),
 )
 
 MIGRATION_TABLES = """
