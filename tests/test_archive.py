@@ -15,6 +15,7 @@ from app import config
 from app.database import get_db
 from app.services import archive as archive_svc
 from app.services import item_copies
+from app.services import item_write
 from app.services import lists
 from app.services.archive import (
     ArchiveError,
@@ -27,6 +28,10 @@ from app.services.archive import (
 from tests.conftest import _insert_borrower, _insert_item, _insert_location
 
 # Hostile fixtures are built in-test with zipfile — no binary blobs checked in.
+# Deliberately pinned to version 1, not archive_svc.FORMAT_VERSION: these
+# hand-built fixtures carry no `deleted_at` on their items/copies, so they
+# are the v1 (pre-Trash) coverage on purpose (G78) — a real v2 export is
+# exercised instead through build_archive() in the tests that need it.
 _MANIFEST = json.dumps({"format": "shelf-archive", "version": 1,
                         "exported_at": "2026-08-18T00:00:00Z",
                         "app_version": None, "counts": {}})
@@ -135,7 +140,7 @@ class TestBuildArchive:
 
         # Manifest shape
         assert manifest["format"] == "shelf-archive"
-        assert manifest["version"] == 1
+        assert manifest["version"] == archive_svc.FORMAT_VERSION
         assert manifest["app_version"] is None
         assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", manifest["exported_at"])
         assert manifest["counts"]["items"] == 1
@@ -148,6 +153,7 @@ class TestBuildArchive:
         assert item["id"] == 1  # archive-local, not the real db id
         assert item["title"] == "Dune"
         assert item["location"] == "Living Room"
+        assert item["deleted_at"] is None
         assert item["tags"] == ["sci-fi"]
         assert item["cover"] == "covers/1.jpg"
         assert item["copies"] == [{
@@ -155,6 +161,7 @@ class TestBuildArchive:
             "position_order": None, "condition": None, "acquired_date": None,
             "acquisition_source": None, "acquisition_price": None,
             "provenance": None, "notes": None, "copy_barcode": None,
+            "deleted_at": None,
         }]
         for forbidden in ("abs_id", "abs_library_id", "location_id", "cover_path"):
             assert forbidden not in item
@@ -270,6 +277,7 @@ class TestBuildArchive:
             "acquired_date": "2020-01-01", "acquisition_source": "Gift",
             "acquisition_price": 12.5, "provenance": "From Grandma",
             "notes": "First copy", "copy_barcode": "ASSET-001",
+            "deleted_at": None,
         }
         assert copies[1] == {
             "copy_number": 2, "location": "Office", "is_primary": 0,
@@ -277,6 +285,7 @@ class TestBuildArchive:
             "acquired_date": "2021-06-15", "acquisition_source": "Used bookstore",
             "acquisition_price": 4.0, "provenance": None,
             "notes": "Second copy", "copy_barcode": "ASSET-002",
+            "deleted_at": None,
         }
 
     def test_item_with_no_copies_exports_empty_list(self, db):
@@ -314,6 +323,64 @@ class TestBuildArchive:
         monkeypatch.setattr(archive_svc, "_copies_by_item", spy)
         build_archive(db)
         assert len(calls) == 1
+
+
+class TestBuildArchiveCarriesTrash:
+    """FORMAT_VERSION 2 — the export reads the physical items/item_copies
+    tables so a trashed row is carried instead of silently omitted
+    (design plan-soft-delete-export)."""
+
+    def test_trashed_item_exports_with_deleted_at_and_its_children(self, db):
+        """`_build_items`'s id_map is built from every row it reads, live or
+        trashed, so a trashed item's tags, reading log, checkout and copies
+        follow it into the archive with no edit of their own."""
+        item_id = _seed_full_library(db)
+        assert item_write.trash_item(db, item_id) is True
+
+        path = build_archive(db)
+        with zipfile.ZipFile(path) as zf:
+            library = json.loads(zf.read("library.json"))
+
+        assert len(library["items"]) == 1
+        item = library["items"][0]
+        assert item["deleted_at"] is not None
+        assert item["tags"] == ["sci-fi"]
+        assert item["copies"]
+        assert library["reading_log"][0]["item_id"] == item["id"]
+        assert library["checkouts"][0]["item_id"] == item["id"]
+
+    def test_live_item_exports_deleted_at_none(self, db):
+        _insert_item(db, title="Still Here", isbn="9780000000149")
+        db.execute("COMMIT")
+
+        path = build_archive(db)
+        with zipfile.ZipFile(path) as zf:
+            library = json.loads(zf.read("library.json"))
+
+        assert library["items"][0]["deleted_at"] is None
+
+    def test_a_trashed_primary_copy_exports_demoted_with_its_deleted_at(self, db):
+        """Trashing a primary copy with a survivor demotes it and promotes
+        the survivor (`item_copies.trash_copy`'s own stamp-and-demote
+        invariant, G107) — both states must round-trip into the archive
+        exactly as stored."""
+        item_id = _insert_item(db, title="Two Copies", isbn="9780000000156")
+        primary_id = item_copies.insert_copy(
+            db, {"item_id": item_id, "copy_number": 1, "is_primary": 1}
+        )
+        item_copies.insert_copy(db, {"item_id": item_id, "copy_number": 2})
+        assert item_copies.trash_copy(db, primary_id) is not None
+        db.execute("COMMIT")
+
+        path = build_archive(db)
+        with zipfile.ZipFile(path) as zf:
+            library = json.loads(zf.read("library.json"))
+
+        copies = {c["copy_number"]: c for c in library["items"][0]["copies"]}
+        assert copies[1]["deleted_at"] is not None
+        assert copies[1]["is_primary"] == 0
+        assert copies[2]["deleted_at"] is None
+        assert copies[2]["is_primary"] == 1
 
 
 class TestExportArchiveEndpoint:
@@ -429,7 +496,10 @@ class TestReaderManifestGate:
 
     def test_rejects_future_version(self, tmp_path):
         p = _write_zip(tmp_path / "a.zip", [],
-                       manifest=json.dumps({"format": "shelf-archive", "version": 2}))
+                       manifest=json.dumps({
+                           "format": "shelf-archive",
+                           "version": archive_svc.FORMAT_VERSION + 1,
+                       }))
         with pytest.raises(ArchiveError, match="newer version of Shelf"):
             read_archive(p)
 
@@ -548,7 +618,7 @@ class TestReaderSelfCompatibility:
         path = build_archive(db)
         with read_archive(path) as reader:
             assert reader.manifest["format"] == "shelf-archive"
-            assert reader.manifest["version"] == 1
+            assert reader.manifest["version"] == archive_svc.FORMAT_VERSION
             lib = reader.library
             assert len(lib["items"]) == 1
             cover_name = lib["items"][0]["cover"]
@@ -898,7 +968,7 @@ class TestMergeSkipModeNonEmptyLibrary:
             report = merge_archive(db, reader, mode="skip")
 
         assert report == {
-            "imported": 0, "updated": 0, "skipped": 1, "errors": [],
+            "imported": 0, "restored": 0, "trashed": 0, "updated": 0, "skipped": 1, "errors": [],
             "covers_installed": 0, "format": "shelf-archive",
         }
         row = db.execute("SELECT title, notes, cover_path FROM items WHERE id = ?", (existing_id,)).fetchone()
@@ -1093,7 +1163,7 @@ class TestMergeReportCounts:
             report = merge_archive(db, reader, mode="skip")
 
         assert report == {
-            "imported": 1, "updated": 0, "skipped": 1,
+            "imported": 1, "restored": 0, "trashed": 0, "updated": 0, "skipped": 1,
             "errors": ["Archive item 3: missing title"],
             "covers_installed": 0, "format": "shelf-archive",
         }
@@ -1280,7 +1350,7 @@ class TestPlanVerdicts:
         plan = _plan(db, tmp_path, library, mode="skip")
         assert plan["mode"] == "skip"
         assert plan["items"] == [{"ref": 1, "title": "Dune", "verdict": "skip",
-                                  "basis": "isbn", "cover": "none"}]
+                                  "basis": "isbn", "cover": "none", "deleted": False}]
         assert plan["summary"]["by_basis"] == {"isbn": 1, "title_authors": 0}
 
     def test_isbn_match_update_mode(self, db, tmp_path):
@@ -1603,7 +1673,7 @@ class TestApplyPlanReportShape:
                               "media_type": "book"}]}
         _plan, report = _plan_and_apply(db, _zip_for(tmp_path, library))
         assert report == {
-            "imported": 1, "updated": 0, "skipped": 0, "errors": [],
+            "imported": 1, "restored": 0, "trashed": 0, "updated": 0, "skipped": 0, "errors": [],
             "covers_installed": 0, "format": "shelf-archive",
             "covers_replaced": 0, "drifted": 0,
             "deselected": {"creates": 0, "updates": 0, "covers": 0,
@@ -3204,3 +3274,274 @@ class TestTheRetiredKidsBookAliasInAnArchive:
         assert db.execute(
             "SELECT COUNT(*) AS c FROM items WHERE isbn = ?", (isbn,)
         ).fetchone()["c"] == 1, "no second row may be created"
+
+
+# ---------------------------------------------------------------------------
+# plan-soft-delete-export T5 — a record in its source's Trash lands in Trash
+# ---------------------------------------------------------------------------
+
+_ITEM_GONE_AT = "2026-01-02 03:04:05"
+_COPY_GONE_AT = "2026-01-01 01:01:01"
+_KEPT_COPY_GONE_AT = "2026-02-02 02:02:02"
+
+
+def _seed_library_with_trash(db):
+    """A trashed item with tags, a reading log, an open loan and two copies —
+    one of them individually trashed before the item was — plus a live item
+    with one trashed copy. Every stamp is explicit so the round trip can
+    compare them exactly."""
+    from app.services import tags as tags_svc
+
+    loc = _insert_location(db, name="Den")
+    bea = _insert_borrower(db, name="Bea")
+    gone = _insert_item(db, title="Gone", isbn="9780441013593",
+                        isbn10="0441013597", location_id=loc)
+    item_copies.add_copy(db, gone)
+    second = item_copies.add_copy(db, gone)
+    tags_svc.attach_tags(db, gone, ["Signed"])
+    db.execute("INSERT INTO reading_log (item_id, status) VALUES (?, 'read')", (gone,))
+    db.execute("INSERT INTO checkouts (item_id, borrower_id) VALUES (?, ?)", (gone, bea))
+
+    kept = _insert_item(db, title="Kept", isbn="9780000000125",
+                        isbn10="0000000124", location_id=loc)
+    item_copies.add_copy(db, kept)
+    kept_second = item_copies.add_copy(db, kept)
+
+    item_copies.trash_copy(db, second, at=_COPY_GONE_AT)
+    item_copies.trash_copy(db, kept_second, at=_KEPT_COPY_GONE_AT)
+    item_write.trash_item(db, gone, at=_ITEM_GONE_AT)
+    db.execute("COMMIT")
+
+
+def _import_into_fresh(db, path, mode="skip"):
+    _wipe_library(db)
+    db.execute("DELETE FROM item_copies")
+    db.execute("COMMIT")
+    with read_archive(path) as reader:
+        report = merge_archive(db, reader, mode=mode)
+    db.execute("COMMIT")
+    return report
+
+
+class TestTrashRoundTripsIntoAFreshInstall:
+    def test_trash_arrives_as_trash_with_its_own_dates(self, db):
+        from app.services import trash
+
+        _seed_library_with_trash(db)
+        path = build_archive(db)
+        with zipfile.ZipFile(path) as zf:
+            original = json.loads(zf.read("library.json"))
+
+        report = _import_into_fresh(db, path)
+
+        assert report["errors"] == []
+        assert (report["imported"], report["trashed"], report["restored"]) == (1, 1, 0)
+
+        listing = trash.listing(db, expired_only=False, days=30)
+        assert [(r["title"], r["deleted_at"]) for r in listing["items"]] == [
+            ("Gone", _ITEM_GONE_AT)]
+        copies = {(g["item_title"], c["deleted_at"])
+                  for g in listing["copy_groups"] for c in g["copies"]}
+        assert copies == {("Gone", _COPY_GONE_AT), ("Kept", _KEPT_COPY_GONE_AT)}
+
+        # The views hide them.
+        assert [r["title"] for r in db.execute(
+            "SELECT title FROM items_live")] == ["Kept"]
+        gone_id = listing["items"][0]["id"]
+        assert db.execute(
+            "SELECT COUNT(*) AS n FROM copies_live WHERE item_id = ?", (gone_id,)
+        ).fetchone()["n"] == 0
+        # Newly created, so its history came with it.
+        for table in ("reading_log", "checkouts"):
+            assert db.execute(
+                f"SELECT COUNT(*) AS n FROM {table} WHERE item_id = ?", (gone_id,)
+            ).fetchone()["n"] == 1
+
+        # Export again: the same library, Trash and all. `updated_at` moves on
+        # a trashed item — trash_item stamps it, as a restore does.
+        with zipfile.ZipFile(build_archive(db)) as zf:
+            again = json.loads(zf.read("library.json"))
+        for lib in (original, again):
+            for it in lib["items"]:
+                it.pop("updated_at")
+        assert _normalize_library(original) == _normalize_library(again)
+
+    def test_a_trashed_copy_marked_primary_imports_non_primary(self, db, tmp_path):
+        path = _write_zip(tmp_path / "p.zip", [], library=json.dumps({"items": [{
+            "id": 1, "title": "Hand Built", "media_type": "book", "owned": 1,
+            "copies": [
+                {"copy_number": 1, "is_primary": True,
+                 "deleted_at": "2026-01-01 00:00:00"},
+                {"copy_number": 2, "is_primary": False},
+            ],
+        }]}))
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader)
+        db.execute("COMMIT")
+
+        assert report["errors"] == []
+        rows = {r["copy_number"]: r for r in db.execute(
+            "SELECT copy_number, is_primary, deleted_at FROM item_copies")}
+        assert rows[1]["is_primary"] == 0
+        assert rows[1]["deleted_at"] == "2026-01-01 00:00:00"
+        assert rows[2]["is_primary"] == 1 and rows[2]["deleted_at"] is None
+
+    def test_an_item_whose_copies_are_all_trashed_has_no_live_copy(self, db, tmp_path):
+        path = _write_zip(tmp_path / "a.zip", [], library=json.dumps({"items": [{
+            "id": 1, "title": "Emptied", "media_type": "book", "owned": 1,
+            "location": "Den",
+            "copies": [{"copy_number": 1, "is_primary": False,
+                        "deleted_at": "2026-01-01 00:00:00"}],
+        }]}))
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader)
+        db.execute("COMMIT")
+
+        assert report["errors"] == []
+        assert db.execute("SELECT COUNT(*) AS n FROM copies_live").fetchone()["n"] == 0
+        assert db.execute(
+            "SELECT COUNT(*) AS n FROM item_copies WHERE deleted_at IS NOT NULL"
+        ).fetchone()["n"] == 1
+
+    @pytest.mark.parametrize("stamp", [
+        "yesterday", "2026-13-40 00:00:00", "2999-01-01 00:00:00", 12345, "",
+    ], ids=["words", "impossible-date", "future", "number", "empty"])
+    def test_an_untrustworthy_date_trashes_as_of_now(self, db, tmp_path, stamp):
+        path = _write_zip(tmp_path / "d.zip", [], library=json.dumps({"items": [{
+            "id": 1, "title": "Odd Date", "media_type": "book", "owned": 1,
+            "deleted_at": stamp,
+        }]}))
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader)
+        db.execute("COMMIT")
+
+        assert report["trashed"] == 1
+        assert len(report["errors"]) == 1 and "as of now" in report["errors"][0]
+        stored = db.execute(
+            "SELECT deleted_at FROM items WHERE title = 'Odd Date'"
+        ).fetchone()["deleted_at"]
+        assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", stored)
+        assert stored != stamp
+
+    def test_a_v1_archive_imports_every_row_live(self, db, tmp_path):
+        """The module `_MANIFEST` is version 1 and its rows carry no
+        `deleted_at` key at all (G87)."""
+        path = _write_zip(tmp_path / "v1.zip", [], library=json.dumps({"items": [
+            {"id": 1, "title": "Old One", "media_type": "book", "owned": 1},
+            {"id": 2, "title": "Old Two", "media_type": "book", "owned": 1},
+        ]}))
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader)
+        db.execute("COMMIT")
+
+        assert (report["imported"], report["trashed"]) == (2, 0)
+        assert db.execute(
+            "SELECT COUNT(*) AS n FROM items WHERE deleted_at IS NOT NULL"
+        ).fetchone()["n"] == 0
+
+    def test_a_v2_archive_is_refused_by_a_v1_reader(self, db, monkeypatch):
+        _seed_library_with_trash(db)
+        path = build_archive(db)
+        monkeypatch.setattr(archive_svc, "FORMAT_VERSION", 1)
+        with pytest.raises(ArchiveError, match="newer version of Shelf"):
+            read_archive(path)
+
+    def test_a_rejected_deleted_record_leaves_nothing_behind(self, db, tmp_path):
+        """The G85 pin's shape, for a record that would have gone to Trash."""
+        path = _write_zip(tmp_path / "r.zip", [], library=json.dumps({"items": [{
+            "id": 1, "title": "Malformed", "media_type": "book", "owned": 1,
+            "location": "Only For This Item", "tags": ["only-for-this-item"],
+            "deleted_at": "2026-01-01 00:00:00",
+            "copies": [{"copy_number": 1, "deleted_at": "2026-01-01 00:00:00"},
+                       {"copy_number": 1}],
+        }]}))
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader)
+
+        assert report["trashed"] == 0 and len(report["errors"]) == 1
+        for sql in (
+            "SELECT COUNT(*) AS n FROM items",
+            "SELECT COUNT(*) AS n FROM item_copies",
+            "SELECT COUNT(*) AS n FROM item_tags",
+            "SELECT COUNT(*) AS n FROM locations WHERE name = 'Only For This Item'",
+        ):
+            assert db.execute(sql).fetchone()["n"] == 0, sql
+
+    def test_a_deleted_record_with_a_live_twin_in_update_mode_stays_live(
+        self, db, tmp_path
+    ):
+        """The safety property: an import never trashes a live row."""
+        live = _insert_item(db, title="Kept", isbn="9780000000125")
+        db.execute("COMMIT")
+        path = _write_zip(tmp_path / "u.zip", [], library=json.dumps({"items": [{
+            "id": 1, "title": "Kept", "isbn": "9780000000125", "media_type": "book",
+            "owned": 1, "publisher": "New", "deleted_at": "2026-01-01 00:00:00",
+        }]}))
+        with read_archive(path) as reader:
+            report = merge_archive(db, reader, mode="update")
+        db.execute("COMMIT")
+
+        assert report["updated"] == 1 and report["trashed"] == 0
+        assert db.execute(
+            "SELECT deleted_at FROM items WHERE id = ?", (live,)
+        ).fetchone()["deleted_at"] is None
+
+
+class TestArchiveUploadReadsAreBounded:
+    """G55: bound the read before validating. Archive import endpoints used to
+    call `await upload.read()` with no argument, buffering the entire upload
+    before the size ceiling was consulted."""
+
+    def test_import_archive_read_is_called_with_ceiling_plus_one(self, admin_client, tmp_path, monkeypatch):
+        from starlette.datastructures import UploadFile
+
+        from app.services.archive import MAX_IMPORT_UPLOAD_SIZE
+
+        calls = []
+        original_read = UploadFile.read
+
+        async def spy_read(self, size=-1):
+            calls.append(size)
+            return await original_read(self, size)
+
+        monkeypatch.setattr(UploadFile, "read", spy_read)
+
+        # Create a minimal valid zip archive
+        p = _write_zip(tmp_path / "test.zip", [])
+        archive_bytes = p.read_bytes()
+
+        result = admin_client.post(
+            "/api/import/archive",
+            files={"file": ("test.zip", io.BytesIO(archive_bytes), "application/zip")},
+            data={"mode": "skip"},
+        )
+
+        assert result.status_code == 200
+        assert calls == [MAX_IMPORT_UPLOAD_SIZE + 1]
+
+    def test_plan_archive_import_read_is_called_with_ceiling_plus_one(self, admin_client, tmp_path, monkeypatch):
+        from starlette.datastructures import UploadFile
+
+        from app.services.archive import MAX_IMPORT_UPLOAD_SIZE
+
+        calls = []
+        original_read = UploadFile.read
+
+        async def spy_read(self, size=-1):
+            calls.append(size)
+            return await original_read(self, size)
+
+        monkeypatch.setattr(UploadFile, "read", spy_read)
+
+        # Create a minimal valid zip archive
+        p = _write_zip(tmp_path / "test.zip", [])
+        archive_bytes = p.read_bytes()
+
+        result = admin_client.post(
+            "/api/import/archive/plan",
+            files={"file": ("test.zip", io.BytesIO(archive_bytes), "application/zip")},
+            data={"mode": "skip"},
+        )
+
+        assert result.status_code == 200
+        assert calls == [MAX_IMPORT_UPLOAD_SIZE + 1]

@@ -2240,6 +2240,17 @@ grep -rn 'add_init_script' tests/e2e/
   genuinely not markup (`16adb7d`). Same family as **G32**, where
   `check_alpine_csp.py` scans raw template text and flags a server-side Jinja
   subscript as an htmx event filter — same cause, different trigger.
+- **The guard's pattern is wider than its name — read the regex, not the
+  test name.** `tests/test_item_write.py::…::test_deleted_at_is_written_by_exactly_four_functions`
+  says "written by four functions", but it matches `deleted\s*_\s*at\s*=`
+  anywhere in `app/` outside `#` comment lines: **docstrings**, an equality
+  test (`deleted_at ==`), and a **local variable** named `deleted_at`. It
+  tripped twice in one plan (`feat/soft-delete-export`, 2026-09-23): a
+  docstring quoting the new `deleted_at = COALESCE(?, …)` statement (T1,
+  `b859168`, reworded to prose), and `deleted_at = _valid_deleted_at(...)` as
+  a local in `archive.apply_plan` (T5, `f95c2fe`, renamed `trash_stamp`).
+  Neither was a write. Name locals after what they hold (`trash_stamp`), and
+  describe the column's assignment in words.
 - **Verify:** judgement. When a text-scanning guard fires, read the hit before
   the rule: if it is inside a comment, the guard is not wrong about the file.
 - **Status:** documented. Not a lint candidate — a lint for this would need
@@ -2325,21 +2336,21 @@ print('\n'.join(bad) or 'OK: every swap destination is explicit')
   `content = await cover_file.read(covers.MAX_COVER_SIZE + 1)`, with
   `save_uploaded_cover`'s existing `> MAX_COVER_SIZE` branch unchanged
   (`app/services/covers.py:100`).
-- **Seven call sites still carry the unbounded shape, and this entry was
-  written knowing it** — the cover uploads at `app/routers/items.py:532` and
-  `:811`, the **photo-intake upload at `intake.py:91`** (the largest payload of
-  the set, and the one a first pass at this entry missed), the archive imports
-  at `archive.py:102` and `:140`, the DB restore at `settings.py:254`, and the
-  CSV import at `items_csv.py:82`. All were out of
-  `feat/cover-picker`'s scope. **This is G29's lesson repeating in advance:
-  documenting a rule is not the same as enforcing it**, and G29 shipped with
-  two live violations of its own rule still in the tree. If you are editing
-  any of those six paths for another reason, bound the read while you are
-  there; do not leave this entry describing a tree that mostly violates it.
-  (Note the ceiling differs per path — a CSV or archive import has no
-  `MAX_COVER_SIZE` to reuse and needs one chosen deliberately.)
-- **Verify:** the count of unbounded reads must go **down**, never up. Seven
-  as of 2026-08-25:
+- **Four call sites still carry the unbounded shape, and this entry was
+  written knowing it** — the cover uploads at `app/routers/items.py:797` and
+  `:1173`, the **photo-intake upload at `intake.py:101`** (the largest payload
+  of the set, and the one a first pass at this entry missed), and the DB
+  restore at `settings.py:325` (lines as of 2026-09-23). The archive imports
+  were bounded by plan-soft-delete-export, and the CSV import before it. All were out of `feat/cover-picker`'s scope. **This is
+  G29's lesson repeating in advance: documenting a rule is not the same as
+  enforcing it**, and G29 shipped with two live violations of its own rule
+  still in the tree. If you are editing any of those four paths for another
+  reason, bound the read while you are there; do not leave this entry
+  describing a tree that mostly violates it. (Note the ceiling differs per
+  path — a CSV or archive import has no `MAX_COVER_SIZE` to reuse and needs
+  one chosen deliberately.)
+- **Verify:** the count of unbounded reads must go **down**, never up. Four
+  as of 2026-09-23:
 
 ```bash
 grep -rn 'await [a-z_]*\.read()' app/routers/ | grep -vc 'read([^)]'
@@ -4913,7 +4924,12 @@ EOF
   alone). Each entry's comment says it is **not** the UNIQUE-prediction class,
   because the list reads as uniform and a reader generalising from its
   neighbours would "fix" one by repointing it at the view.
-  (`feat/soft-delete-collisions`, 2026-09-21.)
+  (`feat/soft-delete-collisions`, 2026-09-21.) The class grew with
+  `feat/soft-delete-export` (2026-09-23): the two portable exports that carry
+  Trash (the archive's item and copy reads, the CSV export's editor/admin
+  branch) and the archive import's trashed-twin lookup, whose title/author
+  base is covered by no constraint at all. Take the current count from
+  `scripts/check_items_live.py`, never from prose (G105).
 - **Why:** the failure is a 500 on a path that has a designed, friendly refusal
   a few lines away, and it cannot happen until something starts writing
   `deleted_at` — so it ships green and surfaces in the plan *after* the one that

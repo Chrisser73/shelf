@@ -9,9 +9,11 @@ All under Settings → Data. Four mechanisms, each for a different job.
 | **Portable archive** | Moving Shelf to a new server, giving someone your library | **Yes** | No |
 | **Database backup** | Disaster recovery of *this* instance | No | Yes (hashed/encrypted) |
 
-**Trash is carried by the database backup only.** The CSV export and the
-portable archive contain what is in your library, not what is in
-[Trash](items.md#trash); a later release will carry deleted items through both.
+**All three exports carry [Trash](items.md#trash).** The database backup,
+the CSV export and the portable archive each include the items you have
+deleted, marked as deleted. Importing a CSV or an archive puts them back in
+Trash, and **an import never moves a live item to Trash** — see
+[What an import does with Trash](#what-an-import-does-with-trash).
 
 ## CSV export
 
@@ -19,7 +21,7 @@ portable archive contain what is in your library, not what is in
 
 `title, authors, isbn, media_type, platform, publisher, publish_year,
 page_count, series_name, location, source, estimated_value, manual_value,
-owned, wishlisted, tags`
+owned, wishlisted, deleted, tags`
 
 `owned` and `wishlisted` are each `1` or `0`, so the file records all three
 states: owned (`1`, `0`), on your wishlist (`0`, `1`) and neither (`0`, `0`).
@@ -27,7 +29,13 @@ Re-importing the file into an empty library brings all three back.
 
 `tags` holds the item's tags, separated by `; `.
 
-Items in [Trash](items.md#trash) are not exported.
+`deleted` is `1` for an item in [Trash](items.md#trash) and `0` for
+everything else. **The export includes the items in Trash**, marked only by
+that column — so if you feed the file to a spreadsheet or another tracker,
+filter on `deleted = 0` first. A viewer's export leaves them out (every
+`deleted` cell is `0`), because a viewer cannot see Trash anywhere else
+either. A CSV carries no copies, so a copy you removed on its own is not in
+the file at all.
 
 ## CSV import
 
@@ -81,7 +89,15 @@ not owned, and every other new row arrives owned.
 **A row that matches an item in Trash restores it** — it comes back as it
 was, is counted as restored in the summary, and then Skip or Update applies to
 it like any other match. Re-importing a file never adds a second copy of
-something you deleted.
+something you deleted. The one exception is a row whose own `deleted` cell is
+`1`: that item is left in Trash — see
+[What an import does with Trash](#what-an-import-does-with-trash).
+
+**The `deleted` column.** A row with `deleted` set to `1` that matches
+nothing is added straight to Trash, and counted as "To Trash" in the summary.
+A blank cell, `0`, or a file with no `deleted` column at all means the row is
+live — so every CSV written before Shelf had this column imports exactly as
+it did, with every row live.
 
 Those are the only two. Any other value is refused outright: the whole file is
 rejected with an error, before it is read, and nothing is written.
@@ -144,8 +160,13 @@ are planned.
 series, reading log, checkouts, **your physical copies**, **which items are
 on your wishlist** and **the cover images**. No users, passwords, API
 credentials, settings or certificates — so it's safe to hand to someone else
-or keep in a shared drive. Items in [Trash](items.md#trash), and copies
-removed on their own, are left out.
+or keep in a shared drive.
+
+**The archive includes [Trash](items.md#trash)** — the items you deleted and
+the copies you removed on their own, each with the date it was deleted.
+Imported into a new install, they arrive in Trash with those same dates, so
+nothing gets extra time before Trash empties it. A copy the archive says was
+removed is never made an item's main copy.
 
 Three things to know about how copies come back:
 
@@ -174,14 +195,22 @@ And two about tags:
   the import's errors; the `book` imports normally.
 
 **Import** is a two-step: upload, then a **preview** shows how many items are
-new, how many you already have, and how each duplicate was matched
-(exactly on ISBN, or heuristically on title + author). You can uncheck parts
-of the archive — leave out loans, say — before **Apply** writes anything.
+new (and how many of those go straight into Trash), how many you already
+have, how each duplicate was matched (exactly on ISBN, or heuristically on
+title + author), and **how many items in your Trash it will restore**. You
+can uncheck parts of the archive — leave out loans, say — before **Apply**
+writes anything. Restores are covered by the same checkbox as new items.
+
+A restored item keeps its own details, copies, reading log and loans; the
+archive adds its tags, and its cover only if the item has none. The archive
+is **not an undo**: it never brings back history that was deleted along with
+an item.
 Covers come from the zip, so a 2,000-item import doesn't make 2,000
 requests to Open Library.
 
 An archive from a newer Shelf than yours is refused with a clear message —
-upgrade first.
+upgrade first. An archive from an older Shelf, written before archives
+carried Trash, imports with every item live.
 
 A row whose ISBN isn't valid — an archive exported before Shelf stopped
 storing Audiobookshelf ASINs as ISBNs will carry some — is imported
@@ -191,6 +220,22 @@ refused and named in the same report; the rest of the archive still applies.
 An item is checked in full before any of it is written, so a refused item is
 skipped whole — it never leaves a half-written record, copy or location behind
 while the report says it failed.
+
+## What an import does with Trash
+
+The CSV import and the archive import follow one rule:
+
+| The file says the item is… | Your library has… | Result |
+|---|---|---|
+| live | no match | added |
+| deleted | no match | added **to Trash** |
+| live | a match in Trash | **restored** from Trash |
+| deleted | a match in Trash | left in Trash, unchanged |
+| either | a live match | Skip or Update as usual — **never moved to Trash** |
+
+The last row matters most. Importing last month's file in Update mode will
+not delete everything you have restored since: an import can bring an item
+out of Trash, but it never puts a live one in.
 
 ## Database backup & restore
 

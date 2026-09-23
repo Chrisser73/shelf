@@ -544,7 +544,13 @@ document.addEventListener('alpine:init', function () {
             importCount() {
                 if (!this.plan) { return 0; }
                 var n = 0;
-                if (this.selCreates) { n += this.plan.summary.create; }
+                if (this.selCreates) {
+                    n += this.plan.summary.create;
+                    // A restore is gated by the same "new items" toggle as a
+                    // create — || 0 so a response from before `restore`
+                    // existed still counts correctly.
+                    n += this.plan.summary.restore || 0;
+                }
                 if (this.selUpdates && this.planMode === 'update') { n += this.plan.summary.update; }
                 return n;
             },
@@ -553,13 +559,36 @@ document.addEventListener('alpine:init', function () {
                 return 'Import ' + this.plural(this.importCount(), 'item');
             },
 
+            // Whether the "Include" section's new-items checkbox shows at
+            // all — a restore-only archive (nothing to create) still needs
+            // it, since a restore is gated by the same selCreates toggle.
+            showCreatesCheckbox() {
+                if (!this.plan) { return false; }
+                var s = this.plan.summary;
+                return s.create > 0 || (s.restore || 0) > 0;
+            },
+
+            // "3 new items", "3 new items, 1 restored from Trash", or
+            // "1 restored from Trash" — the label for showCreatesCheckbox().
+            createsLabel() {
+                if (!this.plan) { return ''; }
+                var s = this.plan.summary;
+                var parts = [];
+                if (s.create > 0) { parts.push(this.plural(s.create, 'new item')); }
+                if (s.restore) { parts.push(s.restore + ' restored from Trash'); }
+                return parts.join(', ');
+            },
+
             // "494 new, 168 already in your library (skipped), 3 to update"
             verdictSentence() {
                 if (!this.plan) { return ''; }
                 var s = this.plan.summary;
-                var parts = [s.create + ' new'];
+                var newPart = s.create + ' new';
+                if (s.create_in_trash) { newPart += ' (' + s.create_in_trash + ' into Trash)'; }
+                var parts = [newPart];
                 if (s.skip) { parts.push(s.skip + ' already in your library (skipped)'); }
                 if (s.update) { parts.push(s.update + ' to update'); }
+                if (s.restore) { parts.push(s.restore + ' to restore from Trash'); }
                 return parts.join(', ');
             },
 

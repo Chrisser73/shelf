@@ -26,6 +26,27 @@ Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
 
+### After upgrading to 0.49.0
+
+**Exports now include Trash.** The CSV export gains a `deleted` column, and
+the portable archive carries the items and copies in Trash with the dates they
+were deleted. Importing either puts them back in Trash; an import never moves
+a live item to Trash. A viewer's CSV export still leaves Trash out. See
+[Import & export](user-guide/import-and-export.md#what-an-import-does-with-trash).
+
+**The archive format is now version 2.** An older Shelf refuses a version 2
+archive with its "upgrade Shelf" message, so upgrade the receiving install
+first. Version 1 archives, taken before this upgrade, still import — every
+item in them arrives live.
+
+**The archive is still not an undo.** Importing an archive restores an item
+you have since moved to Trash, but it adds none of the archive's reading log
+or loans to an item that is already there — history that was lost stays lost.
+Trash itself is the way to undo a delete, and a database backup is the way to
+undo anything else.
+
+**No migrations run.**
+
 ### After upgrading to 0.46.0
 
 **Delete now moves things to Trash.** Deleting an item — from its page, from
@@ -46,7 +67,8 @@ deleted automatically.
 **No migrations run.** The columns Trash uses shipped earlier, empty.
 
 **Exports leave Trash out.** The CSV export and the portable archive contain
-only what is not in Trash; the database backup carries everything.
+only what is not in Trash; the database backup carries everything. (0.49.0
+adds Trash to both — see above.)
 
 ### After upgrading to 0.43.0
 

@@ -99,7 +99,7 @@ async def import_archive(request: Request, _=Depends(require_role("admin"))):
     if not upload or not hasattr(upload, "read"):
         return _refusal("No file uploaded")
 
-    content = await upload.read()
+    content = await upload.read(MAX_IMPORT_UPLOAD_SIZE + 1)
     if len(content) > MAX_IMPORT_UPLOAD_SIZE:
         return _refusal(
             f"Archive is too large (max {MAX_IMPORT_UPLOAD_SIZE // (1024 * 1024)} MB)."
@@ -137,7 +137,7 @@ async def plan_archive_import(request: Request, _=Depends(require_role("admin"))
     if not upload or not hasattr(upload, "read"):
         return _refusal("No file uploaded")
 
-    content = await upload.read()
+    content = await upload.read(MAX_IMPORT_UPLOAD_SIZE + 1)
     if len(content) > MAX_IMPORT_UPLOAD_SIZE:
         return _refusal(
             f"Archive is too large (max {MAX_IMPORT_UPLOAD_SIZE // (1024 * 1024)} MB)."

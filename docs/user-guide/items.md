@@ -271,9 +271,12 @@ Scanning or adding something that is in Trash restores it rather than making a
 duplicate. The existing-item scan modes do not: they report it as *In Trash*
 and offer **Restore** — see [Scanning](scanning.md).
 
-Trash is not carried by the CSV export or the portable archive yet — both
-contain only what is not in Trash. The database backup (Settings → Data)
-carries everything, Trash included.
+Trash is carried by every export. The database backup (Settings → Data)
+carries everything; the CSV export marks items in Trash with its `deleted`
+column; and the portable archive carries items and copies in Trash with the
+dates they were deleted. Importing a CSV or an archive puts them back in
+Trash, and never moves a live item there — see
+[Import & export](import-and-export.md#what-an-import-does-with-trash).
 
 ## Video games
 

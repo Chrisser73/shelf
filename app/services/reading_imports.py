@@ -19,6 +19,9 @@ Each normalizer returns the shelf-native shape consumed by the CSV import:
         "date_finished": str | None,    # ISO date
         "owned": bool | None,        # generic: None when absent/blank
         "wishlisted": bool | None,   # generic only; None when absent/blank
+        "deleted": bool | None,      # generic only; None when absent/blank —
+                                      # Goodreads/StoryGraph emit None, since
+                                      # neither tracker has a Trash concept.
         "tags": list[str],           # generic only; [] when absent/blank —
                                       # Goodreads/StoryGraph emit no "tags"
                                       # key at all, so callers must read
@@ -163,6 +166,7 @@ def normalize_goodreads(row: dict) -> dict:
         "owned": (row.get("owned_copies") or "").strip().isdigit()
                  and int(row["owned_copies"]) > 0,
         "wishlisted": None,  # generic-only column; Goodreads has no equivalent
+        "deleted": None,  # generic-only column; Goodreads has no Trash concept
     }
 
 
@@ -186,6 +190,7 @@ def normalize_storygraph(row: dict) -> dict:
         # Only an explicit "No" marks the book as not owned (wishlist)
         "owned": owned_raw != "no",
         "wishlisted": None,  # generic-only column; StoryGraph has no equivalent
+        "deleted": None,  # generic-only column; StoryGraph has no Trash concept
     }
 
 
@@ -219,6 +224,10 @@ def normalize_generic(row: dict) -> dict:
         # column is absent or blank; items_csv.py applies the defaults.
         "owned": _parse_flag(row.get("owned")),
         "wishlisted": _parse_flag(row.get("wishlisted")),
+        # Absent, blank and "0" all mean live (G87 via _parse_flag), so every
+        # export written before the `deleted` column still imports every row live
+        # (G101's old-file rule).
+        "deleted": _parse_flag(row.get("deleted")),
         "tags": tags,
     }
 

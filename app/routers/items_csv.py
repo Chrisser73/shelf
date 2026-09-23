@@ -35,22 +35,34 @@ router = APIRouter(prefix="/api")
 MAX_CSV_UPLOAD_SIZE = 50 * 1024 * 1024
 
 @router.get("/export/csv")
-async def export_csv(_=Depends(require_role("viewer"))):
+async def export_csv(user=Depends(require_role("viewer"))):
     import csv
     import io
     from fastapi.responses import StreamingResponse
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value", "owned", "wishlisted", "tags"])
+    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value", "owned", "wishlisted", "deleted", "tags"])
 
+    # editor/admin exports carry Trash; the Trash page itself is editor+, so
+    # a viewer export must not become the one place a viewer sees a trashed
+    # row (design plan-soft-delete-export, Decision 1). Both branches write
+    # the same `deleted` cell shape below — a viewer's is just always 0.
     with get_db() as db:
-        rows = db.execute(
-            f"SELECT i.*, l.name as location_name, {lists.WISHLISTED_SQL} AS wishlisted "
-            "FROM items_live i "
-            "LEFT JOIN locations l ON i.location_id = l.id "
-            "ORDER BY i.title"
-        ).fetchall()
+        if user["role"] in ("editor", "admin"):
+            rows = db.execute(
+                f"SELECT i.*, l.name as location_name, {lists.WISHLISTED_SQL} AS wishlisted "
+                "FROM items i "
+                "LEFT JOIN locations l ON i.location_id = l.id "
+                "ORDER BY i.title"
+            ).fetchall()
+        else:
+            rows = db.execute(
+                f"SELECT i.*, l.name as location_name, {lists.WISHLISTED_SQL} AS wishlisted "
+                "FROM items_live i "
+                "LEFT JOIN locations l ON i.location_id = l.id "
+                "ORDER BY i.title"
+            ).fetchall()
         # One grouped query for the whole result set — never a per-row query.
         tags_by_item = tags_svc.tags_for_items(db, [row["id"] for row in rows])
 
@@ -61,6 +73,7 @@ async def export_csv(_=Depends(require_role("viewer"))):
             row["series_name"], row["location_name"], row["source"],
             row["estimated_value"], row["manual_value"],
             row["owned"], 1 if row["wishlisted"] else 0,
+            1 if row["deleted_at"] else 0,
             "; ".join(tags_by_item.get(row["id"], [])),
         ])
 
@@ -117,6 +130,7 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
     imported = 0
     skipped = 0
     restored = 0
+    trashed = 0
     errors = []
     new_item_ids: list[int] = []
     # Keyed ('isbn', isbn, media) or ('title', title, authors, media) — the
@@ -233,6 +247,11 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                         continue
                     seen_in_file.add(file_key)
 
+                # Whether the file itself marks this row deleted (the CSV's
+                # own `deleted` column, generic-only — None on a
+                # reading-tracker row, which has no Trash concept).
+                incoming_deleted = bool(norm.get("deleted"))
+
                 if existing:
                     # A trashed hit is restored before anything else about
                     # this row is decided — it must be the row's first write
@@ -241,8 +260,22 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     # at the end, so nothing after this call may raise for a
                     # reason a pre-check above could already have caught.
                     if existing["deleted_at"] is not None:
+                        if incoming_deleted:
+                            # The file and the database already agree this
+                            # row is gone — leave it alone. Restoring it
+                            # would fight the very state the column exists
+                            # to carry, so this is neither a restore nor an
+                            # update; it is counted with the rows that
+                            # caused no write at all.
+                            skipped += 1
+                            continue
                         item_write.restore_item(db, existing["id"])
                         restored += 1
+                    # A live hit is never trashed by an import, regardless of
+                    # what the incoming row's `deleted` column says (the
+                    # safety property) — `incoming_deleted` plays no further
+                    # part below; the skip/update path runs exactly as it
+                    # does for a row that has no opinion on Trash at all.
                     if mode == "skip":
                         # Restored or not, a skip-mode hit leaves the row's
                         # own fields untouched — restore_item only clears
@@ -308,12 +341,26 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     owned=int(owned),
                     wishlisted=wishlisted,
                     source=source,
+                    # No hit in the database: a row the file marks deleted
+                    # is created directly rather than resurrected, so a
+                    # trashed twin that this row's own dedup keys somehow
+                    # missed is refused, not restored, on this path.
+                    restore_trashed=not incoming_deleted,
                 )
                 if norm.get("tags"):  # additive only — see the update path's comment
                     tags_svc.attach_tags(db, new_id, norm["tags"])
-                if isbn_val:
-                    new_item_ids.append(new_id)
-                imported += 1
+                if incoming_deleted:
+                    # G85: nothing that can raise sits between the insert
+                    # and this write — the tag attach above is the only
+                    # thing in between, and it cannot fail on a row this
+                    # loop just created. Trashed "now": a CSV row carries no
+                    # deletion timestamp of its own.
+                    item_write.trash_item(db, new_id)
+                    trashed += 1
+                else:
+                    if isbn_val:
+                        new_item_ids.append(new_id)
+                    imported += 1
             except ItemValueError as e:
                 errors.append(f"Row {i}: {e}")
             except Exception as e:
@@ -328,12 +375,21 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
         asyncio.create_task(items_common._enrich_import_covers(eligible))
 
     return {
+        # `imported`, `skipped`, `restored` and `trashed` partition every row
+        # that reached a decision (a row that raised before one is in
+        # `errors` instead, never in these four): imported (created live, or
+        # a live hit updated), skipped (a live hit in skip mode, an in-file
+        # duplicate, or an already-trashed row the file also marks deleted),
+        # restored (a trashed hit the file's row says is live again), and
+        # trashed (no hit, and the file's own row says it is deleted — see
+        # `incoming_deleted` above).
         "imported": imported,
         "skipped": skipped,
         # Disjoint from `imported`/`skipped`: a restored row is counted here
         # only, even when update mode refreshes it after restoring, and it is
         # never `skipped` — something was written to it.
         "restored": restored,
+        "trashed": trashed,
         # `errors` is capped for the wire; `error_count` is the true total, so
         # the UI can list twenty of thirty-seven and still say thirty-seven.
         "errors": errors[:20],

@@ -246,6 +246,13 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         "SELECT id, deleted_at FROM items WHERE TRIM(title) = TRIM(?) COLLATE NOCASE AND "
         "TRIM(COALESCE(authors, '')) = TRIM(?) COLLATE NOCASE AND media_type = ? AND "
         "(isbn IS NULL OR isbn = '') ORDER BY deleted_at IS NOT NULL, id LIMIT 1": 1,
+        # export_csv's editor/admin branch — the CSV export carries Trash for
+        # editor/admin (design plan-soft-delete-export). The viewer branch
+        # stays on items_live, so this text spans only the physical-table
+        # read a non-viewer export takes.
+        "SELECT i.*, l.name as location_name, {lists.WISHLISTED_SQL} AS wishlisted "
+        "FROM items i LEFT JOIN locations l ON i.location_id = l.id "
+        "ORDER BY i.title": 1,
     },
     "app/routers/item_copies.py": {
         # _barcode_conflict — copy_barcode is UNIQUE collection-wide, so this
@@ -255,6 +262,32 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         # this conflict response.
         "SELECT c.id AS copy_id, c.item_id, i.title FROM item_copies c "
         "JOIN items i ON i.id = c.item_id WHERE c.copy_barcode = ?": 1,
+    },
+    "app/services/archive.py": {
+        # _build_items — the portable archive carries Trash — design
+        # plan-soft-delete-export. A trashed item's row must be seen so it is
+        # exported (and so id_map carries it, dragging its tags/reading
+        # log/checkouts along).
+        "FROM items i LEFT JOIN locations ON locations.id = i.location_id "
+        "ORDER BY i.id": 1,
+        # plan_archive's and apply_plan's pre-import bound — one statement
+        # text, two reads. Physical so a trashed row whose id is above the
+        # live maximum is still inside the bound the trashed-twin lookup
+        # below uses; through the view it would be invisible to it.
+        "SELECT COALESCE(MAX(id), 0) AS m FROM items": 2,
+        # _trashed_twin_lookup — finds the row the view hides, so an archive
+        # record can be classified `restore` (or left alone in Trash) before
+        # anything is written (G85). NOT a UNIQUE-prediction read: the
+        # title/author base is covered by no constraint at all, and all three
+        # exist to find a trashed row, not to foresee a collision (G107).
+        "SELECT id, cover_path FROM items WHERE isbn = ? AND media_type = ? "
+        "AND deleted_at IS NOT NULL AND id <= ? ORDER BY id LIMIT 1": 1,
+        "SELECT id, cover_path FROM items WHERE upc = ? AND media_type = ? "
+        "AND deleted_at IS NOT NULL AND id <= ? ORDER BY id LIMIT 1": 1,
+        "SELECT id, cover_path FROM items WHERE (isbn IS NULL OR isbn = '') "
+        "AND media_type = ? AND title = ? COLLATE NOCASE "
+        "AND COALESCE(authors, '') = ? COLLATE NOCASE "
+        "AND deleted_at IS NOT NULL AND id <= ? ORDER BY id LIMIT 1": 1,
     },
 }
 
@@ -353,6 +386,13 @@ COPIES_ALLOWLIST: dict[str, dict[str, int]] = {
         # Archive import — same copy_barcode UNIQUE conflict check as
         # _barcode_conflict above, on the import path instead of the API.
         "SELECT item_id FROM item_copies WHERE copy_barcode = ?": 1,
+        # _copies_by_item — the portable archive carries Trash — design
+        # plan-soft-delete-export. A trashed item's trashed copies must be
+        # seen so they are exported too (they are already demoted, so no
+        # further transform is needed).
+        "c.deleted_at AS deleted_at FROM item_copies c LEFT JOIN locations "
+        "ON locations.id = c.location_id "
+        "ORDER BY c.item_id, c.copy_number, c.id": 1,
     },
 }
 

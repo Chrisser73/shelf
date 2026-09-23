@@ -434,13 +434,22 @@ def _settle_after_removal(db, item_id: int, was_primary: bool) -> dict[str, Any]
     }
 
 
-def trash_copy(db, copy_id: int) -> dict[str, Any] | None:
+def trash_copy(db, copy_id: int, *, at: str | None = None) -> dict[str, Any] | None:
     """Move one physical copy to Trash, promoting a survivor when it was primary.
 
     Returns `None` when the copy is not live. Otherwise a dict the caller can
     render from: `item_id`, `was_primary`, `promoted_copy_id` (the survivor
     that inherited primary, or `None`) and `remaining` (how many live copies
     the item has left).
+
+    `at`, when given, replaces the current time as the value written into
+    `deleted_at` (via `COALESCE(?, datetime('now'))`), in the same statement
+    as the demote. This funnel does not validate it — it is trusted verbatim.
+    The one caller that will ever pass a non-None value is the archive
+    import, replaying a source's own deletion timestamp so the retention
+    clock does not restart on re-import; that caller validates `at` before
+    this function's first write. Every existing caller passes nothing, and
+    gets `datetime('now')` exactly as before.
 
     Three outcomes, and the seam moves in two of them:
 
@@ -483,9 +492,9 @@ def trash_copy(db, copy_id: int) -> dict[str, Any] | None:
     item_id = copy["item_id"]
     was_primary = bool(copy["is_primary"])
     db.execute(
-        "UPDATE item_copies SET deleted_at = datetime('now'), is_primary = 0, "
-        "updated_at = datetime('now') WHERE id = ?",
-        (copy_id,),
+        "UPDATE item_copies SET deleted_at = COALESCE(?, datetime('now')), "
+        "is_primary = 0, updated_at = datetime('now') WHERE id = ?",
+        (at, copy_id),
     )
     trash.invalidate(db)
     return _settle_after_removal(db, item_id, was_primary)

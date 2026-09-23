@@ -193,7 +193,8 @@ the item page, the shelf audit (`/api/inventory/missing`), Scan's Inventory and
 Lookup modes, and the portable archive all read the copies relation rather than
 the seam, because a merged item legitimately has copies in two rooms and the
 seam names only one. (They read it through `copies_live`, not the physical
-table — see the read invariant below.)
+table — see the read invariant below — except the archive export, which carries
+Trash and so reads the physical table.)
 Where an item has no copy rows at all — the conservative backfill leaves
 wishlist rows without one — those readers fall back to the seam, which is then
 the only answer there is. Browse, Scan's Move mode, the valuation report and
@@ -1208,11 +1209,17 @@ a trashed row:
 The `sqlite3.IntegrityError` handlers at the add routes therefore mean what
 their comments say again — a lost race, not a trashed twin.
 
-Three places cannot reach the funnel's rule and carry it themselves. Music's
+Four places cannot reach the funnel's rule and carry it themselves. Music's
 and periodicals' earliest duplicate guards read a child table with no items
 join, so they restore at that guard, before a redirect to a page that would
 bounce to Browse. CSV import's dedup reads find an existing row directly — no
-`INSERT` to fold into — and restore it there. And the external-id matchers of
+`INSERT` to fold into — and restore it there. The portable archive import
+classifies every record before it writes anything (`_classify` in
+`services/archive.py`, shared by the plan and apply stages): a live record
+whose twin is in Trash gets a **`restore`** verdict, found by its own physical
+lookup over ISBN, UPC *and* title/author — the funnel keys on ISBN and UPC
+only, so an ISBN-less record would otherwise land as a second live row beside
+its trashed twin. And the external-id matchers of
 the four syncs (Audiobookshelf's `abs_id`, Komga's and RomM's record tables,
 Hardcover's `hardcover_book_id`) read the physical relation so a trashed twin
 is *seen* and skipped, counted as `in_trash`: through the view, an ISBN-less
@@ -1231,11 +1238,21 @@ one of two equal matches and re-importing resurrects the deleted one.
 / `restore_item` and `item_copies.trash_copy` / `restore_copy` — and both
 funnels refuse it as a caller-supplied field name, so it cannot be reached
 through `update_item_fields` either. A source pin in `tests/test_item_write.py`
-holds the four-function claim by enclosing function, not by file. Three routes
+holds the four-function claim by enclosing function, not by file. Four routes
 put rows into Trash — the item delete (`routers/items.delete_item`, also what
-Browse's bulk delete loops over), Remove copy (`routers/item_copies`) and the
-Audiobookshelf excluded-library cleanup (`routers/sync`) — and
-`tests/test_trash_funnel.py` pins exactly those three. None of them touches
+Browse's bulk delete loops over), Remove copy (`routers/item_copies`), the
+Audiobookshelf excluded-library cleanup (`routers/sync`) and CSV import, for a
+row its file marks `deleted` (`routers/items_csv`) — and
+`tests/test_trash_funnel.py` pins exactly those four. The archive import is the
+fifth caller, from `services/archive.py`: a record in its source's Trash is
+created and then trashed with the source's own date, which is what
+`trash_item`'s and `trash_copy`'s optional `at` exists for (validated first: a
+malformed or future date means "now"). Carrying `deleted_at` is also why the
+archive's `FORMAT_VERSION` is 2 — an older reader refuses the archive rather
+than importing its Trash as live rows; a version 1 archive imports every row
+live. **No import ever
+trashes a row that was live before it ran** — a record that matches a live
+item is skipped or updated whatever its file says. None of them touches
 `scan_log`: the link survives, recent scans join `items_live`, and a restore
 re-links it for free.
 
@@ -1303,7 +1320,7 @@ Two details decide whether the guard actually guards:
 
 Some reads stay on the physical tables, each allowlisted by repository-relative
 path — never by basename — with its reason at the entry. On the **items** side,
-30 entries excusing 32 reads:
+36 entries excusing 39 reads:
 
 - the `items_live` CREATE in `get_db()` itself — the seam reads the physical
   table by definition, and so does the `copies_live` CREATE, which joins `items`;
@@ -1333,9 +1350,17 @@ path — never by basename — with its reason at the entry. On the **items** si
 - the Trash service (`services/trash.py`) — the expired count and the ids Empty
   expired purges, `copy_state` (which tells `restore_copy`'s three `None`
   outcomes apart), `purge_item`'s guard and the Trash page's listing. Trash is
-  the one surface whose whole job is the rows the views hide.
+  the one surface whose whole job is the rows the views hide;
+- the two portable exports, which carry Trash: the archive's item read
+  (`services/archive.py`) and the CSV export's editor/admin branch
+  (`routers/items_csv.py` — a viewer's export stays on `items_live`, because
+  the Trash page is editor-only);
+- the archive import's trashed-twin lookup (`services/archive.py`, three
+  statements: ISBN, UPC, title/author) and its pre-import `MAX(id)` bound, one
+  statement text read by both the plan and apply stages. The bound is physical
+  so a trashed row numbered above the live maximum is still inside it.
 
-On the **copies** side, 15 entries excusing 15 reads. **Eight are one class: a
+On the **copies** side, 16 entries excusing 16 reads. **Eight are one class: a
 read that exists to predict a UNIQUE violation reads the physical table,
 because the constraint does.** A trashed row still occupies its unique slot, so
 a guard asking "will this insert collide?" must see trashed rows or it predicts
@@ -1356,13 +1381,14 @@ classes** — `add_copy` reads the highest `copy_number` (predicts the constrain
 and whether the item has any copy at all (an ordinary read) and is therefore
 split in two, the `MAX` on `item_copies` and the `COUNT(*)` on `copies_live`.
 
-**The other seven are a different class, and say so at their entries**, because
+**The other eight are a different class, and say so at their entries**, because
 a reader who generalises the rule above would "fix" them by repointing them at
 the view. All read the physical table to find a row the view deliberately
 hides, and none predicts a constraint: `restore_copy` and `purge_copy`
 (`services/item_copies.py`), which have to start from the trashed copy they act
-on; the four Trash service reads above that join copies; and
-`_reparent_copies`' row-selection read
+on; the four Trash service reads above that join copies; the archive export's
+`_copies_by_item` (`services/archive.py`), which carries trashed copies into the
+archive; and `_reparent_copies`' row-selection read
 (`services/item_merge.py`), which moves a merged item's trashed copies onto the
 keeper — through the view they would stay parented to the husk and be destroyed
 by its `ON DELETE CASCADE`, losing a restorable row for good.

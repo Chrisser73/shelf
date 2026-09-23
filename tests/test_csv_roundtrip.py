@@ -37,9 +37,9 @@ def _count(db):
 
 
 class TestWishlistedColumn:
-    def test_header_ends_owned_wishlisted_tags(self, admin_client):
+    def test_header_ends_owned_wishlisted_deleted_tags(self, admin_client):
         header = _export(admin_client).splitlines()[0]
-        assert header.split(",")[-3:] == ["owned", "wishlisted", "tags"]
+        assert header.split(",")[-4:] == ["owned", "wishlisted", "deleted", "tags"]
 
     def test_wishlist_item_exports_one_owned_item_exports_zero(self, admin_client, db):
         _insert_item(db, title="Owned Book", isbn="9780441013593", media_type="book", owned=1)
@@ -59,7 +59,7 @@ class TestOwnershipStatesRoundTrip:
 
     def test_header_carries_owned_before_wishlisted(self, admin_client):
         header = _export(admin_client).splitlines()[0]
-        assert header.split(",")[-3:] == ["owned", "wishlisted", "tags"]
+        assert header.split(",")[-4:] == ["owned", "wishlisted", "deleted", "tags"]
 
     def test_all_three_states_survive_into_a_fresh_library(self, admin_client, db):
         from app.services import lists
@@ -88,6 +88,61 @@ class TestOwnershipStatesRoundTrip:
         assert state("State Wished") == (0, True)
         assert state("State Neither") == (0, False)
         _assert_ownership_partition(db)
+
+
+class TestDeletedColumn:
+    """T3: the `deleted` column carries Trash state for editor/admin exports.
+    A viewer export omits the trashed row entirely and its `deleted` cells
+    are all 0 — the Trash page is editor+, and the CSV must not be the one
+    place a viewer sees a trashed row (design plan-soft-delete-export,
+    Decision 1). The file shape (17 columns) is identical for every role."""
+
+    def _seed_live_and_trashed(self, db):
+        from app.services import item_write
+        from app.services import tags as tags_svc
+
+        live_id = _insert_item(db, title="Live Book", isbn="9780441013593", media_type="book")
+        trashed_id = _insert_item(db, title="Trashed Book", isbn="9780553283686", media_type="book")
+        db.commit()
+        tags_svc.attach_tags(db, trashed_id, ["Signed"])
+        item_write.trash_item(db, trashed_id)
+        db.commit()
+        return live_id, trashed_id
+
+    def test_admin_export_includes_trashed_row_with_deleted_flag_and_tags(self, admin_client, db):
+        self._seed_live_and_trashed(db)
+
+        rows = list(csv.DictReader(io.StringIO(_export(admin_client))))
+        live_row = next(r for r in rows if r["title"] == "Live Book")
+        trashed_row = next(r for r in rows if r["title"] == "Trashed Book")
+
+        assert live_row["deleted"] == "0"
+        assert trashed_row["deleted"] == "1"
+        assert trashed_row["tags"] == "Signed"
+
+    def test_editor_export_includes_trashed_row_with_deleted_flag(self, editor_client, db):
+        self._seed_live_and_trashed(db)
+
+        rows = list(csv.DictReader(io.StringIO(_export(editor_client))))
+        live_row = next(r for r in rows if r["title"] == "Live Book")
+        trashed_row = next(r for r in rows if r["title"] == "Trashed Book")
+
+        assert live_row["deleted"] == "0"
+        assert trashed_row["deleted"] == "1"
+
+    def test_viewer_export_omits_trashed_row_and_keeps_the_seventeen_column_header(self, viewer_client, db):
+        self._seed_live_and_trashed(db)
+
+        exported = _export(viewer_client)
+        header = exported.splitlines()[0].split(",")
+        assert len(header) == 17
+        assert header[-4:] == ["owned", "wishlisted", "deleted", "tags"]
+
+        rows = list(csv.DictReader(io.StringIO(exported)))
+        titles = {r["title"] for r in rows}
+        assert "Trashed Book" not in titles
+        live_row = next(r for r in rows if r["title"] == "Live Book")
+        assert live_row["deleted"] == "0"
 
 
 class TestRoundTrip:

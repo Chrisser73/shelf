@@ -12,10 +12,16 @@ The source pin that holds the four-function claim lives in
 `tests/test_item_write.py::TestSingleWritePath`.
 """
 
+import re
+
 import pytest
 
 from app.services import item_copies, item_merge, item_write
 from app.services.item_write import insert_item
+
+#: `datetime('now')`'s own shape — used to pin the None-default case without
+#: coupling to the exact second it ran.
+_NOW_SHAPED = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 
 
 def _location(db, name="Living Room"):
@@ -187,6 +193,25 @@ class TestTrashItem:
 
         assert item_write.restore_item(db, item_id) is True
 
+    def test_an_explicit_at_is_stored_verbatim(self, db):
+        item_id = _item(db)
+
+        assert item_write.trash_item(db, item_id, at="2026-01-02 03:04:05") is True
+
+        assert db.execute(
+            "SELECT deleted_at FROM items WHERE id = ?", (item_id,)
+        ).fetchone()["deleted_at"] == "2026-01-02 03:04:05"
+
+    def test_no_at_stores_a_datetime_now_shaped_value(self, db):
+        item_id = _item(db)
+
+        assert item_write.trash_item(db, item_id) is True
+
+        stamp = db.execute(
+            "SELECT deleted_at FROM items WHERE id = ?", (item_id,)
+        ).fetchone()["deleted_at"]
+        assert _NOW_SHAPED.match(stamp), stamp
+
 
 class TestTrashCopy:
     def test_trashing_a_secondary_touches_nothing_else(self, db):
@@ -277,6 +302,23 @@ class TestTrashCopy:
         # The next copy numbers above it rather than reusing 2.
         third = item_copies.add_copy(db, item_id)
         assert _copy_row(db, third)["copy_number"] == 3
+
+    def test_an_explicit_at_is_stored_verbatim(self, db):
+        _item_id, only = _item_with_copy(db)
+
+        result = item_copies.trash_copy(db, only, at="2026-01-02 03:04:05")
+
+        assert result is not None
+        assert _copy_row(db, only)["deleted_at"] == "2026-01-02 03:04:05"
+
+    def test_no_at_stores_a_datetime_now_shaped_value(self, db):
+        _item_id, only = _item_with_copy(db)
+
+        result = item_copies.trash_copy(db, only)
+
+        assert result is not None
+        stamp = _copy_row(db, only)["deleted_at"]
+        assert _NOW_SHAPED.match(stamp), stamp
 
 
 class TestTheGeminiN1Contract:
@@ -460,16 +502,18 @@ class TestMergeReparentsTrashedCopies:
 
 
 class TestNoRouteCallsThem:
-    def test_only_the_three_soft_delete_sites_put_anything_into_trash(self):
-        """**Exactly three routes write `deleted_at` in the trashing
+    def test_only_the_named_soft_delete_sites_put_anything_into_trash(self):
+        """**Exactly four routes write `deleted_at` in the trashing
         direction** — the item delete (`items.py`), the Audiobookshelf
-        excluded-library cleanup (`sync.py`) and Remove copy
-        (`item_copies.py`).
+        excluded-library cleanup (`sync.py`), Remove copy (`item_copies.py`)
+        and the CSV importer's own-file-says-deleted row (`items_csv.py`,
+        soft-delete-export T6 — a row with no database hit and the file's
+        `deleted` column set lands straight in Trash, never as a live row
+        that a second pass would have to delete again).
 
         This test's earlier form said *no* route could; soft-delete-trash T4
-        flipped the delete sites and narrowed it to the named three. A fourth
-        caller is a new way into Trash and should be a decision, not a
-        drive-by.
+        flipped the delete sites and narrowed it to three. A fifth caller is
+        a new way into Trash and should be a decision, not a drive-by.
         """
         import ast
         from pathlib import Path
@@ -496,6 +540,7 @@ class TestNoRouteCallsThem:
             ("items.py", "trash_item"),
             ("sync.py", "trash_item"),
             ("item_copies.py", "trash_copy"),
+            ("items_csv.py", "trash_item"),
         }, f"the routes that put rows into Trash changed: {sorted(callers)}"
 
         # And the restore side is exactly these five routers, no more.

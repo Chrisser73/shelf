@@ -382,3 +382,83 @@ def test_archive_import_failure_reports_without_throwing(live_server, authed_pag
     expect(authed_page.locator(f"{_PANEL} p:has-text('Imported:')")).to_have_count(0)
 
     assert_page_clean(authed_page)
+
+
+def test_archive_reimport_restores_trashed_twin(live_server, authed_page):
+    """Export an archive while an item is live, trash that item through the
+    app's own delete route, then re-import the same archive: the preview
+    classifies the trashed twin as `restore` (not `create`) and says so, and
+    applying it brings the item back live — plan_soft_delete_export T8."""
+    item_id = _seed_item_with_cover(
+        live_server,
+        title="Restore From Trash Book",
+        media_type="book",
+        isbn="9780007779000",
+    )
+
+    _open_data_tab(authed_page, live_server)
+    zip_path = _download_archive(authed_page)
+
+    # Trash the item through the app's own delete route via the UI (G13) —
+    # never a raw DB write, since the archive's twin has to actually land in
+    # Trash for the restore path to be exercised.
+    authed_page.goto(f"{live_server['url']}/item/{item_id}")
+    authed_page.wait_for_load_state("networkidle")
+    messages = []
+    authed_page.once("dialog", lambda d: (messages.append(d.message), d.accept()))
+    delete_btn = authed_page.locator(
+        "button:has-text('Delete'), a:has-text('Delete'), [hx-delete], [data-testid='delete-btn']"
+    ).first
+    # Same shape as test_item_crud.py::test_item_delete: the DELETE answers
+    # 200 with a body, and app.js drives a *second*, JS-triggered navigation
+    # to /browse (data-after-request="goto-browse") — wait for that, not the
+    # response (G83).
+    with authed_page.expect_navigation():
+        delete_btn.click()
+    assert messages == ["Move 'Restore From Trash Book' to Trash?"], messages
+
+    # A trashed item's detail page redirects to /browse (app/routers/pages.py
+    # reads items_live).
+    authed_page.goto(f"{live_server['url']}/item/{item_id}")
+    authed_page.wait_for_load_state("networkidle")
+    assert authed_page.url.rstrip("/").endswith("/browse"), authed_page.url
+
+    # --- re-import the same archive: preview should offer a restore -------
+    _open_data_tab(authed_page, live_server)
+
+    file_input = authed_page.locator("input[type=file][accept='.zip']")
+    expect(file_input).to_be_visible()
+    form = file_input.locator("xpath=ancestor::form")
+    preview_btn = form.locator("button[type=submit], input[type=submit]").first
+    apply_btn = authed_page.locator(_PANEL).get_by_role("button", name=re.compile(r"^Import \d"))
+
+    file_input.set_input_files(str(zip_path))
+    with authed_page.expect_response("**/api/import/archive/plan") as resp_info:
+        preview_btn.click()
+    plan_result = resp_info.value.json()
+    assert plan_result.get("error") is None, plan_result
+    plan = plan_result["plan"]
+    assert plan["summary"]["restore"] >= 1, plan
+
+    expect(apply_btn).to_be_visible()
+    verdict_line = authed_page.locator(f"{_PANEL} p", has_text="This archive holds")
+    expect(verdict_line).to_contain_text("to restore from Trash")
+
+    # --- apply: the restore is included by default (selCreates) -----------
+    with authed_page.expect_response("**/api/import/archive/apply") as resp_info:
+        apply_btn.click()
+    apply_result = resp_info.value.json()
+    assert apply_result.get("error") is None, apply_result
+    assert apply_result["restored"] >= 1, apply_result
+
+    result_line = _result_text(authed_page)
+    m = re.search(r"Restored:\s*(\d+)", result_line)
+    assert m and int(m.group(1)) >= 1, result_line
+
+    # --- the item is live again ---------------------------------------------
+    authed_page.goto(f"{live_server['url']}/item/{item_id}")
+    authed_page.wait_for_load_state("networkidle")
+    assert authed_page.url.rstrip("/").endswith(f"/item/{item_id}"), authed_page.url
+    expect(authed_page.locator("body")).to_contain_text("Restore From Trash Book")
+
+    assert_page_clean(authed_page)

@@ -33,6 +33,7 @@ import zipfile
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 from app import config
 from app.services import isbn as isbn_svc
@@ -45,7 +46,7 @@ from app.services.item_write import insert_item, update_item_fields, was_restore
 logger = logging.getLogger(__name__)
 
 FORMAT_NAME = "shelf-archive"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 
 def archive_tmp_path() -> Path:
@@ -112,7 +113,21 @@ _COPY_TEXT_FIELDS = (
 def _copies_by_item(db) -> dict[int, list[dict]]:
     """Map real item id -> list of copy dicts, in copy_number/id order —
     one grouped query for the whole export, mirroring `_tags_by_item` so
-    `_build_items` stays free of an N+1 over item_copies."""
+    `_build_items` stays free of an N+1 over item_copies.
+
+    Reads the item_copies table directly, not its live view, so a trashed
+    item's trashed copies are exported too (allowlisted in
+    scripts/check_items_live.py — the portable archive carries Trash). A
+    trashed copy is already demoted (`is_primary = 0`, stamped in the same
+    statement that trashes it), so it is exported exactly as stored.
+
+    Each copy dict carries `deleted_at` **beside** the fields built from
+    `_COPY_FIELDS`, not inside that tuple: `_COPY_FIELDS` feeds
+    `item_copies.insert_copy`/`update_copy`, and both funnels refuse a
+    `deleted_at` key by name whatever its value, so adding it to the tuple
+    would fail every archive import (same reason `wishlisted` sits outside
+    `_ITEM_COLUMNS` in `_build_items`, below).
+    """
     rows = db.execute(
         "SELECT c.item_id AS item_id, "
         "c.copy_number AS copy_number, "
@@ -125,17 +140,52 @@ def _copies_by_item(db) -> dict[int, list[dict]]:
         "c.acquisition_price AS acquisition_price, "
         "c.provenance AS provenance, "
         "c.notes AS notes, "
-        "c.copy_barcode AS copy_barcode "
-        "FROM copies_live c LEFT JOIN locations "
+        "c.copy_barcode AS copy_barcode, "
+        "c.deleted_at AS deleted_at "
+        "FROM item_copies c LEFT JOIN locations "
         "ON locations.id = c.location_id "
         "ORDER BY c.item_id, c.copy_number, c.id"
     ).fetchall()
     out: dict[int, list[dict]] = {}
     for r in rows:
         copy = {field: r[field] for field in _COPY_FIELDS}
+        copy["deleted_at"] = r["deleted_at"]
         out.setdefault(r["item_id"], []).append(copy)
     return out
 
+
+
+_DELETED_AT_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+#: `_valid_deleted_at`'s answer for a record that is in Trash but whose own
+#: deletion date cannot be kept: it is trashed as of the import.
+DELETED_NOW = "now"
+
+
+def _valid_deleted_at(value) -> str | None:
+    """What an archive's `deleted_at` value means, checked before any write.
+
+    - `None` — absent or null: the row is live. A v1 archive has no such key
+      at all, so every one of its rows lands here (G87).
+    - the value itself — `YYYY-MM-DD HH:MM:SS`, SQLite's `datetime('now')`
+      shape, a real date, and not later than now (UTC, as SQLite stores it).
+      The source's deletion date survives, so the Trash retention clock does
+      not restart on a move to a new install.
+    - `DELETED_NOW` — anything else. The archive is untrusted: a malformed or
+      future value would otherwise set how long the row sits in Trash. The
+      row still goes to Trash, as its source said, dated now; the caller
+      reports it.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str) and _DELETED_AT_SHAPE.match(value):
+        try:
+            stamp = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return DELETED_NOW
+        if stamp <= datetime.now(timezone.utc).replace(tzinfo=None):
+            return value
+    return DELETED_NOW
 
 
 def _validated_copies(item: dict) -> list[dict] | None:
@@ -224,12 +274,24 @@ def _validated_copies(item: dict) -> list[dict] | None:
         copy = {field: entry.get(field) for field in _COPY_FIELDS}
         copy["copy_number"] = number
         copy["acquisition_price"] = price
-        copy["is_primary"] = 1 if entry.get("is_primary") else 0
+        # Beside the _COPY_FIELDS values, never among them: the copy funnels
+        # refuse the key by name. `_import_copies` replays it through
+        # `trash_copy` after the row is written.
+        copy["deleted_at"] = _valid_deleted_at(entry.get("deleted_at"))
+        # A trashed copy is never primary — `trash_copy` demotes in the same
+        # statement that stamps it, and an archive cannot say otherwise.
+        copy["is_primary"] = (
+            1 if entry.get("is_primary") and copy["deleted_at"] is None else 0
+        )
         out.append(copy)
 
     out.sort(key=lambda c: c["copy_number"])
-    if sum(c["is_primary"] for c in out) != 1:
-        for index, copy in enumerate(out):
+    # Repaired over the live copies only. An item whose copies are all in
+    # Trash has no primary, which is its source's own state after the last
+    # `trash_copy` (G86: a located item with no live copy is real).
+    live = [c for c in out if c["deleted_at"] is None]
+    if live and sum(c["is_primary"] for c in live) != 1:
+        for index, copy in enumerate(live):
             copy["is_primary"] = 1 if index == 0 else 0
     return out
 
@@ -252,12 +314,22 @@ def _import_copies(db, real_id: int, copies: list[dict] | None, get_location_id,
     A `copy_barcode` already used by another item is dropped and reported:
     the column is UNIQUE collection-wide, and losing a barcode is a far
     smaller loss than losing the copy.
+
+    A copy the archive has in Trash is written live, then moved to Trash by
+    `item_copies.trash_copy` with its own deletion date, in `copy_number`
+    order, once every copy is in place. Only that funnel stamps a copy, and
+    its `_settle_after_removal` owns the seam (G96, G107). The item must still
+    be live when that runs, so the caller trashes a deleted item afterwards.
+    An array with no live copy carries no primary, so the placeholder goes
+    first, exactly as it does for `[]`.
     """
     if copies is None:
         return
     if not copies:
         item_copies.delete_copies_for_item(db, real_id)
         return
+    if not any(c["is_primary"] for c in copies):
+        item_copies.delete_copies_for_item(db, real_id)
 
     existing_primary = db.execute(
         "SELECT id FROM copies_live WHERE item_id = ? AND is_primary = 1",
@@ -268,6 +340,7 @@ def _import_copies(db, real_id: int, copies: list[dict] | None, get_location_id,
     # load-bearing: the placeholder row still holds copy_number 1, so an
     # archive whose primary is copy 2 would collide when copy 1 inserted ahead
     # of the reconciliation. Reconciling first frees the number. B2.
+    to_trash: list[tuple[int, int, str]] = []
     for copy in sorted(copies, key=lambda c: (not c["is_primary"], c["copy_number"])):
         fields = {
             "copy_number": copy["copy_number"],
@@ -300,7 +373,14 @@ def _import_copies(db, real_id: int, copies: list[dict] | None, get_location_id,
             # shelf position survives the reconciliation.
             item_copies.update_copy(db, existing_primary["id"], fields)
         else:
-            item_copies.insert_copy(db, {"item_id": real_id, **fields})
+            copy_id = item_copies.insert_copy(db, {"item_id": real_id, **fields})
+            if copy.get("deleted_at") is not None:
+                to_trash.append((copy["copy_number"], copy_id, copy["deleted_at"]))
+
+    for _number, copy_id, stamp in sorted(to_trash):
+        item_copies.trash_copy(
+            db, copy_id, at=None if stamp == DELETED_NOW else stamp,
+        )
 
 
 def _build_items(db) -> tuple[list[dict], dict[int, int], list[tuple[str, Path]]]:
@@ -310,11 +390,17 @@ def _build_items(db) -> tuple[list[dict], dict[int, int], list[tuple[str, Path]]
     Archive-local ids are assigned sequentially in real-id order — they
     exist only so reading_log/checkouts can reference items within the
     archive; they are not preserved on import.
+
+    Reads the items table directly, not its live view, so a trashed item
+    is exported too (allowlisted in scripts/check_items_live.py — the
+    portable archive carries Trash). `id_map` is built from these rows, so
+    a trashed item's tags, reading log and checkouts follow it into the
+    archive with no edit of their own.
     """
     rows = db.execute(
         "SELECT i.*, locations.name AS location_name, "
         f"{lists.WISHLISTED_SQL} AS wishlisted "
-        "FROM items_live i LEFT JOIN locations ON locations.id = i.location_id "
+        "FROM items i LEFT JOIN locations ON locations.id = i.location_id "
         "ORDER BY i.id"
     ).fetchall()
     tags_map = _tags_by_item(db)
@@ -331,10 +417,15 @@ def _build_items(db) -> tuple[list[dict], dict[int, int], list[tuple[str, Path]]
         obj = {"id": archive_id}
         for col in _ITEM_COLUMNS:
             obj[col] = row[col]
-        # Not in _ITEM_COLUMNS: it is not a column. That whitelist is what
-        # apply_plan maps onto insert_item, and `wishlisted` reaches the
-        # funnel as its virtual field instead.
+        # `wishlisted` and `deleted_at` are deliberately not in
+        # _ITEM_COLUMNS. That whitelist is what apply_plan maps onto
+        # insert_item/update_item_fields, and both write funnels refuse a
+        # `deleted_at` key by name whatever its value — adding it to the
+        # whitelist would fail every archive import. `wishlisted` instead
+        # reaches the funnel as its own virtual field; `deleted_at` is
+        # replayed on import through the Trash funnels instead (apply_plan).
         obj["wishlisted"] = bool(row["wishlisted"])
+        obj["deleted_at"] = row["deleted_at"]
         obj["location"] = row["location_name"]
         obj["tags"] = tags_map.get(real_id, [])
         obj["copies"] = copies_map.get(real_id, [])
@@ -940,6 +1031,97 @@ def _dedupe_lookup(db, *, title: str, isbn_val: str | None, media: str,
     return row, "title_authors"
 
 
+def _trashed_twin_lookup(db, *, title: str, isbn_val: str | None,
+                         upc: str | None, media: str, authors, max_id: int):
+    """The trashed row an archive record would bring back, plus the path that
+    found it — `(row_or_None, basis)`, `row` carrying `id` and `cover_path`.
+
+    Physical on purpose: it exists to find the row items_live hides. It runs
+    only after `_dedupe_lookup` has found no live twin, so a live row always
+    wins over a trashed one sharing its key.
+
+    `_dedupe_lookup`'s two bases, the same `id <= max_id` bound, plus UPC.
+    UPC is here and not there because the insert funnel's own collision rule
+    keys on it: a live archive row whose UPC a trashed row holds is restored
+    by `insert_item` whatever this says, so the plan must say `restore` for
+    it or plan and apply disagree (G85). `upc` is the archive's raw value and
+    is tested `is not None`, exactly as `item_write._trashed_twin` sees and
+    tests it, for the same reason. The title/author base is the one the
+    funnel cannot see at all — without it an ISBN-less row with a trashed
+    twin was created as a second live row.
+    """
+    if isbn_val:
+        row = db.execute(
+            "SELECT id, cover_path FROM items WHERE isbn = ? AND media_type = ? "
+            "AND deleted_at IS NOT NULL AND id <= ? ORDER BY id LIMIT 1",
+            (isbn_val, media, max_id),
+        ).fetchone()
+        if row is not None:
+            return row, "isbn"
+    if upc is not None:
+        row = db.execute(
+            "SELECT id, cover_path FROM items WHERE upc = ? AND media_type = ? "
+            "AND deleted_at IS NOT NULL AND id <= ? ORDER BY id LIMIT 1",
+            (upc, media, max_id),
+        ).fetchone()
+        if row is not None:
+            return row, "upc"
+    if not isbn_val:
+        row = db.execute(
+            "SELECT id, cover_path FROM items WHERE (isbn IS NULL OR isbn = '') "
+            "AND media_type = ? AND title = ? COLLATE NOCASE "
+            "AND COALESCE(authors, '') = ? COLLATE NOCASE "
+            "AND deleted_at IS NOT NULL AND id <= ? ORDER BY id LIMIT 1",
+            (media, title, authors or "", max_id),
+        ).fetchone()
+        if row is not None:
+            return row, "title_authors"
+    return None, None
+
+class _Verdict(NamedTuple):
+    """One archive record's classification — see `_classify`."""
+    verdict: str            # create / skip / update / restore
+    basis: str | None       # the lookup path that found the twin
+    twin: object            # the matched row (live or trashed), or None
+    deleted: bool           # the incoming record is in its source's Trash
+    twin_in_trash: bool     # the matched row is in local Trash
+
+
+def _classify(db, item: dict, *, title: str, isbn_val: str | None,
+              media: str, mode: str, max_id: int) -> _Verdict:
+    """The import rule table, in one place. `plan_archive` and `apply_plan`
+    both call it, so the drift check compares two answers the same code gave.
+
+    | incoming | local twin | verdict |
+    |---|---|---|
+    | either  | live    | `skip` / `update` by mode — an import never trashes a live row |
+    | live    | trashed | `restore` |
+    | deleted | trashed | `skip` — left in Trash, its own deletion date kept |
+    | either  | none    | `create` (a deleted one is created into Trash) |
+
+    `deleted` is whether the record carries a non-null `deleted_at`. Read
+    with `.get` on purpose (G87): an absent key is a v1 archive, and every
+    one of its rows is live.
+    """
+    deleted = item.get("deleted_at") is not None
+    authors = item.get("authors")
+    row, basis = _dedupe_lookup(
+        db, title=title, isbn_val=isbn_val, media=media,
+        authors=authors, max_id=max_id,
+    )
+    if row is not None:
+        return _Verdict("update" if mode == "update" else "skip", basis, row,
+                        deleted, False)
+    twin, basis = _trashed_twin_lookup(
+        db, title=title, isbn_val=isbn_val, upc=item.get("upc"), media=media,
+        authors=authors, max_id=max_id,
+    )
+    if twin is not None:
+        return _Verdict("skip" if deleted else "restore", basis, twin,
+                        deleted, True)
+    return _Verdict("create", None, None, deleted, False)
+
+
 def _item_media_and_tags(item: dict) -> tuple[str, list[str]]:
     """The canonical media type and effective tag list for one archive item.
 
@@ -1063,7 +1245,10 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
          "items": [{"ref", "title", "verdict", "basis", "cover"}, …],
          "summary": {…}}
 
-    `verdict` is create/skip/update using the merge's own dedupe rules;
+    `verdict` is create/skip/update/restore — the rule table in `_classify`:
+    `restore` is a live record whose twin is in local Trash, and a record
+    that is in its source's Trash carries `"deleted": true` (a `create` for
+    it lands in Trash; a `skip` leaves a trashed twin where it is).
     `basis` is the lookup path that produced a match (None for creates);
     `cover` is what apply would do to the target item's cover file —
     "install" when it will have none, "replace" when a matched item already
@@ -1085,8 +1270,10 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
     cover_names = reader.cover_names
 
     # Same bound as the merge's: everything currently in the table. Nothing is
-    # inserted here, so this is just "match only pre-existing rows".
-    max_id = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM items_live").fetchone()["m"]
+    # inserted here, so this is just "match only pre-existing rows". The
+    # physical table, not the view: a trashed row above the live maximum must
+    # still be inside the bound, or the trashed-twin lookup cannot see it.
+    max_id = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM items").fetchone()["m"]
 
     existing = {kind: _existing_names(db, kind) for kind in _NAME_LOOKUP_TABLES}
     pending: dict[str, dict[str, str]] = {kind: {} for kind in _NAME_LOOKUP_TABLES}
@@ -1120,7 +1307,10 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
 
     records: list[dict] = []
     errors: list[str] = []
-    counts = {"create": 0, "skip": 0, "update": 0}
+    counts = {"create": 0, "skip": 0, "update": 0, "restore": 0}
+    create_in_trash = 0
+    # Live matches only — what "already in your library" rests on. A record
+    # matched against a row in Trash is counted by its verdict, not here.
     by_basis = {"isbn": 0, "title_authors": 0}
     covers_install = 0
     covers_replace = 0
@@ -1142,25 +1332,32 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
             isbn_pair = isbn_svc.canonical_isbn_pair(raw_isbn) if raw_isbn else None
             isbn_val = isbn_pair[0] if isbn_pair else None
             media, item_tag_names = _item_media_and_tags(item)
-            authors = item.get("authors")
             cover_arcname = item.get("cover")
             has_cover_entry = bool(cover_arcname) and cover_arcname in cover_names
 
-            row, basis = _dedupe_lookup(
-                db, title=title, isbn_val=isbn_val, media=media,
-                authors=authors, max_id=max_id,
+            verdict, basis, row, deleted, twin_in_trash = _classify(
+                db, item, title=title, isbn_val=isbn_val, media=media,
+                mode=mode, max_id=max_id,
             )
 
-            if row is None:
-                verdict, basis = "create", None
+            if verdict == "create":
                 cover = "install" if has_cover_entry else "none"
                 # Only an item that is actually created carries its
                 # location/tag names in; a match reuses whatever is there.
                 note_name("locations", item.get("location"))
                 for tag_name in item_tag_names:
                     note_name("tags", tag_name)
-            elif mode == "update":
-                verdict = "update"
+                if deleted:
+                    create_in_trash += 1
+            elif verdict == "restore":
+                # The restored row keeps its own fields and location, as a
+                # restore through the insert funnel does; only the archive's
+                # tags are attached, and its cover only fills a gap.
+                cover = ("install" if has_cover_entry and not row["cover_path"]
+                         else "none")
+                for tag_name in item_tag_names:
+                    note_name("tags", tag_name)
+            elif verdict == "update":
                 if not has_cover_entry:
                     cover = "none"
                 elif _has_local_cover(row["id"]):
@@ -1171,10 +1368,10 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
                 for tag_name in item_tag_names:
                     note_name("tags", tag_name)
             else:
-                verdict, cover = "skip", "none"
+                cover = "none"
 
             counts[verdict] += 1
-            if basis:
+            if basis and not twin_in_trash:
                 by_basis[basis] += 1
             if cover == "install":
                 covers_install += 1
@@ -1183,7 +1380,7 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
 
             records.append({
                 "ref": ref, "title": title, "verdict": verdict,
-                "basis": basis, "cover": cover,
+                "basis": basis, "cover": cover, "deleted": deleted,
             })
         except Exception as e:
             errors.append(f"Archive item {ref}: {e}")
@@ -1222,6 +1419,8 @@ def plan_archive(db, reader: ArchiveReader, mode: str = "skip") -> dict:
             "create": counts["create"],
             "skip": counts["skip"],
             "update": counts["update"],
+            "restore": counts["restore"],
+            "create_in_trash": create_in_trash,
             "by_basis": dict(by_basis),
             "covers_install": covers_install,
             "covers_replace": covers_replace,
@@ -1289,8 +1488,10 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
     counted separately in `covers_replaced`; it is not counted as
     "deselected", since it is opt-in rather than opted-out.
 
-    Returns the v1 report keys plus `covers_replaced`, `drifted`, and
-    `deselected`. Never opens an HTTP client — covers come from the zip via
+    Returns the v1 report keys plus `restored`, `trashed`, `covers_replaced`,
+    `drifted`, and `deselected`. The item counts are disjoint: a row brought
+    back from Trash is `restored`, and a row created straight into Trash is
+    `trashed` — neither is also `imported`. Never opens an HTTP client — covers come from the zip via
     reader.read_cover only.
     """
     sel = normalize_selection(selection)
@@ -1301,6 +1502,8 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
     cover_names = reader.cover_names
 
     imported = 0
+    restored_count = 0
+    trashed = 0
     updated = 0
     skipped = 0
     drifted = 0
@@ -1391,9 +1594,10 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
     # Highest item id that predates this import, snapshotted once. SQLite
     # hands new rows ids above the current maximum, so this cleanly separates
     # "was already here" from "this import created it" — see the dedupe
-    # lookups below.
+    # lookups below. The physical table, for the reason plan_archive gives:
+    # the same statement text, so one allowlist entry covers both.
     pre_import_max_id = db.execute(
-        "SELECT COALESCE(MAX(id), 0) AS m FROM items_live"
+        "SELECT COALESCE(MAX(id), 0) AS m FROM items"
     ).fetchone()["m"]
 
     for item in library.get("items") or []:
@@ -1433,7 +1637,6 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
             isbn_pair = isbn_svc.canonical_isbn_pair(raw_isbn) if raw_isbn else None
             isbn_val, isbn10_val = isbn_pair or (None, None)
             media, item_tag_names = _item_media_and_tags(item)
-            authors = item.get("authors")
 
             # Both lookups are confined to rows that existed *before* this
             # import (id <= pre_import_max_id). Without that bound, a library
@@ -1444,25 +1647,22 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
             # collection dedupes almost entirely on (title, authors), where
             # repeats are common. An archive is a faithful copy, not a
             # de-duplicator: duplicates in the source stay duplicates here.
-            existing, _basis = _dedupe_lookup(
-                db, title=title, isbn_val=isbn_val, media=media,
-                authors=authors, max_id=pre_import_max_id,
-            )
-
+            #
             # Re-classify now and compare against what the user reviewed. The
             # DB can change between plan and apply; anything that moved is
             # left alone rather than acted on under a stale verdict.
-            if existing is None:
-                verdict = "create"
-            elif mode == "update":
-                verdict = "update"
-            else:
-                verdict = "skip"
+            verdict, _basis, twin, _deleted, _in_trash = _classify(
+                db, item, title=title, isbn_val=isbn_val, media=media,
+                mode=mode, max_id=pre_import_max_id,
+            )
+            existing = twin if verdict in ("skip", "update") else None
             if verdict != record.get("verdict"):
                 drifted += 1
                 continue
 
-            if verdict == "create" and not sel["include_creates"]:
+            # A restore brings back an item the library does not show today,
+            # exactly as a create does, so the same toggle governs both.
+            if verdict in ("create", "restore") and not sel["include_creates"]:
                 deselected["creates"] += 1
                 continue
             if verdict == "update" and not sel["include_updates"]:
@@ -1501,6 +1701,49 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
 
             if verdict == "skip":
                 skipped += 1
+                continue
+
+            if verdict == "restore":
+                twin_id = twin["id"]
+                # Checked before the first write (G85): the ownership intent
+                # is the only part of the record a restore acts on.
+                intent, wishlisted = item_write.restore_intent({
+                    "owned": item_norm["owned"],
+                    "wishlisted": item_norm["wishlisted"],
+                })
+                if not item_write.restore_item(db, twin_id):
+                    # The row stopped being trashed since the classification
+                    # (G18) — nothing was written, and this is drift.
+                    drifted += 1
+                    continue
+                # Only ever toward owned (G100), exactly as a restore through
+                # insert_item. The row's other fields stay as the user left
+                # them, in both modes.
+                item_write.apply_restored_ownership(db, twin_id, intent, wishlisted)
+                for tag_name in item_tag_names:
+                    tag_id = get_tag_id(tag_name)
+                    if tag_id:
+                        db.execute(
+                            "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
+                            (twin_id, tag_id),
+                        )
+                # Not entered in id_map and no `_import_copies`: a restored
+                # row kept its own copies, reading log and loans through the
+                # trash, so attaching the archive's would double them (G27 —
+                # the archive is not an undo). The reasons are spelled out on
+                # the create path's backstop below.
+                restored_count += 1
+                if has_cover_entry:
+                    if not sel["covers"]:
+                        deselected["covers"] += 1
+                    elif twin["cover_path"]:
+                        pass  # the user's own cover survives the re-import
+                    elif _install_cover(reader, twin_id, cover_arcname):
+                        db.execute(
+                            "UPDATE items SET cover_path = ? WHERE id = ?",
+                            (f"covers/{twin_id}.jpg", twin_id),
+                        )
+                        covers_installed += 1
                 continue
 
             if raw_isbn and isbn_val is None:
@@ -1562,6 +1805,22 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
                 # field it will not use would throw away a metadata update for
                 # nothing.
                 planned_copies = _validated_copies(item)
+                # The record's own Trash state, judged with its copies' —
+                # before the first write, like everything else here (G85).
+                trash_stamp = _valid_deleted_at(item.get("deleted_at"))
+                if trash_stamp == DELETED_NOW:
+                    errors.append(
+                        f"Archive item {archive_id} ({title!r}): moved to Trash "
+                        f"as of now — its deletion date "
+                        f"{item.get('deleted_at')!r} is not a valid past date"
+                    )
+                for copy in planned_copies or []:
+                    if copy["deleted_at"] == DELETED_NOW:
+                        errors.append(
+                            f"Archive item {archive_id} ({title!r}): copy "
+                            f"{copy['copy_number']} moved to Trash as of now — "
+                            "its deletion date is not a valid past date"
+                        )
 
                 loc_id = get_location_id(loc_name)
                 created_at = item_norm.get("created_at")
@@ -1592,7 +1851,11 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
                 # connection that did the insert (G16) — insert_item() keeps
                 # that property, which a helper taking its own connection
                 # would not.
-                real_id = insert_item(db, fields)
+                # A record in its source's Trash never restores a local row:
+                # `_classify` has already found no trashed twin, so a refusal
+                # here is a race, and it lands in `errors` like any other.
+                real_id = insert_item(db, fields,
+                                      restore_trashed=trash_stamp is None)
                 # Read the restore flag BEFORE real_id goes anywhere that
                 # could normalise it — `ItemId` loses the flag through int().
                 restored = was_restored(real_id)
@@ -1628,9 +1891,22 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
                 if not restored:
                     _import_copies(db, real_id, planned_copies, get_location_id,
                                    errors, archive_id, title)
-                # The summary keys are unchanged: a restored row counts as
-                # imported. Counting it separately is plan 5's archive work.
-                imported += 1
+                # The race backstop: `_classify` found no trashed twin, but
+                # one appeared before the insert and the funnel restored it.
+                # Counted as what it is, not as an import.
+                if restored:
+                    restored_count += 1
+                elif trash_stamp is not None:
+                    # Last, because `trash_copy` above needs a live item. It
+                    # stays in id_map: it is newly created, so its reading log
+                    # and loans come with it.
+                    item_write.trash_item(
+                        db, real_id,
+                        at=None if trash_stamp == DELETED_NOW else trash_stamp,
+                    )
+                    trashed += 1
+                else:
+                    imported += 1
 
                 if has_cover_entry:
                     if not sel["covers"]:
@@ -1727,6 +2003,8 @@ def apply_plan(db, reader: ArchiveReader, plan: dict, selection: dict | None = N
 
     return {
         "imported": imported,
+        "restored": restored_count,
+        "trashed": trashed,
         "updated": updated,
         "skipped": skipped,
         "errors": errors[:20],
@@ -1765,6 +2043,8 @@ def merge_archive(db, reader: ArchiveReader, mode: str = "skip",
     report = apply_plan(db, reader, plan, {"replace_covers": replace_covers})
     return {
         "imported": report["imported"],
+        "restored": report["restored"],
+        "trashed": report["trashed"],
         "updated": report["updated"],
         "skipped": report["skipped"],
         "errors": report["errors"],

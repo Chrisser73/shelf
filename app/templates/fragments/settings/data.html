@@ -193,6 +193,9 @@
                                 <template x-if="importResult.restored > 0">
                                     <span>, Restored: <span x-text="importResult.restored"></span></span>
                                 </template>
+                                <template x-if="importResult.trashed > 0">
+                                    <span>, To Trash: <span x-text="importResult.trashed"></span></span>
+                                </template>
                                 <template x-if="importResult.covers_queued > 0">
                                     <span> · Fetching <span x-text="importResult.covers_queued"></span> covers in background</span>
                                 </template>
@@ -359,9 +362,9 @@
 
                     <div class="space-y-2 border-t border-shelf-border pt-3">
                         <p class="text-xs uppercase tracking-wide text-shelf-muted">Include</p>
-                        <label class="flex items-center gap-2 text-shelf-text" x-show="plan.summary.create > 0">
+                        <label class="flex items-center gap-2 text-shelf-text" x-show="showCreatesCheckbox()">
                             <input type="checkbox" x-model="selCreates" class="rounded border-shelf-border bg-shelf-bg">
-                            <span><span x-text="plan.summary.create"></span> new items</span>
+                            <span x-text="createsLabel()"></span>
                         </label>
                         <label class="flex items-center gap-2 text-shelf-text" x-show="plan.summary.update > 0">
                             <input type="checkbox" x-model="selUpdates" class="rounded border-shelf-border bg-shelf-bg">
@@ -390,6 +393,9 @@
                         <p class="text-xs text-shelf-muted" x-show="plan.summary.skip > 0">
                             <span x-text="plan.summary.skip"></span> items already in your library are skipped either way.
                         </p>
+                        <p class="text-xs text-shelf-muted" x-show="plan.summary.restore > 0">
+                            <span x-text="plan.summary.restore"></span> items in your Trash will be restored — they keep their own details, copies and history.
+                        </p>
                     </div>
 
                     <div class="flex gap-2 items-center border-t border-shelf-border pt-3">
@@ -416,6 +422,12 @@
                             Imported: <span x-text="importResult.imported" class="text-shelf-success"></span>,
                             Updated: <span x-text="importResult.updated"></span>,
                             Skipped: <span x-text="importResult.skipped"></span>
+                            <template x-if="importResult.restored > 0">
+                                <span> · Restored: <span x-text="importResult.restored"></span></span>
+                            </template>
+                            <template x-if="importResult.trashed > 0">
+                                <span> · To Trash: <span x-text="importResult.trashed"></span></span>
+                            </template>
                             <template x-if="importResult.covers_installed > 0">
                                 <span> · Covers installed: <span x-text="importResult.covers_installed"></span></span>
                             </template>

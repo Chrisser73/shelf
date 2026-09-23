@@ -456,7 +456,26 @@ def _trashed_twin(db, values: Mapping[str, Any]):
     return None
 
 
-def _apply_restored_ownership(db, item_id: int, values: Mapping[str, Any],
+def restore_intent(values: Mapping[str, Any]) -> tuple[dict[str, Any], bool | None]:
+    """Check the ownership intent `apply_restored_ownership` will act on, and
+    return `(values, wishlisted)` in the shape it takes.
+
+    For a caller that found the trashed row itself rather than through
+    `insert_item` — the archive import's `restore` verdict. `insert_item`
+    validates before its first write, and so must that caller: the import
+    catches a per-record error and then commits, so an `InvalidOwned` or
+    `InvalidWishlisted` raised *after* `restore_item` would leave a restored
+    row beside a report saying the record failed (G85). Raises exactly what
+    the funnel would.
+    """
+    out = dict(values)
+    wishlisted = _pop_wishlisted(out)
+    if "owned" in out:
+        out["owned"] = _coerce_owned(out["owned"])
+    return out, wishlisted
+
+
+def apply_restored_ownership(db, item_id: int, values: Mapping[str, Any],
                               wishlisted: bool | None) -> None:
     """Carry the caller's ownership intent onto a row just restored.
 
@@ -522,7 +541,7 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, *,
       title, not `location_id`, not `source`. A person re-adding something
       they deleted gets it back as they left it, not overwritten by whatever
       the provider says today. The caller's ownership intent is applied, and
-      only ever toward owned (see `_apply_restored_ownership`).
+      only ever toward owned (see `apply_restored_ownership`).
     - **refuses**, with `restore_trashed=False`, raising `IdentifierInTrash`
       and writing nothing. That is the machine path: a background sync must
       not resurrect what a person deleted.
@@ -562,7 +581,7 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, *,
                 title=row["title"],
             )
         if restore_item(db, row["id"]):
-            _apply_restored_ownership(db, row["id"], values, wishlisted)
+            apply_restored_ownership(db, row["id"], values, wishlisted)
             tags.attach_pending(db, row["id"])
             return ItemId(row["id"], restored=True)
         # The row stopped being trashed between the lookup and the write —
@@ -764,7 +783,7 @@ def promote_wishlisted(db, item_id: int) -> bool:
     return True
 
 
-def trash_item(db, item_id: int) -> bool:
+def trash_item(db, item_id: int, *, at: str | None = None) -> bool:
     """Move one item to Trash, and return whether this call moved it.
 
     Stamps `deleted_at`, which hides the row from `items_live` and — because
@@ -772,6 +791,14 @@ def trash_item(db, item_id: int) -> bool:
     write to `item_copies` at all. `scan_log`, loans and wishlist membership
     are left exactly as they are, so a restore finds the item as the user left
     it.
+
+    `at`, when given, replaces the current time as the value written into
+    `deleted_at` (via `COALESCE(?, datetime('now'))`). This funnel does not
+    validate it — it is trusted verbatim. The one caller that will ever pass
+    a non-None value is the archive import, replaying a source's own deletion
+    timestamp so the retention clock does not restart on re-import; that
+    caller validates `at` before this function's first write. Every existing
+    caller passes nothing, and gets `datetime('now')` exactly as before.
 
     Guarded on the current state, so a second call on an already-trashed row
     writes nothing and returns `False`. That is what lets a caller treat the
@@ -789,10 +816,10 @@ def trash_item(db, item_id: int) -> bool:
     same lock (G3).
     """
     cursor = db.execute(
-        "UPDATE items SET deleted_at = datetime('now'), "
+        "UPDATE items SET deleted_at = COALESCE(?, datetime('now')), "
         "updated_at = datetime('now') "
         "WHERE id = ? AND deleted_at IS NULL",
-        (item_id,),
+        (at, item_id),
     )
     trash.invalidate(db)
     return cursor.rowcount > 0

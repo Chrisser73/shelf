@@ -6,6 +6,54 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-09-23
+
+Since 0.46.0, deleting an item moves it to Trash — but the CSV export and the
+portable archive left Trash out. Moving Shelf to a new server with an archive
+silently dropped everything you had deleted but might still want back. Now both
+exports carry Trash, and importing them puts those items back in Trash.
+
+### Added
+
+- **The portable archive carries Trash.** Items you deleted and copies you
+  removed on their own are included, each with the date it was deleted.
+  Imported into another install, they arrive in Trash with those same dates, so
+  nothing gets extra time before Trash empties it. A copy the archive says was
+  removed is never made an item's main copy.
+- **The CSV export has a `deleted` column.** It is `1` for an item in Trash and
+  `0` for everything else, and editor and admin exports include the items in
+  Trash. If you feed the file to a spreadsheet or another tracker, filter on
+  `deleted = 0` first. A viewer's export still leaves Trash out, because a
+  viewer cannot see Trash anywhere else either.
+- **Importing either file follows one rule for Trash.** A deleted row that
+  matches nothing is added straight to Trash. A live row that matches an item
+  in Trash restores it. A deleted row that matches an item in Trash leaves it
+  there. **An import never moves a live item to Trash**, so re-importing last
+  month's file in Update mode does not undo the restores you made since.
+- **The import screens show Trash.** The archive preview says how many items in
+  your Trash it will restore, and how many new items go straight to Trash. The
+  results of both imports count "Restored" and "To Trash".
+
+### Changed
+
+- **The archive format is now version 2.** An older Shelf refuses a version 2
+  archive with its "upgrade Shelf" message, so upgrade the receiving install
+  first. Version 1 archives still import, with every item live, and a CSV with
+  no `deleted` column imports exactly as before.
+- **An archive item with no ISBN now restores its match from Trash.** Before,
+  an archive row matched only by title and author made a second, live copy of
+  an item you had deleted. It is now restored, the same as a row matched on
+  ISBN or barcode, and the archive import counts restores separately from new
+  items. The restored item keeps its own details, copies, reading log and
+  loans; the archive adds its tags, and its cover only if the item has none.
+  The archive is still not an undo: it never brings back history that was
+  deleted along with an item.
+
+### Fixed
+
+- An oversized archive upload is now refused after reading just past the size
+  limit, instead of being read into memory whole first.
+
 ## [0.48.0] - 2026-09-22
 
 Tagging a pile of new items used to mean opening every item after it was added
@@ -4150,6 +4198,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.49.0]: https://github.com/dgahagan/shelf/releases/tag/v0.49.0
 [0.48.0]: https://github.com/dgahagan/shelf/releases/tag/v0.48.0
 [0.47.0]: https://github.com/dgahagan/shelf/releases/tag/v0.47.0
 [0.46.0]: https://github.com/dgahagan/shelf/releases/tag/v0.46.0

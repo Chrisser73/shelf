@@ -7,7 +7,7 @@ logins, three roles.
 |---|---|
 | **Admin** | Everything — settings, users, integrations, locations, borrowers, sync, bulk ops, backup/restore, logs, **delete permanently and empty expired Trash**, the Trash retention setting, plus all editor rights |
 | **Editor** | Add / edit items, delete them to Trash and restore them from Trash, all scan modes, covers, lend and return, tags, import / export CSV and archives |
-| **Viewer** | Browse, search, Series, Stats, Store Mode, set reading status on items, export CSV |
+| **Viewer** | Browse, search, Series, Stats, Store Mode, set reading status on items, export CSV (without the items in Trash) |
 
 Cover controls — **Find cover**, **Upload**, **Remove cover**, **Retry
 cover** — are editor+; a viewer doesn't see them on the item page at all.

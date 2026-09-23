@@ -301,15 +301,20 @@ class TestArchiveRestoresAndStaysCommitted:
         assert _copy_numbers(db, item_id) == [1, 2]
 
     def test_the_restored_record_is_not_reported_as_drifted(self, db, tmp_path):
-        """G72 — plan and apply must dedupe on the same value. The plan reads
-        items_live and sees `create`; apply restores through the funnel. A
-        restore must not land in `drifted`."""
+        """G72 — plan and apply must classify on the same value. Both now
+        call `_classify`, which finds the trashed twin and says `restore`. A
+        restore must not land in `drifted`.
+
+        The counts are disjoint (plan-soft-delete-export, Decisions 6): a
+        restored row is `restored`, no longer also `imported` — which this
+        test asserted until the `restore` verdict existed."""
         _trashed_with_two_copies(db)
 
         report = _merge(db, _archive(tmp_path, {"items": [_record()]}))
 
         assert report.get("drifted", 0) == 0
-        assert report["imported"] == 1
+        assert report["restored"] == 1
+        assert report["imported"] == 0
 
     def test_siblings_in_the_same_archive_still_import(self, db, tmp_path):
         _trashed_with_two_copies(db)
@@ -439,3 +444,286 @@ class TestTheUpdatePathRefusesAndLeavesNothingBehind:
         assert db.execute(
             "SELECT upc FROM items WHERE title = 'Matched'"
         ).fetchone()["upc"] is None
+
+
+# ============================================ archive — the restore verdict ==
+#
+# plan-soft-delete-export T4. `_classify` holds the rule table; plan_archive
+# and apply_plan both call it. Each rule-table row with a LIVE incoming
+# record, in both modes, asserted on the plan AND on the database after apply
+# (G85: never on the report alone).
+
+from app.services.archive import apply_plan, plan_archive
+
+UPC = "012569803121"
+
+
+def _plan_apply(db, path, mode="skip", selection=None, between=None):
+    with read_archive(path) as reader:
+        plan = plan_archive(db, reader, mode=mode)
+    if between is not None:
+        between(db)
+    with read_archive(path) as reader:
+        report = apply_plan(db, reader, plan, selection)
+    try:
+        db.execute("COMMIT")
+    except sqlite3.OperationalError as e:
+        if "no transaction is active" not in str(e):
+            raise
+    return plan, report
+
+
+def _live(db, item_id):
+    return db.execute(
+        "SELECT deleted_at FROM items WHERE id = ?", (item_id,)
+    ).fetchone()["deleted_at"] is None
+
+
+def _rec(**kw):
+    rec = {"id": 1, "title": "Restorable", "authors": "A. Author",
+           "media_type": "book", "owned": 1, "source": "manual"}
+    rec.update(kw)
+    return rec
+
+
+MODES = pytest.mark.parametrize("mode", ["skip", "update"])
+
+
+class TestTheRestoreVerdict:
+    @MODES
+    def test_no_twin_creates(self, db, tmp_path, mode):
+        plan, report = _plan_apply(
+            db, _archive(tmp_path, {"items": [_rec(isbn=ISBN13)]}), mode)
+        assert plan["items"][0]["verdict"] == "create"
+        assert plan["summary"]["restore"] == 0
+        assert report["imported"] == 1 and report["restored"] == 0
+
+    @MODES
+    def test_a_trashed_isbn_twin_is_restored(self, db, tmp_path, mode):
+        twin = _insert_item(db, title="Restorable", isbn=ISBN13)
+        trash_item(db, twin)
+        db.execute("COMMIT")
+
+        plan, report = _plan_apply(
+            db, _archive(tmp_path, {"items": [_rec(isbn=ISBN13)]}), mode)
+
+        assert plan["items"][0]["verdict"] == "restore"
+        assert plan["items"][0]["basis"] == "isbn"
+        assert plan["summary"]["restore"] == 1
+        # Live matches only — a trashed twin is not "already in your library".
+        assert plan["summary"]["by_basis"] == {"isbn": 0, "title_authors": 0}
+        assert (report["restored"], report["imported"], report["drifted"]) == (1, 0, 0)
+        assert _live(db, twin)
+
+    @MODES
+    def test_a_trashed_title_author_twin_is_restored_not_duplicated(
+        self, db, tmp_path, mode
+    ):
+        """Corrections 3. The insert funnel restores only on ISBN/UPC, so
+        before `_trashed_twin_lookup` this record planned `create` and landed
+        as a second live row beside its trashed twin. Verified red on the
+        pre-T4 classifier: the plan said `create` and two rows existed."""
+        twin = _insert_item(db, title="Restorable", isbn=None,
+                            authors="A. Author")
+        trash_item(db, twin)
+        db.execute("COMMIT")
+
+        plan, report = _plan_apply(db, _archive(tmp_path, {"items": [_rec()]}), mode)
+
+        assert plan["items"][0]["verdict"] == "restore"
+        assert plan["items"][0]["basis"] == "title_authors"
+        assert report["restored"] == 1
+        assert db.execute(
+            "SELECT COUNT(*) AS n FROM items WHERE title = 'Restorable'"
+        ).fetchone()["n"] == 1
+        assert _live(db, twin)
+
+    @MODES
+    def test_a_trashed_upc_twin_is_restored(self, db, tmp_path, mode):
+        twin = _insert_item(db, title="Some Film", isbn=None, upc=UPC)
+        trash_item(db, twin)
+        db.execute("COMMIT")
+
+        plan, report = _plan_apply(
+            db, _archive(tmp_path, {"items": [_rec(upc=UPC)]}), mode)
+
+        assert plan["items"][0]["verdict"] == "restore"
+        assert plan["items"][0]["basis"] == "upc"
+        assert report["restored"] == 1 and report["drifted"] == 0
+        assert _live(db, twin)
+        # The row keeps its own fields: a restore is not a metadata update.
+        assert db.execute(
+            "SELECT title FROM items WHERE id = ?", (twin,)
+        ).fetchone()["title"] == "Some Film"
+
+    @MODES
+    def test_a_live_twin_wins_and_nothing_is_trashed(self, db, tmp_path, mode):
+        live = _insert_item(db, title="Restorable", isbn=ISBN13)
+        db.execute("COMMIT")
+
+        plan, report = _plan_apply(
+            db, _archive(tmp_path, {"items": [_rec(isbn=ISBN13)]}), mode)
+
+        assert plan["items"][0]["verdict"] == mode
+        assert report["restored"] == 0
+        assert _live(db, live)
+        assert db.execute(
+            "SELECT COUNT(*) AS n FROM items WHERE deleted_at IS NOT NULL"
+        ).fetchone()["n"] == 0
+
+
+class TestDeletedRecordsClassify:
+    """The deleted-incoming half of the rule table, as the plan states it.
+    What apply then does with a deleted create is T5's."""
+
+    @MODES
+    def test_deleted_with_a_trashed_twin_is_left_alone(self, db, tmp_path, mode):
+        twin = _insert_item(db, title="Restorable", isbn=ISBN13)
+        trash_item(db, twin, at="2026-01-02 03:04:05")
+        db.execute("COMMIT")
+
+        plan, report = _plan_apply(db, _archive(tmp_path, {"items": [
+            _rec(isbn=ISBN13, deleted_at="2026-05-05 05:05:05")]}), mode)
+
+        assert plan["items"][0]["verdict"] == "skip"
+        assert plan["items"][0]["deleted"] is True
+        assert report["skipped"] == 1 and report["restored"] == 0
+        assert db.execute(
+            "SELECT deleted_at FROM items WHERE id = ?", (twin,)
+        ).fetchone()["deleted_at"] == "2026-01-02 03:04:05"
+
+    @MODES
+    def test_deleted_with_a_live_twin_never_trashes_it(self, db, tmp_path, mode):
+        live = _insert_item(db, title="Restorable", isbn=ISBN13)
+        db.execute("COMMIT")
+
+        plan, _report = _plan_apply(db, _archive(tmp_path, {"items": [
+            _rec(isbn=ISBN13, deleted_at="2026-05-05 05:05:05")]}), mode)
+
+        assert plan["items"][0]["verdict"] == mode
+        assert _live(db, live)
+
+    def test_deleted_with_no_twin_plans_a_create_into_trash(self, db, tmp_path):
+        plan, _report = _plan_apply(db, _archive(tmp_path, {"items": [
+            _rec(isbn=ISBN13, deleted_at="2026-05-05 05:05:05"),
+            {**_rec(isbn=None, title="Other"), "id": 2},
+        ]}))
+        s = plan["summary"]
+        assert s["create"] == 2 and s["create_in_trash"] == 1
+        assert [r["deleted"] for r in plan["items"]] == [True, False]
+
+    def test_a_v1_record_without_the_key_is_live(self, db, tmp_path):
+        twin = _insert_item(db, title="Restorable", isbn=ISBN13)
+        trash_item(db, twin)
+        db.execute("COMMIT")
+        plan, _report = _plan_apply(
+            db, _archive(tmp_path, {"items": [_rec(isbn=ISBN13)]}))
+        assert plan["items"][0]["deleted"] is False
+        assert plan["items"][0]["verdict"] == "restore"
+
+
+class TestWhatARestoreCarries:
+    def _trashed(self, db, **kw):
+        twin = _insert_item(db, title="Restorable", isbn=ISBN13, **kw)
+        return twin
+
+    def test_history_is_not_attached_and_copies_are_kept(self, db, tmp_path):
+        """G27: the archive is not an undo, and a restored row kept its own
+        copies, reading log and loans through the trash."""
+        twin = self._trashed(db)
+        item_copies.add_copy(db, twin)
+        item_copies.add_copy(db, twin)
+        before = _copy_numbers(db, twin)
+        trash_item(db, twin)
+        db.execute("COMMIT")
+
+        _plan, report = _plan_apply(db, _archive(tmp_path, {
+            "items": [_rec(isbn=ISBN13, copies=[])],
+            "reading_log": [{"item_id": 1, "status": "read"}],
+            "checkouts": [{"item_id": 1, "borrower": "Bea"}],
+        }))
+
+        assert report["restored"] == 1
+        assert len(before) == 2 and _copy_numbers(db, twin) == before
+        for table in ("reading_log", "checkouts"):
+            assert db.execute(
+                f"SELECT COUNT(*) AS n FROM {table} WHERE item_id = ?", (twin,)
+            ).fetchone()["n"] == 0
+
+    def test_tags_attach_and_ownership_moves_toward_owned(self, db, tmp_path):
+        twin = self._trashed(db, owned=0, wishlisted=True)
+        trash_item(db, twin)
+        db.execute("COMMIT")
+
+        _plan_apply(db, _archive(tmp_path, {"items": [
+            _rec(isbn=ISBN13, owned=1, wishlisted=False, tags=["Signed"])]}))
+
+        assert db.execute(
+            "SELECT owned FROM items WHERE id = ?", (twin,)).fetchone()["owned"] == 1
+        assert [r["name"] for r in db.execute(
+            "SELECT tags.name FROM item_tags JOIN tags ON tags.id = item_tags.tag_id "
+            "WHERE item_tags.item_id = ?", (twin,))] == ["Signed"]
+
+    def test_an_invalid_owned_value_leaves_the_twin_in_trash(self, db, tmp_path):
+        """G85: the ownership intent is checked before `restore_item`."""
+        twin = self._trashed(db)
+        trash_item(db, twin)
+        db.execute("COMMIT")
+
+        _plan, report = _plan_apply(
+            db, _archive(tmp_path, {"items": [_rec(isbn=ISBN13, owned="maybe")]}))
+
+        assert len(report["errors"]) == 1
+        assert report["restored"] == 0
+        assert not _live(db, twin)
+
+    def test_include_creates_off_deselects_a_restore(self, db, tmp_path):
+        twin = self._trashed(db)
+        trash_item(db, twin)
+        db.execute("COMMIT")
+
+        _plan, report = _plan_apply(
+            db, _archive(tmp_path, {"items": [_rec(isbn=ISBN13)]}),
+            selection={"include_creates": False})
+
+        assert report["deselected"]["creates"] == 1
+        assert report["restored"] == 0
+        assert not _live(db, twin)
+
+
+class TestRestoreDrift:
+    def test_twin_trashed_between_plan_and_apply_is_drift(self, db, tmp_path):
+        """Planned `skip` against a live row; the row went to Trash before
+        apply, which now says `restore`. Nothing the user did not see."""
+        live = _insert_item(db, title="Restorable", isbn=ISBN13)
+        db.execute("COMMIT")
+
+        def trash_it(db):
+            trash_item(db, live)
+            db.execute("COMMIT")
+
+        plan, report = _plan_apply(
+            db, _archive(tmp_path, {"items": [_rec(isbn=ISBN13)]}), between=trash_it)
+
+        assert plan["items"][0]["verdict"] == "skip"
+        assert report["drifted"] == 1
+        assert report["restored"] == 0 and report["skipped"] == 0
+        assert not _live(db, live)
+
+    def test_twin_restored_by_hand_between_plan_and_apply_is_drift(self, db, tmp_path):
+        from app.services.item_write import restore_item
+
+        twin = _insert_item(db, title="Restorable", isbn=ISBN13)
+        trash_item(db, twin)
+        db.execute("COMMIT")
+
+        def restore_it(db):
+            restore_item(db, twin)
+            db.execute("COMMIT")
+
+        plan, report = _plan_apply(
+            db, _archive(tmp_path, {"items": [_rec(isbn=ISBN13)]}), between=restore_it)
+
+        assert plan["items"][0]["verdict"] == "restore"
+        assert report["drifted"] == 1 and report["restored"] == 0
+        assert _live(db, twin)
