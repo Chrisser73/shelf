@@ -6,6 +6,38 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.50.1] - 2026-09-24
+
+A code and security review found one serious problem and a few smaller ones,
+and this release fixes them. The serious one: a book title containing HTML
+could run script in the browser of whoever opened the inventory audit's
+missing-items list. When that was an admin, the script could act with the
+admin's permissions. Every earlier version is affected, so upgrade. See
+[GHSA-xh62-f2p3-qm7g](https://github.com/dgahagan/shelf/security/advisories/GHSA-xh62-f2p3-qm7g),
+published with this release.
+
+### Security
+
+- **The inventory audit's Show Missing Items list now escapes titles, authors
+  and location names.** A title containing HTML could run script in the browser
+  of whoever opened the list — including an admin. Titles do not only come from
+  people: metadata providers, imports and photo intake supply them too, so a
+  bad upstream record could carry the script without any user typing it.
+- **Photo intake's Analyze step now caps how much a single tiled submission
+  can add up to.** A batch of tiles with no combined-size limit could exhaust
+  memory and run up vision-API cost. A batch over 300 MB is refused; a real
+  photo's tiles come to a small fraction of that.
+
+### Fixed
+
+- **A page that fails to load one of its scripts now says so on more
+  pages.** The account menu, the edit page's barcode cameras and ownership
+  boxes, and Shelf Fill used to go dead in silence when their script did not
+  load. They now show the same "reload it" notice as the rest of the app.
+- **A double submit adding the same ISBN — a double tap, or two devices
+  scanning it at once — no longer shows an error page.** It now shows the
+  same "Already in collection" card a second scan shows normally.
+
 ## [0.50.0] - 2026-09-23
 
 Since 0.48.0 you can tag items as you add them — but a tag could not be put on
@@ -4242,6 +4274,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.50.1]: https://github.com/dgahagan/shelf/releases/tag/v0.50.1
 [0.50.0]: https://github.com/dgahagan/shelf/releases/tag/v0.50.0
 [0.49.0]: https://github.com/dgahagan/shelf/releases/tag/v0.49.0
 [0.48.0]: https://github.com/dgahagan/shelf/releases/tag/v0.48.0

@@ -139,8 +139,12 @@ PY
   registration. The CSP build has no global fallback, so an unregistered name
   is not an error — the component simply never initialises and the panel sits
   inert.
+- **And name it in the component-load guard.** `component-load-guard.js`'s
+  `SCRIPTS` map must list the registration under the file that makes it, or
+  losing that file is silent — five names had drifted out by 2026-09-23 (H-4).
 - **Status:** linted — `make check-alpine` resolves every `x-data` name
-  against the registrations under `static/js/`.
+  against the registrations under `static/js/`, and every registration
+  against the guard's `SCRIPTS` map.
 
 ## G5 — When Alpine state is dereferenced in a template guard expression
 
@@ -2513,6 +2517,17 @@ print('every non-book hint survives tier 4')"
 
 ```bash
 grep -rn "|safe" app/templates/
+```
+
+- **The same trap with no template at all.** A route that returns
+  `HTMLResponse(f"…{title}…")` skips Jinja entirely, so the Verify grep
+  above never sees it. `/api/inventory/missing` did exactly this until
+  2026-09-23 (review finding D-1): stored XSS, editor → admin, because
+  `scan.js` assigns the fragment with `innerHTML`. It is now
+  `fragments/inventory_missing.html`. Check this form as well:
+
+```bash
+grep -rnE 'HTMLResponse\(f|html_parts' app/
 ```
 
 - **Status:** documented — a lint candidate: "`|safe` applied to a bare

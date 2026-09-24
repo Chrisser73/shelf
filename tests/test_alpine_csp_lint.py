@@ -342,3 +342,26 @@ def test_main_reports_a_load_order_violation_and_exits_non_zero(capsys, monkeypa
     rc = check_alpine_csp.main()
     assert rc == 1
     assert sentinel in capsys.readouterr().out
+
+
+def test_real_guard_map_names_every_registration():
+    assert check_alpine_csp.check_guard_map() == []
+
+
+def test_guard_map_catches_missing_misfiled_and_stale_entries(tmp_path):
+    """H-4: the guard skips a name it does not know, so a registration left
+    out of SCRIPTS fails silently when its script is lost."""
+    (tmp_path / "component-load-guard.js").write_text(
+        "var SCRIPTS = {\n"
+        "        mapped: 'a.js',\n"
+        "        misfiled: 'a.js',\n"
+        "        stale: 'a.js'\n"
+        "    };\n"
+    )
+    (tmp_path / "a.js").write_text("Alpine.data('mapped', f); Alpine.data('unmapped', g);")
+    (tmp_path / "b.js").write_text("Alpine.data('misfiled', h);")
+    out = check_alpine_csp.check_guard_map(tmp_path)
+    assert len(out) == 3
+    assert any("'unmapped') is missing" in v for v in out)
+    assert any("'misfiled') is mapped to a.js" in v for v in out)
+    assert any("names 'stale'" in v for v in out)

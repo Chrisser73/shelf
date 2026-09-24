@@ -222,6 +222,9 @@ it posted from.
   and Alpine's own tag is the only deferred one and comes **last**. Disturb any
   of the three and the affected page throws `Undefined variable` once per
   binding, with the guard installed too late to say which file was lost.
+  A new `Alpine.data('name', …)` also needs a `name: 'file.js'` entry in the
+  guard's `SCRIPTS` map, or losing that file goes unreported — the same lint
+  fails until it is there.
 - **Raw `fetch()` must send `X-CSRF-Token`.** `make check-csrf` enforces;
   HTMX is configured globally in `base.html`.
 - **`MIGRATIONS` in `app/database.py` is append-only.** Never edit or

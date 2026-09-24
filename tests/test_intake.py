@@ -580,6 +580,25 @@ class TestAnalyzeEndpoint:
         ])
         assert resp.json()["ok"] is False
 
+    def test_rejects_tiles_whose_combined_size_exceeds_the_budget(self, admin_client, monkeypatch):
+        """B-4: no cap on the *combined* size of a tiled submission let an
+        editor force arbitrarily many near-per-file-limit tiles into one
+        request — RAM plus billed vision calls. The third tile here must
+        never reach vision.detect_spines."""
+        monkeypatch.setattr(vision, "MAX_TOTAL_INTAKE_BYTES", 250)  # two tiles fit, a third does not
+        seen = []
+        async def fake_detect(images, settings):
+            seen.extend(images)
+            return []
+        monkeypatch.setattr(vision, "detect_spines", fake_detect)
+        resp = admin_client.post("/api/intake/analyze", files=[
+            ("photos", ("tile-0.jpg", b"tile0" + FAKE_JPEG, "image/jpeg")),
+            ("photos", ("tile-1.jpg", b"tile1" + FAKE_JPEG, "image/jpeg")),
+            ("photos", ("tile-2.jpg", b"tile2" + FAKE_JPEG, "image/jpeg")),
+        ])
+        assert resp.json()["ok"] is False
+        assert seen == []
+
     @respx.mock
     def test_language_persisted_from_preferred_language_match(self, admin_client, db):
         """T4/R2: intake's own INSERT captures language — a preferred-language

@@ -598,8 +598,31 @@ async def _scan_isbn_inner(request, isbn, media_type, location_id, platform, mod
                 },
             )
 
-        item_id = items_common._save_item(metadata, isbn13, media_type, location_id,
-                                          source, hc_ids, owned=mode != "wishlist")
+        try:
+            item_id = items_common._save_item(metadata, isbn13, media_type, location_id,
+                                              source, hc_ids, owned=mode != "wishlist")
+        except sqlite3.IntegrityError:
+            # A second scan of the same ISBN — a double submit, or two
+            # devices — can win the insert during this request's own
+            # metadata lookup: the same race the duplicate check above
+            # defends against under its write lock, just a wider window.
+            # Re-run that exact check rather than let the UNIQUE violation
+            # reach the caller as a 500 (F-BUG-1).
+            with get_db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                existing = db.execute(
+                    "SELECT id, title FROM items_live WHERE isbn = ? AND media_type = ?",
+                    (isbn13, media_type),
+                ).fetchone()
+                promoted = bool(existing) and mode != "wishlist" and item_write.promote_wishlisted(db, existing["id"])
+            if existing is None:
+                raise
+            status = "promoted" if promoted else "duplicate"
+            items_common._log_scan(isbn13, media_type, status, existing["id"], mode)
+            return templates.TemplateResponse(
+                request, "fragments/scan_result.html",
+                {"status": status, "isbn": isbn13, "title": existing["title"], "item_id": existing["id"]},
+            )
 
         # Queue the cover instead of downloading it in-request. The
         # hints are the exact three inputs the download used to take, so
@@ -1531,28 +1554,11 @@ async def inventory_missing(
 
     missing = [dict(i) for i in items if i["id"] not in scanned]
 
-    html_parts = []
-    if not missing:
-        html_parts.append(
-            f'<p class="text-sm text-shelf-success">All items at {loc_name} accounted for!</p>'
-        )
-    else:
-        html_parts.append(
-            f'<p class="text-sm text-shelf-warning mb-3">{len(missing)} item(s) at {loc_name} not scanned:</p>'
-        )
-        for item in missing:
-            cover = f'<img src="/covers/{item["id"]}.jpg" class="w-10 h-14 object-cover rounded" alt="">' if item["cover_path"] else '<div class="w-10 h-14 bg-shelf-hover rounded flex items-center justify-center text-shelf-muted text-xs">?</div>'
-            title = item["title"] or "Untitled"
-            authors = f'<p class="text-xs text-shelf-muted truncate">{item["authors"]}</p>' if item.get("authors") else ""
-            copy_count = f' <span class="text-xs text-shelf-muted">({item["copy_count"]} copies)</span>' if item["copy_count"] > 1 else ""
-            html_parts.append(
-                f'<div class="bg-shelf-card rounded-lg border border-shelf-border p-3 flex items-center gap-3">'
-                f'{cover}<div class="flex-1 min-w-0"><p class="font-medium text-sm truncate">'
-                f'<a href="/item/{item["id"]}" class="hover:text-shelf-accent2">{title}</a>{copy_count}</p>{authors}</div>'
-                f'<span class="text-xs px-2 py-1 rounded-full shrink-0 bg-shelf-error/20 text-shelf-error">missing</span></div>'
-            )
-
-    return HTMLResponse("\n".join(html_parts))
+    return templates.TemplateResponse(
+        request,
+        "fragments/inventory_missing.html",
+        {"missing": missing, "loc_name": loc_name},
+    )
 
 
 @router.post("/igdb/test-key")

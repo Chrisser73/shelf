@@ -898,8 +898,11 @@ Scan page's Add by hand panel gave it a page-load root, so it is now caught by
 the `alpine:initialized` pass there; the `htmx:afterSwap` pass still covers the
 instance every `not_found` scan card brings with it. What it
 cannot resolve becomes **one `console.error` per lost script**, naming the file
-and — for the four page-scoped components, which alone declare a matching
-top-level function — whether that script executed at all. The reader gets one
+and — for the four components it probes (`browsePage`, `scanPage`,
+`intakePage`, `coverDrop`) — whether that script executed at all. It can name a
+file only for a component listed in its `SCRIPTS` map, so `make check-alpine`
+fails on any `Alpine.data()` registration missing from that map or filed under
+the wrong script. The reader gets one
 toast asking them to reload; a reload almost always fixes it, because the
 failure is per-navigation. It is deliberately its own file: a guard inside
 `components.js` could not report the loss of `components.js`, which on

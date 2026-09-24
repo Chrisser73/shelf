@@ -94,6 +94,7 @@ async def analyze_photo(photos: list[UploadFile] = File(...)):
     """
     images: list[tuple[bytes, str]] = []
     parts: list[str] = []
+    total_bytes = 0
     for photo in photos:
         mime = (photo.content_type or "").lower()
         if mime not in vision.ALLOWED_MIME:
@@ -103,6 +104,11 @@ async def analyze_photo(photos: list[UploadFile] = File(...)):
             return {"ok": False, "message": "Photo is too large (max 10 MB)"}
         if not image_bytes:
             return {"ok": False, "message": "Empty upload"}
+        # Stop reading further tiles the moment the combined budget is spent,
+        # rather than reading every file first and checking at the end.
+        total_bytes += len(image_bytes)
+        if total_bytes > vision.MAX_TOTAL_INTAKE_BYTES:
+            return {"ok": False, "message": "This upload is too large to analyze (over 300 MB in total)"}
         images.append((image_bytes, mime))
         parts.append(f"{photo.filename or '-'} {mime} {len(image_bytes)} B")
     if not images:

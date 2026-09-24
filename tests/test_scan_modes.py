@@ -420,6 +420,25 @@ class TestInventoryMode:
         assert b"accounted for" in resp.content
         assert b"Found Copy" not in resp.content
 
+    def test_inventory_missing_escapes_an_attacker_controlled_title(self, admin_client, db):
+        """D-1: a title is not always typed by an editor — it can arrive from
+        a provider, an import, or vision output. The audit fragment used to
+        build this HTML with Python f-strings and no escaping, so a title
+        carrying an Alpine directive ran in an admin's browser the moment the
+        admin opened the audit (editor -> admin). Assert the payload reaches
+        the response only in its escaped form."""
+        shelf_a = _insert_location(db, "Shelf A")
+        payload = '<img src=x x-on:error="alert(document.cookie)">'
+        _insert_item(db, title=payload, isbn="9780000000569", location_id=shelf_a)
+        db.commit()
+
+        resp = admin_client.post("/api/inventory/missing", data={
+            "location_id": str(shelf_a), "scanned_ids": "",
+        })
+        assert resp.status_code == 200
+        assert payload not in resp.text
+        assert "&lt;img" in resp.text
+
     def test_a_multi_copy_item_reports_rather_than_moving(self, admin_client, db):
         """#116's destructive half. An ISBN does not say which copy is in the
         user's hand, so scanning a two-copy item at a shelf holding neither

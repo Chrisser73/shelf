@@ -18,6 +18,7 @@ from app.database import (
     get_db,
     init_db,
 )
+from app.routers import items_common
 from app.services import provider_result
 from tests.conftest import (
     _insert_item,
@@ -2122,3 +2123,94 @@ class TestTheRetiredKidsBookAliasOnEdit:
         ).fetchone()["c"] == 1, (
             "the conflict must be caught, leaving the original owner alone"
         )
+
+
+class TestScanAddIntegrityErrorGuard:
+    """F-BUG-1 (review 2026-09-23): the ISBN scan-add and title-search-add
+    paths saved through `_save_item` with no `sqlite3.IntegrityError` catch,
+    unlike the UPC path (`items_common._scan_upc`, see
+    `TestScanIntegrityErrorGuard` in test_scan_upc_enrichment.py) and Photo
+    Intake (`intake.py`). A rival insert landing during this request's own
+    metadata lookup — a double submit, or two devices scanning the same
+    ISBN — tripped `UNIQUE(isbn, media_type)` as an uncaught 500 instead of
+    the duplicate card the pre-check above already knows how to render."""
+
+    ISBN13 = "9780000009005"
+
+    def _race_during_lookup(self, monkeypatch, media_type="book", title="Raced In",
+                             **rival_kwargs):
+        async def lookup(isbn13, hc_token, client, *, google_api_key=None):
+            # The rival writer commits on a separate connection, inside the
+            # window this request's own lookup occupies — exactly the
+            # `TestScanIntegrityErrorGuard._race_during_lookup` shape.
+            with get_db() as rival:
+                _insert_item(rival, title=title, isbn=isbn13, media_type=media_type,
+                             **rival_kwargs)
+            return {"title": "Winner", "authors": None}, "openlibrary", {}, None
+
+        monkeypatch.setattr(items_common, "_lookup_metadata", lookup)
+
+    def test_scan_add_reports_duplicate_not_500(self, editor_client, db, monkeypatch):
+        self._race_during_lookup(monkeypatch)
+
+        resp = editor_client.post(
+            "/api/scan", data={"isbn": self.ISBN13, "media_type": "book", "mode": "add"},
+        )
+
+        assert resp.status_code == 200
+        assert "duplicate" in resp.text.lower()
+        assert db.execute(
+            "SELECT COUNT(*) c FROM items WHERE isbn = ?", (self.ISBN13,)
+        ).fetchone()["c"] == 1
+
+    def test_scan_add_promotes_a_wishlisted_row_that_lands_during_the_race(
+        self, editor_client, db, monkeypatch
+    ):
+        """The pre-check promotes a wishlisted row it finds before the
+        lookup starts (#125); the race catch must apply the same rule to
+        one that lands during it, not just report it as a plain
+        duplicate — G100's "apply the transition at every guard"."""
+        self._race_during_lookup(monkeypatch, owned=0, wishlisted=True)
+
+        resp = editor_client.post(
+            "/api/scan", data={"isbn": self.ISBN13, "media_type": "book", "mode": "add"},
+        )
+
+        assert resp.status_code == 200
+        assert "Now owned" in resp.text
+        row = db.execute(
+            "SELECT owned FROM items WHERE isbn = ?", (self.ISBN13,)
+        ).fetchone()
+        assert row["owned"] == 1
+
+    def test_scan_add_in_wishlist_mode_does_not_promote_the_raced_in_row(
+        self, editor_client, db, monkeypatch
+    ):
+        """A wishlist-mode scan must never promote, even a row that lands
+        owned during the race — the same `mode != "wishlist"` gate the
+        pre-check applies."""
+        self._race_during_lookup(monkeypatch)  # owned=1 (default), not wishlisted
+
+        resp = editor_client.post(
+            "/api/scan", data={"isbn": self.ISBN13, "media_type": "book", "mode": "wishlist"},
+        )
+
+        assert resp.status_code == 200
+        assert "duplicate" in resp.text.lower()
+        row = db.execute(
+            "SELECT owned FROM items WHERE isbn = ?", (self.ISBN13,)
+        ).fetchone()
+        assert row["owned"] == 1, "the rival's own ownership must be left alone"
+
+    def test_book_search_add_reports_duplicate_not_500(self, editor_client, db, monkeypatch):
+        self._race_during_lookup(monkeypatch)
+
+        resp = editor_client.post(
+            "/api/books/add", data={"isbn": self.ISBN13, "media_type": "book"},
+        )
+
+        assert resp.status_code == 200
+        assert "duplicate" in resp.text.lower()
+        assert db.execute(
+            "SELECT COUNT(*) c FROM items WHERE isbn = ?", (self.ISBN13,)
+        ).fetchone()["c"] == 1

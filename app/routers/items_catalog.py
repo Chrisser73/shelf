@@ -7,6 +7,7 @@ call through it so tests can patch.
 """
 
 import logging
+import sqlite3
 
 import httpx
 
@@ -314,8 +315,27 @@ async def add_book_from_search(
                 {"status": "error", "isbn": isbn13, "message": "Could not fetch metadata for this ISBN"},
             )
 
-        with tags_svc.default_tags(tags):
-            item_id = items_common._save_item(metadata, isbn13, media_type, location_id, source, hc_ids)
+        try:
+            with tags_svc.default_tags(tags):
+                item_id = items_common._save_item(metadata, isbn13, media_type, location_id, source, hc_ids)
+        except sqlite3.IntegrityError:
+            # A rival add (this same route, or a scan of the same ISBN) can
+            # win the insert during this request's own metadata lookup — the
+            # same race the duplicate check above defends against before the
+            # lookup starts. Re-run it rather than let the UNIQUE violation
+            # reach the caller as a 500 (F-BUG-1).
+            with get_db() as db:
+                existing = db.execute(
+                    "SELECT id, title FROM items_live WHERE isbn = ? AND media_type = ?",
+                    (isbn13, media_type),
+                ).fetchone()
+            if existing is None:
+                raise
+            items_common._log_scan(isbn13, media_type, "duplicate", existing["id"])
+            return templates.TemplateResponse(
+                request, "fragments/scan_result.html",
+                {"status": "duplicate", "isbn": isbn13, "title": existing["title"], "item_id": existing["id"]},
+            )
 
         # Cover kept: skip the download entirely on a restored row that
         # already has one — a skipped download is also a skipped outbound
