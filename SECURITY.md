@@ -22,7 +22,9 @@ it weren't:
 - Strict Content-Security-Policy — no `unsafe-inline`, no `unsafe-eval`, no
   CDNs (all assets vendored)
 - CSRF protection on all mutating requests
-- bcrypt password hashing; JWT sessions in HTTP-only, secure cookies
+- bcrypt password hashing; JWT sessions in HTTP-only cookies, marked `Secure`
+  whenever the browser reached Shelf over HTTPS (directly, or through a proxy
+  listed in `SHELF_TRUST_PROXY`)
 - Login takes the same time whether or not the username exists, so a failed
   attempt does not reveal which accounts are real
 - Role-based access control (admin / editor / viewer)
@@ -43,4 +45,5 @@ it weren't:
 - Container runs as a non-root user
 
 If you're exposing Shelf beyond your LAN, put it behind a reverse proxy with
-a real certificate and set `SHELF_TRUST_PROXY` to the proxy's address.
+a real certificate, set `SHELF_TLS=off` so Shelf serves plain HTTP to it, and
+set `SHELF_TRUST_PROXY` to the proxy's address.

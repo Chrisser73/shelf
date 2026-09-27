@@ -24,7 +24,9 @@ Applies to both the barcode scanner and Photo Intake's **Take photo** button
 on desktop (its in-page viewfinder), which both use `getUserMedia`:
 
 - Must be HTTPS. `http://` or an untrusted origin on some browsers disables
-  `getUserMedia` — trust the certificate, see
+  `getUserMedia`, and the scanner says "Camera requires HTTPS". Trust the
+  certificate, or — if you set `SHELF_TLS=off` — open Shelf through your
+  HTTPS reverse proxy rather than its plain-HTTP port. See
   [HTTPS & reverse proxy](https-and-reverse-proxy.md).
 - Permission was denied once — reset it in the browser's site settings for
   your Shelf URL.

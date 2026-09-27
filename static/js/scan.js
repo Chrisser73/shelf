@@ -235,8 +235,8 @@ function scanPage() {
                 this.scanner = false;
                 this.cameraActive = false;
                 this.scanLoading = false;
-                if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-                    showToast('Camera requires HTTPS. Access Shelf via https:// and accept the certificate.', 'error');
+                if (!window.isSecureContext) {
+                    showToast('Camera requires HTTPS. Open Shelf through an HTTPS reverse proxy, or leave SHELF_TLS on.', 'error');
                 } else {
                     showToast('Camera access denied. Check browser permissions for this site.', 'error');
                 }

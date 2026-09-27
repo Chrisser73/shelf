@@ -6,6 +6,43 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-09-27
+
+Shelf can now serve plain HTTP to a reverse proxy that already terminates
+TLS, instead of making the proxy talk to a second, self-signed HTTPS listener
+whose certificate nobody checks. Requested in
+[#124](https://github.com/dgahagan/shelf/issues/124) by
+[@danielgratzl](https://github.com/danielgratzl).
+
+### Added
+
+- **`SHELF_TLS=off` serves plain HTTP.** The default stays `on`, so existing
+  installs and bare `docker run` still get HTTPS from the first start. With
+  `off`, no certificate is generated and any existing one is left in place, so
+  switching back loses nothing. Any value other than `on` or `off` stops the
+  container at startup with an error. Plain HTTP without a proxy in front has
+  a cost the browser sets, not Shelf: on any address other than the machine
+  itself, the camera scanner, the desktop webcam and offline Store Mode stop
+  working. Typed and USB-scanner entry, Photo Intake's **Take photo** on a
+  phone, and Store Mode while online all still work. See
+  [HTTPS & reverse proxy](docs/https-and-reverse-proxy.md).
+
+### Changed
+
+- **The login cookie's `Secure` flag and HSTS follow how the browser reached
+  Shelf.** Over HTTPS, directly or through a proxy listed in
+  `SHELF_TRUST_PROXY`, both are on as before. Over plain HTTP the cookie is
+  sent without `Secure`, so logging in works, and HSTS is not sent.
+- **The camera's "requires HTTPS" message asks the browser.** It no longer
+  misreads `127.0.0.1` as insecure, and it no longer tells you to accept a
+  certificate that a proxy setup does not have.
+
+### Removed
+
+- **`SHELF_DEV_INSECURE_COOKIES`.** A plain-HTTP origin now gets a working
+  cookie by rule, so the variable does nothing. An install that still sets it
+  over HTTPS now gets `Secure` cookies.
+
 ## [0.53.0] - 2026-09-26
 
 Some actions take a few seconds, such as a title or ISBN lookup, a cover
@@ -4427,6 +4464,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.54.0]: https://github.com/dgahagan/shelf/releases/tag/v0.54.0
 [0.53.0]: https://github.com/dgahagan/shelf/releases/tag/v0.53.0
 [0.52.0]: https://github.com/dgahagan/shelf/releases/tag/v0.52.0
 [0.51.1]: https://github.com/dgahagan/shelf/releases/tag/v0.51.1

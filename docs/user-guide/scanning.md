@@ -8,7 +8,7 @@ plus title search and **Add by hand** for the things a barcode cannot reach.
 
 **Phone or tablet camera.** Tap the camera button. Shelf picks the decoder
 for the device — ZXing on iOS Safari, html5-qrcode everywhere else — and
-reads EAN-13, EAN-8, UPC-A and UPC-E. Requires HTTPS (you have it) and a
+reads EAN-13, EAN-8, UPC-A and UPC-E. Requires HTTPS (the default, or a TLS reverse proxy in front) and a
 one-time camera permission. Hold steady about 10–15 cm away; the viewfinder
 beeps and fills the field on a read.
 

@@ -64,7 +64,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # Browsers ignore HSTS over http://, and behind a trusted TLS proxy the scheme is already https.
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         # No 'unsafe-inline', no CDN hosts, and no 'unsafe-eval': all JS is
@@ -178,7 +180,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if user:
             fresh_token = should_refresh_token(request, user)
             if fresh_token:
-                set_auth_cookie(response, fresh_token, request.cookies.get("csrf_token"))
+                set_auth_cookie(request, response, fresh_token, request.cookies.get("csrf_token"))
 
         return response
 

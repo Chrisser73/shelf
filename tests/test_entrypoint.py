@@ -1,4 +1,5 @@
-"""entrypoint.sh hands SHELF_TRUST_PROXY to uvicorn as FORWARDED_ALLOW_IPS.
+"""entrypoint.sh hands SHELF_TRUST_PROXY to uvicorn as FORWARDED_ALLOW_IPS, and
+SHELF_TLS decides whether it serves HTTPS (generating a cert) or plain HTTP.
 
 The real script runs under /bin/sh with stubs for the commands that would touch
 the host (mkdir, chown, openssl) and for gosu, which records what uvicorn would
@@ -27,16 +28,19 @@ def _stub(bin_dir: Path, name: str, body: str) -> None:
 def run_entrypoint(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("mkdir", "chown", "openssl"):
+    for name in ("mkdir", "chown"):
         _stub(bin_dir, name, "exit 0")
+    _stub(bin_dir, "openssl", "printf 'OPENSSL_RAN=1\\n'\nexit 0")
     _stub(bin_dir, "gosu", 'printf \'FAI=%s\\n\' "${FORWARDED_ALLOW_IPS-<unset>}"\nprintf \'ARGV=%s\\n\' "$*"\nexit 0')
 
-    def run(trust_proxy=None):
-        # Built from scratch: an inherited FORWARDED_ALLOW_IPS or SHELF_TRUST_PROXY
-        # on the host would make the unset cases lie (G50).
+    def run(trust_proxy=None, tls=None):
+        # Built from scratch: an inherited FORWARDED_ALLOW_IPS, SHELF_TRUST_PROXY or
+        # SHELF_TLS on the host would make the unset cases lie (G50).
         env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
         if trust_proxy is not None:
             env["SHELF_TRUST_PROXY"] = trust_proxy
+        if tls is not None:
+            env["SHELF_TLS"] = tls
         return subprocess.run(
             ["/bin/sh", str(ENTRYPOINT)], env=env, capture_output=True, text=True, timeout=10,
         )
@@ -85,3 +89,43 @@ def test_exec_line_is_unchanged(run_entrypoint):
     assert result.returncode == 0, result.stderr
     argv = next(line for line in result.stdout.splitlines() if line.startswith("ARGV="))
     assert argv.startswith("ARGV=shelf uvicorn app.main:app --host 0.0.0.0 ")
+
+
+def _argv(result) -> str:
+    for line in result.stdout.splitlines():
+        if line.startswith("ARGV="):
+            return line[len("ARGV="):]
+    raise AssertionError(f"gosu stub never ran; stdout={result.stdout!r} stderr={result.stderr!r}")
+
+
+def _openssl_ran(result) -> bool:
+    return any(line.startswith("OPENSSL_RAN=") for line in result.stdout.splitlines())
+
+
+@pytest.mark.parametrize("value", [None, "", "on"])
+def test_tls_on_or_default_serves_https(run_entrypoint, value):
+    result = run_entrypoint(tls=value)
+    assert result.returncode == 0, result.stderr
+    argv = _argv(result)
+    assert "--ssl-keyfile" in argv
+    assert "--ssl-certfile" in argv
+    assert _openssl_ran(result)
+
+
+def test_tls_off_serves_plain_http(run_entrypoint):
+    result = run_entrypoint(trust_proxy="10.0.0.5", tls="off")
+    assert result.returncode == 0, result.stderr
+    argv = _argv(result)
+    assert "--ssl-keyfile" not in argv
+    assert "--ssl-certfile" not in argv
+    assert not _openssl_ran(result)
+    assert _fai(result) == "10.0.0.5"
+
+
+@pytest.mark.parametrize("value", ["true", "1", "yes", "OFF"])
+def test_tls_invalid_values_refuse_to_start(run_entrypoint, value):
+    result = run_entrypoint(tls=value)
+    assert result.returncode != 0
+    assert f"'{value}'" in result.stderr
+    assert "Must be 'on' or 'off'." in result.stderr
+    assert "ARGV=" not in result.stdout

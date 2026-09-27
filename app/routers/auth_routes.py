@@ -65,7 +65,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
 
     token = create_token(user["id"], user["username"], user["role"], user["display_name"], user["token_version"])
     response = RedirectResponse(url="/", status_code=303)
-    set_auth_cookie(response, token)
+    set_auth_cookie(request, response, token)
     logger.info("User '%s' logged in from %s", username, get_client_ip(request))
     return response
 
@@ -137,7 +137,7 @@ async def setup(
 
     token = create_token(user["id"], user["username"], user["role"], user["display_name"], user["token_version"])
     response = RedirectResponse(url="/", status_code=303)
-    set_auth_cookie(response, token)
+    set_auth_cookie(request, response, token)
     logger.info("Setup completed: admin user '%s' created", username)
     return response
 
@@ -280,7 +280,7 @@ async def change_own_password(
     new_token = create_token(user["id"], user["username"], user["role"], user.get("display_name"), new_tv)
     from fastapi.responses import JSONResponse
     resp = JSONResponse({"ok": True, "message": "Password changed"})
-    set_auth_cookie(resp, new_token)
+    set_auth_cookie(request, resp, new_token)
     return resp
 
 
@@ -306,7 +306,7 @@ async def change_display_name(
     token = create_token(user["id"], user["username"], user["role"], display_name, user["token_version"])
     from fastapi.responses import JSONResponse
     resp = JSONResponse({"ok": True, "message": "Display name updated", "display_name": display_name})
-    set_auth_cookie(resp, token)
+    set_auth_cookie(request, resp, token)
     return resp
 
 

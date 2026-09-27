@@ -2166,6 +2166,11 @@ $ grep -n 'get_setting(db, "' app/routers/sync.py
   cross-vendor plan review before any code existed
   (`.devdocs/archive/completed/plan-issue-41-abs-sync-guard-review-codex.md`);
   verified by reading `/proc/<pid>/environ` of the booted child.
+- **Also cleared by `server_factory`: `FORWARDED_ALLOW_IPS`** (`cd2735d`,
+  2026-09-26, #124). uvicorn reads it directly, so a host value changes which
+  peers may set the scheme. `tests/e2e/test_transport_scheme.py` must pass
+  under `FORWARDED_ALLOW_IPS=10.0.0.5`; with the variable not cleared, 3 of
+  its 4 tests go red.
 - **Verify:** the configuration-matrix tests must stay green with the pytest
   parent itself configured — if this goes red, the clearing is not reaching the
   child:
@@ -5519,6 +5524,35 @@ grep -rnE 'hx-disabled-elt="[^"]*,[^"]*"' app/templates | grep -w this | cut -d:
 
 - **Status:** documented. The one live instance is harmless now that the
   listener guards the button; the Verify line stops a new one.
+
+## G123 — When a unit test's result depends on the request scheme
+
+- **Rule:** The shared `client` fixture (and `admin_client`/`editor_client`/
+  `viewer_client`, which wrap it) is `TestClient(app, base_url="https://testserver")`.
+  A relative URL is therefore an **https** request. Any test whose assertion
+  depends on the scheme — the cookie's `Secure` flag, HSTS, and later OIDC
+  redirect URIs (#89) — names it explicitly on **both** branches:
+  `client.get("http://testserver/...")` and `client.get("https://testserver/...")`.
+  Read `Secure` from `resp.headers.get_list("set-cookie")`; the httpx jar hides it.
+- **Why:** Starlette's `TestClient` defaults to `http://testserver`, so it is
+  natural to assume a relative request is plain HTTP. Here it is not. A test
+  written on that assumption runs the https branch twice and passes, or
+  asserts "absent over http" against an https response and fails for the
+  wrong reason.
+- **Evidence:** #124's implementation plan claimed the unit client "speaks
+  `http://testserver`" in two places. The Codex plan review caught it
+  (R1, `.devdocs/archive/completed/plan-issue-124-optional-tls-review-codex.md`)
+  before any code existed. The tests landed with explicit URLs in `fbf944c` and
+  `179cfa3` (2026-09-26), and a `secure = True` mutation turns every `http` case red.
+- **Verify:** the base URL is still https, and the scheme-dependent tests still
+  name both schemes:
+
+```bash
+grep -n 'TestClient(app, base_url=' tests/conftest.py
+grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py tests/test_security_fixes.py
+```
+
+- **Status:** documented.
 
 ## Graveyard
 

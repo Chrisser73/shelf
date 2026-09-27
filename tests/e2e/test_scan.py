@@ -322,6 +322,30 @@ def test_scan_camera_uses_html5_qrcode_by_default(live_server, browser, setup_ad
         ctx.close()
 
 
+def test_scan_camera_denial_on_plain_http_loopback_is_not_an_https_error(
+    live_server, browser, setup_admin
+):
+    """http://127.0.0.1 is a secure context, so a refused camera is a
+    permission denial — not the "requires HTTPS" advice a URL-scheme check
+    would give."""
+    ctx = browser.new_context()
+    ctx.add_init_script(
+        "navigator.mediaDevices.getUserMedia = () => Promise.reject("
+        "Object.assign(new Error('denied'), {name: 'NotAllowedError'}));"
+    )
+    try:
+        pg = _login_page(live_server, ctx, setup_admin)
+        assert live_server["url"].startswith("http://")
+        _start_scan_camera(pg, live_server)
+        assert pg.evaluate("window.isSecureContext") is True
+
+        toasts = pg.locator("#toast-container")
+        expect(toasts).to_contain_text("Camera access denied")
+        expect(toasts).not_to_contain_text("Camera requires HTTPS")
+    finally:
+        ctx.close()
+
+
 def test_manual_entry_shows_toast_feedback(live_server, authed_page):
     """Typed ISBN + Enter surfaces a toast — the result card lands below the
     fold, so without this the submit looks like a silent no-op."""

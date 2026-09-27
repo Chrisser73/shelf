@@ -320,7 +320,14 @@ class TestSecurityHeaders:
     def test_other_security_headers_intact(self, admin_client):
         resp = admin_client.get("/browse")
         assert "x-content-type-options" in {h.lower() for h in resp.headers}
+
+    def test_hsts_present_over_https(self, admin_client):
+        resp = admin_client.get("https://testserver/browse")
         assert "strict-transport-security" in {h.lower() for h in resp.headers}
+
+    def test_hsts_absent_over_http(self, admin_client):
+        resp = admin_client.get("http://testserver/browse")
+        assert "strict-transport-security" not in {h.lower() for h in resp.headers}
 
 
 # ---------------------------------------------------------------------------

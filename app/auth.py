@@ -1,5 +1,4 @@
 import logging
-import os
 import secrets
 import sqlite3
 import time
@@ -193,13 +192,10 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
-def set_auth_cookie(response: Response, token: str, csrf_token: str | None = None) -> None:
-    secure = not os.environ.get("SHELF_DEV_INSECURE_COOKIES")
-    if os.environ.get("SHELF_DEV_INSECURE_COOKIES"):
-        logger.warning(
-            "SHELF_DEV_INSECURE_COOKIES is set — auth cookie is NOT secure. "
-            "Never use this in production."
-        )
+def set_auth_cookie(request: Request, response: Response, token: str, csrf_token: str | None = None) -> None:
+    # The browser-facing scheme: uvicorn rewrites it from X-Forwarded-Proto only
+    # for SHELF_TRUST_PROXY peers, so an untrusted peer cannot claim https.
+    secure = request.url.scheme == "https"
     response.set_cookie(
         key="access_token",
         value=token,

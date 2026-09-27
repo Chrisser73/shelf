@@ -9,14 +9,16 @@ separate frontend build beyond Tailwind.
 Middleware, outermost first (`app/main.py`):
 
 1. **SecurityHeaders** — strict CSP (no `unsafe-inline`/`unsafe-eval`, no
-   third-party origins), HSTS, frame/denial headers.
+   third-party origins), frame/denial headers, and HSTS only when
+   `request.url.scheme` is `https`.
 2. **RateLimit** — per-IP sliding window on `/api/`, `/share/`, `/login`,
    `/setup`. The client IP is the socket peer and no header is read in app
    code. uvicorn's proxy-headers middleware rewrites the peer for proxies
    listed in `SHELF_TRUST_PROXY` (handed to it as `FORWARDED_ALLOW_IPS` by
    `entrypoint.sh`), walking `X-Forwarded-For` right to left and skipping
    every trusted hop.
-3. **Auth** — JWT in an HTTP-only secure cookie; redirects to `/setup` when
+3. **Auth** — JWT in an HTTP-only cookie, `Secure` only when
+   `request.url.scheme` is `https`; redirects to `/setup` when
    no users exist, `/login` when unauthenticated; sliding refresh past the
    token's half-life. Identity and role are read from the `users` row on
    every request: the JWT proves the session and does not carry it, so a token
@@ -25,6 +27,14 @@ Middleware, outermost first (`app/main.py`):
    enforced per route with `require_role`.
 4. **CSRF** — double-submit cookie; accepts an `X-CSRF-Token` header (HTMX,
    fetch) or `_csrf` form field on mutating requests.
+
+**The browser's scheme is `request.url.scheme`, and only that.** uvicorn sets
+it from `X-Forwarded-Proto`, but only for peers listed in `SHELF_TRUST_PROXY`
+(or `127.0.0.1` when unset); from any other peer the header is ignored. The
+cookie's `Secure` flag and HSTS both key off it, so they are right under the
+built-in TLS listener, behind a trusted TLS proxy with `SHELF_TLS=off`, and on
+plain HTTP alike. There is deliberately no second switch for either. Anything else that needs the
+browser-facing scheme, such as OIDC redirect URIs (#89), must use the same rule.
 
 Routes live in `app/routers/`, one module per feature. Pages render full
 templates; HTMX endpoints render fragments from `app/templates/fragments/`.
@@ -1478,7 +1488,7 @@ not wait for it.
 
 ## Security posture
 
-Non-root container, HTTPS from first boot, strict CSP, CSRF everywhere,
+Non-root container, HTTPS from first boot by default (`SHELF_TLS=off` hands TLS to a proxy), strict CSP, CSRF everywhere,
 bcrypt with a constant-cost login path (an unknown username costs the same
 as a wrong password, so timing does not enumerate accounts), short-lived
 sliding JWTs, per-IP rate limiting, encrypted secrets,
