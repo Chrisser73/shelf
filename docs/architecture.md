@@ -870,6 +870,21 @@ must be simple, which is why the lint exists. Tailwind compiled locally to
 (`static/js/scanner-engine.js`) choosing ZXing on iOS Safari and
 html5-qrcode elsewhere.
 
+**A click- or submit-triggered htmx control is guarded by default.** A
+delegated listener in `static/js/app.js` marks the control that issued a
+request `aria-busy` (a spinner in CSS) and disables it — a form's submitter,
+not the whole form — until `htmx:afterRequest`, which fires on success,
+error, abort and timeout alike. It never disables a text input (a
+search-as-you-type box is only marked), never re-enables a control it did
+not disable, and ignores a request a form listener cancelled, which gets no
+`afterRequest`. What it disabled is keyed on the request's `xhr`, not the
+element, because htmx rewrites `detail.elt` between events. It works
+alongside `hx-disabled-elt` rather than deferring to it. So a new htmx
+button needs no attribute to be guarded, and an Alpine control can opt into
+the same look with `:aria-busy`. The 2px bar at the top of the viewport
+remains for requests no control started (lazy loaders, polling,
+`htmx.ajax`).
+
 **`GET /api/tags` is the one source for every tag datalist** on the add
 surfaces (Scan, Shelf Fill, Photo Intake). `static/js/tag-suggest.js` — a
 plain script, not an Alpine component — fetches it once per page, fills the

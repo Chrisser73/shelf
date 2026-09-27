@@ -18,3 +18,31 @@ body { background-color: #0f1117; color: #e2e8f0; }
 ::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 4px; }
 /* Hide Alpine-controlled elements until Alpine initializes */
 [x-cloak] { display: none !important; }
+/* Busy state: static/js/app.js sets aria-busy on the htmx control that issued a
+   request. An Alpine control can opt into the same look with :aria-busy="<flag>". */
+button[aria-busy="true"]::after {
+    content: "";
+    display: inline-block;
+    width: 0.9em;
+    height: 0.9em;
+    margin-left: 0.4em;
+    vertical-align: -0.125em;
+    border: 2px solid #2d3148;
+    border-top-color: #6366f1;
+    border-radius: 9999px;
+    animation: busy-spin 0.7s linear infinite;
+}
+input[aria-busy="true"] {
+    padding-right: 2.25rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='none' stroke='%232d3148' stroke-width='3'/%3E%3Cpath d='M12 3a9 9 0 0 1 9 9' fill='none' stroke='%236366f1' stroke-width='3' stroke-linecap='round'%3E%3CanimateTransform attributeName='transform' type='rotate' from='0 12 12' to='360 12 12' dur='0.7s' repeatCount='indefinite'/%3E%3C/path%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem 1rem;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    button[aria-busy="true"]::after { animation: none; }
+    input[aria-busy="true"] {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='none' stroke='%232d3148' stroke-width='3'/%3E%3Cpath d='M12 3a9 9 0 0 1 9 9' fill='none' stroke='%236366f1' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
+    }
+}

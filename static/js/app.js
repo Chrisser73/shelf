@@ -112,13 +112,78 @@ document.body.addEventListener('showToast', function(e) {
 // --- Loading bar ---
 (function() {
     var bar = document.getElementById('htmx-indicator');
-    document.body.addEventListener('htmx:beforeRequest', function() {
+    document.body.addEventListener('htmx:beforeRequest', function(evt) {
+        // A request a form listener cancelled gets no afterRequest to hide the bar.
+        if (evt.defaultPrevented) return;
         bar.style.opacity = '1';
         bar.style.width = (30 + Math.random() * 30) + '%';
     });
     document.body.addEventListener('htmx:afterRequest', function() {
         bar.style.width = '100%';
         setTimeout(function() { bar.style.opacity = '0'; bar.style.width = '0'; }, 300);
+    });
+})();
+
+// --- Per-control busy state ---
+// The control that issued an htmx request is marked aria-busy (and disabled,
+// if it is a button) until htmx:afterRequest, which fires on 2xx, error,
+// abort and timeout alike — never release on afterSwap/afterSettle (G6).
+// - A cancelled beforeRequest (scan.js, shelf-fill.js) gets no afterRequest,
+//   so a defaultPrevented request is never marked.
+// - Ownership is keyed on detail.xhr: htmx rewrites detail.elt per dispatch
+//   and re-fires afterRequest elsewhere when the issuer was swapped out.
+// - Text inputs are marked, never disabled; a control already disabled is
+//   never re-enabled. hx-disabled-elt elements are not skipped: htmx restores
+//   its own disabled state before afterRequest, and its `this, #x` list form
+//   never disables `this` in 2.0.4, so skipping left buttons unguarded.
+(function() {
+    var owned = new WeakMap();
+
+    function controlsFor(elt, evt) {
+        var tag = elt.tagName;
+        var trig = evt.detail.requestConfig && evt.detail.requestConfig.triggeringEvent;
+        if (tag === 'FORM') {
+            if (trig && trig.submitter) return [trig.submitter];
+            return Array.prototype.filter.call(elt.elements, function(c) { return c.type === 'submit'; });
+        }
+        if (tag === 'BUTTON') return [elt];
+        if (tag === 'INPUT' && trig && trig.type === 'keyup') return [elt];
+        return [];
+    }
+
+    document.body.addEventListener('htmx:beforeRequest', function(evt) {
+        if (evt.defaultPrevented || !evt.detail.xhr) return;
+        var elt = evt.detail.elt;
+        if (!elt || !elt.tagName) return;
+        var recs = [];
+        controlsFor(elt, evt).forEach(function(c) {
+            var rec = { el: c, busy: false, disabled: false };
+            if (c.getAttribute('aria-busy') !== 'true') {
+                c.setAttribute('aria-busy', 'true');
+                rec.busy = true;
+            }
+            var disableable = c.tagName === 'BUTTON' || (c.tagName === 'INPUT' && c.type === 'submit');
+            if (disableable && !c.disabled) {
+                c.disabled = true;
+                c.setAttribute('data-busy-owned', '');
+                rec.disabled = true;
+            }
+            if (rec.busy || rec.disabled) recs.push(rec);
+        });
+        if (recs.length) owned.set(evt.detail.xhr, recs);
+    });
+
+    document.body.addEventListener('htmx:afterRequest', function(evt) {
+        var recs = evt.detail.xhr && owned.get(evt.detail.xhr);
+        if (!recs) return;
+        owned.delete(evt.detail.xhr);
+        recs.forEach(function(rec) {
+            if (rec.busy) rec.el.removeAttribute('aria-busy');
+            if (rec.disabled) {
+                rec.el.disabled = false;
+                rec.el.removeAttribute('data-busy-owned');
+            }
+        });
     });
 })();
 

@@ -201,6 +201,14 @@ PY
   doesn't know about, iterating the registry in `app/browse_filters.py`. A new
   OOB-swapped interactive control must either be a declared filter or arrange
   its own re-process. Inherited from G24, which retired around it.
+- **The re-process restores htmx triggers only, not a plain
+  `addEventListener`.** `browse.js:65` binds the sort `<select>`'s `change`
+  listener (it persists `shelf-sort`) once, at load. So a server-driven change
+  to a control's *contents* swaps the `<option>` out of band, never the
+  `<select>`: `filter_counts_oob.html` swaps `#sort-option-author` for exactly
+  this reason (#119, 0.52.0). htmx 2 parses the response through `<template>`,
+  so a top-level OOB `<option>` survives the parse. Proposed as G122 by the
+  0.52.0 diff review and folded in here, since the trigger is the same.
 - **Evidence:** `8a4ce0b` (2026-08-16, found as a latent bug during the
   community-plan T8 work; documented in `static/js/browse.js`).
 - **Verify:** no listener on `afterSettle` remains, the vendored htmx still
@@ -5483,6 +5491,34 @@ grep -n 'type="submit" class="sr-only"' app/templates/scan.html app/templates/sh
   (expect the cover `<img>`), and the E2E above.
 - **Status:** documented. Other `w-8`/`w-10` thumbnails in padded cells
   (`stats.html`, `related_media_panel.html`) were not measured.
+
+## G122 — When writing an `hx-disabled-elt` selector list that names the control itself
+
+- **Rule:** Never put `this` inside a comma list. In the vendored htmx 2.0.4,
+  `hx-disabled-elt="this, #other"` disables `#other` only: the list goes to
+  `querySelectorAll` whole, where `this` is a tag name that matches nothing.
+  Bare `this` works, and so does `find a, find b`. To name the control and
+  something else, give the control an id and list both ids. Since #118, a
+  click-triggered htmx button needs no `hx-disabled-elt` of its own: the busy
+  listener in `static/js/app.js` disables it, so use the attribute only for
+  the *other* elements (inputs) that must lock during the request.
+- **Why:** it fails silently. The request succeeds, the input greys out, and
+  the button stays live, so a double click posts twice. Nothing but a
+  held-response E2E test sees it.
+- **Evidence:** `item_edit.html:201` (Use URL) shipped with
+  `"this, #edit-cover-url"` and was never guarded. Found by #118's T2
+  (`tests/e2e/test_busy_controls.py`), probe in
+  `.devdocs/archive/completed/plan-issue-118-busy-controls-probes/`; the busy
+  listener now guards it (`1f95ca4`, 2026-09-26).
+- **Verify:** only the known, now-guarded instance has `this` in a list; must print exactly
+  `app/templates/item_edit.html:201` and nothing else:
+
+```bash
+grep -rnE 'hx-disabled-elt="[^"]*,[^"]*"' app/templates | grep -w this | cut -d: -f1,2
+```
+
+- **Status:** documented. The one live instance is harmless now that the
+  listener guards the button; the Verify line stops a new one.
 
 ## Graveyard
 

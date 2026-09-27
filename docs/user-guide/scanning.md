@@ -15,6 +15,8 @@ beeps and fills the field on a read.
 **USB or Bluetooth barcode scanner.** Any scanner that types the barcode and
 sends Enter (the default for nearly all of them) works: click into the
 barcode field once and scan away. No camera involved, no configuration.
+Let each result appear before scanning the next item: a scan made while the
+previous one is still being looked up is ignored.
 
 **Keyboard.** Type an ISBN-10, ISBN-13 or UPC and press Enter.
 

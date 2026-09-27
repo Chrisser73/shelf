@@ -6,6 +6,42 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-09-26
+
+Some actions take a few seconds, such as a title or ISBN lookup, a cover
+search or adding a copy. Until now nothing near the button showed that the
+click had registered. The only sign was a thin bar at the very top of the
+screen, which on a phone is far from your thumb. Pressing again sent the
+request twice. Requested in [#118](https://github.com/dgahagan/shelf/issues/118)
+by [@danielgratzl](https://github.com/danielgratzl).
+
+### Added
+
+- **A button shows a spinner and cannot be pressed again while its request
+  runs.** This applies to every button and form on the page that talks to the
+  server: scans, lookups, cover search, reading status, tags, copies, trash
+  and the rest. The button comes back as soon as the request ends, whether it
+  succeeded, failed or lost the network. Screen readers hear it as busy.
+- **Search-as-you-type boxes show a small spinner while they search.** The box
+  is never locked, so you can keep typing.
+
+### Changed
+
+- **A second scan typed while the first is still being looked up is ignored.**
+  Before, it was sent after the first one finished, but by then the scan field
+  had been cleared, so it went out blank and added nothing. Now nothing is
+  sent. Wait for the first result before scanning the next item.
+
+Buttons that already showed their own progress, such as the Settings
+maintenance tasks and the connection tests, keep working as before.
+
+### Fixed
+
+- **The loading bar no longer sticks part-way** after Shelf refuses a scan
+  before sending it, for example "Select a borrower first" in Lend mode.
+- **"Use URL" on the edit page is locked while the cover downloads.** It was
+  meant to be already, but only the address box was.
+
 ## [0.52.0] - 2026-09-26
 
 Record sleeves, CD cases and cassette j-cards are square. Shelf showed every
@@ -4391,6 +4427,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.53.0]: https://github.com/dgahagan/shelf/releases/tag/v0.53.0
 [0.52.0]: https://github.com/dgahagan/shelf/releases/tag/v0.52.0
 [0.51.1]: https://github.com/dgahagan/shelf/releases/tag/v0.51.1
 [0.51.0]: https://github.com/dgahagan/shelf/releases/tag/v0.51.0
