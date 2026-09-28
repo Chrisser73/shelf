@@ -1,4 +1,4 @@
-# [UPGRADE V1](https://github.com/Chrisser73/shelf/blob/feature/ui-improvements-upgrades-arm64build/CHANGES.md) (by Chrisser73)
+# [UPGRADE V1.2](https://github.com/Chrisser73/shelf/blob/feature/upgradesv1-rebase-latest/CHANGES.md) (by Chrisser73)
 
 
 # Shelf

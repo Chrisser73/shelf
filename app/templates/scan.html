@@ -5,7 +5,7 @@
 <script src="/static/vendor/zxing-browser-0.1.5.min.js"></script>
 {% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto" x-data="scanPage" data-off-modes="{{ off_scan_modes }}">
+<div class="max-w-3xl mx-auto" x-data="scanPage" data-off-modes="{{ off_scan_modes }}  data-scan-page data-lending-enabled="{{ 'true' if lending_enabled else 'false' }}">
 
     <!-- Mode Switcher -->
     <div class="flex flex-wrap gap-2 mb-4">
