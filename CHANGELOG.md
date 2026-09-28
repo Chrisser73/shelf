@@ -12,7 +12,9 @@ An item's authors used to be one piece of text. Clicking it searched for that
 whole text, so on a book with a co-author, a translator or an introduction, the
 link found little besides the book you were already on. Each author is now a
 person of their own: every name on an item page is its own link, and Browse
-can show everything by one author.
+can show everything by one author. This is the second half of
+[#117](https://github.com/dgahagan/shelf/issues/117), requested by
+[@danielgratzl](https://github.com/danielgratzl).
 
 ### Added
 
