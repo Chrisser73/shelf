@@ -46,6 +46,53 @@ one-hour module cache. A failed read means no banner for that render, never a
 failed page; `base.html` guards on `{% if trash_nag %}`, so a hand-built
 environment without the key still renders.
 
+### Feature flags
+
+**Flags gate surfaces and schedulers, never schema and never data.** Optional
+features (`app/features.py`, the `FEATURES` registry) can be turned off by an
+admin in Settings → Features. Migrations run in full and every table exists
+whatever the flags say; disabling hides and refuses, enabling re-reveals
+everything, including rows written in between. Archive export and import
+ignore flags. Core surfaces (scan, Browse, items, copies, locations, tags,
+Trash, settings, users, backup, archive, logs) are not registered and cannot
+be turned off.
+
+- **Storage.** One `settings` row per feature, `feature.<key>`. Only the exact
+  value `"0"` disables; an absent row means enabled, so an upgrade changes
+  nothing. Reads go through a module cache that every write path invalidates
+  twice — immediately and again after its transaction commits
+  (`database.after_commit`), with a generation guard on the refill, so a
+  concurrent read cannot re-cache the pre-commit value.
+- **The gate is a route dependency, not a middleware.**
+  `require_feature(key)` runs after the four middlewares above and is declared
+  **after** the route's `require_role`, so a user without the role gets the
+  role refusal and never learns from the disabled page what a route is for.
+  While the feature is off it answers an `EventSource` request with one SSE
+  `type:error` frame (the browser hides a 403's body from a stream), a native
+  form post or link (`Sec-Fetch-Mode: navigate`) and an HTML page with
+  `feature_disabled.html` (with an Enable form for admins), an htmx request
+  with a 403 and an `HX-Trigger` toast, and any other `/api/` request with a
+  403 JSON body.
+- **Use is gated, configuration is not.** Each integration's status, settings,
+  test and library/platform routes stay reachable while it is off, as do
+  `/api/tmdb/test-key` (TMDb is core DVD scanning), the periodical 977
+  scan-confirmation routes (they belong to scanning) and `/sw.js`.
+- **The share page is gated inline.** `/share/{token}` has no user, so a
+  disabled Sharing feature takes the same statement as an unknown token and
+  answers byte for byte like one: an anonymous visitor cannot tell that
+  sharing exists and is off. The `lend` and `return` scan modes refuse inside
+  `items_scan_modes.py` through the scan card's existing error arm.
+- **The registry lint** (`tests/test_features.py`) walks `app.routes` like the
+  nav census: every route in a feature's module is gated by it or listed in
+  its `ungated`/`inline` exemptions with a reason, no other route carries a
+  gate, every exemption names a real route, every nav tab belongs to exactly
+  one feature or to `CORE_NAV_TABS`, and every gate resolves after its role
+  check.
+
+The nav drops a disabled feature's tab in `visible_tabs`, beside the role and
+integration checks. Manual tab hiding (Settings → Navigation) stays
+presentation only: a hidden tab's routes keep serving.
+
 **Trash** is two routers in `app/routers/trash.py`, registered separately: the
 unprefixed page (`GET /trash`, editor) and the API under `/api/trash/` —
 restore an item or copy (editor), delete permanently, **Empty expired** and
@@ -838,6 +885,14 @@ process. The Audiobookshelf sync is idempotent per item — an unchanged item
 is neither rewritten nor re-covered, and a same-format ISBN already present
 is adopted rather than inserted — and isolated per library, so one library's
 timeout is reported for that library and the rest still run.
+
+Each of the three scheduled jobs checks its feature flag (`abs_sync`,
+`hardcover`, `lending`) at the top of every pass. A disabled job skips the
+pass without calling its service and without writing its
+`abs_last_sync` / `hc_last_sync` / `loan_reminder_last_sent` stamp, so
+re-enabling does not pretend a sync ran. The loop never exits: turning the
+feature back on resumes it at the next five-minute wake, with no restart. The
+cover queue is core and has no flag.
 
 ## Self-hosted library sync
 

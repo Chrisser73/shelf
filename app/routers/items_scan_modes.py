@@ -11,6 +11,7 @@ guard's own advice is "split by feature area, as items_covers/csv/catalog
 were"; this is that split.
 """
 
+from app import features
 from app.database import get_db
 from app.routers import items_common
 from app.services import item_copies
@@ -49,6 +50,11 @@ def _format_copy_places(copies) -> str:
 
 def _scan_mode_lend(request, templates, item: dict, borrower_id: int | None, raw: str):
     """Handle lend mode: check out an item to a borrower."""
+    if not features.feature_enabled("lending"):
+        return templates.TemplateResponse(
+            request, "fragments/scan_result.html",
+            {"status": "error", "isbn": raw, "message": "Lending is turned off on this Shelf."},
+        )
     if not borrower_id:
         return templates.TemplateResponse(
             request, "fragments/scan_result.html",
@@ -96,6 +102,11 @@ def _scan_mode_lend(request, templates, item: dict, borrower_id: int | None, raw
 
 def _scan_mode_return(request, templates, item: dict, raw: str):
     """Handle return mode: check in an item."""
+    if not features.feature_enabled("lending"):
+        return templates.TemplateResponse(
+            request, "fragments/scan_result.html",
+            {"status": "error", "isbn": raw, "message": "Lending is turned off on this Shelf."},
+        )
     with get_db() as db:
         active = db.execute(
             "SELECT c.id, b.name, c.checked_out FROM checkouts c JOIN borrowers b ON c.borrower_id = b.id "

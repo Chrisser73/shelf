@@ -2,12 +2,13 @@
 
 Open the menu under your username and choose **Settings**. Settings is available to administrators; account profile and password controls remain under **Account** in the same menu.
 
-The Settings page is organised into four sections, listed in a sidebar on a wide screen and as a row of buttons above the content on a narrow one:
+The Settings page is organised into five sections, listed in a sidebar on a wide screen and as a row of buttons above the content on a narrow one:
 
 - **Library** — collection display, lending, locations, **tags**, game platforms, navigation preferences and **Trash** retention.
 - **Integrations** — Audiobookshelf, Hardcover, metadata providers, valuation and vision services.
 - **Data** — CSV and portable-archive import/export, backups and maintenance tools.
 - **Users** — accounts, roles and access administration.
+- **Features** — turn optional parts of Shelf, such as Lending, Sharing or Hardcover, on or off. See [Configuration → Features](../configuration.md#features).
 
 The selected section is remembered in the browser, so returning to Settings opens the area you were working in. The redesign changes navigation and presentation only: existing settings forms, endpoints and stored values keep their current behaviour.
 

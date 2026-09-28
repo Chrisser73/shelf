@@ -87,6 +87,12 @@ def _isolated_db(tmp_path, monkeypatch):
     import app.nav as nav_mod
     monkeypatch.setattr(nav_mod, "_cached_settings", None)
 
+    # Reset the feature-flag cache (G13) — one test's disabled feature would
+    # otherwise stay disabled in the next test's routes, nav and jobs.
+    import app.features as features_mod
+    monkeypatch.setattr(features_mod, "_cached_flags", None)
+    monkeypatch.setattr(features_mod, "_generation", 0)
+
     # Reset the currency cache — otherwise one test's display currency
     # leaks into the next test's money formatting.
     import app.currency as currency_mod

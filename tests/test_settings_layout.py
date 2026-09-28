@@ -3,13 +3,13 @@
 from pathlib import Path
 
 
-def test_settings_page_has_four_section_controls(admin_client):
+def test_settings_page_has_five_section_controls(admin_client):
     html = admin_client.get("/settings").text
     assert "Administration" in html
     assert 'data-testid="settings-section-nav"' in html
     assert 'aria-label="Settings sections"' in html
     assert 'data-testid="settings-section-content"' in html
-    for key in ("library", "integrations", "data", "users"):
+    for key in ("library", "integrations", "data", "users", "features"):
         assert html.count(f'data-testid="tab-{key}"') == 1
 
 

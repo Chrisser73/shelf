@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from starlette.responses import StreamingResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import HTTP_TIMEOUT, MEDIA_TYPES
 from app.currency import format_money
 from app.database import get_db, get_setting
@@ -98,7 +99,8 @@ async def test_tmdb_key(request: Request, _=Depends(require_role("admin"))):
 
 
 @router.post("/valuate/{item_id:int}")
-async def valuate_item(item_id: int, _=Depends(require_role("admin"))):
+async def valuate_item(item_id: int, _=Depends(require_role("admin")),
+                       __=Depends(require_feature("valuation"))):
     """Look up price for a single item."""
     with get_db() as db:
         item = db.execute("SELECT isbn FROM items_live WHERE id = ?", (item_id,)).fetchone()
@@ -148,7 +150,8 @@ def _snapshot_valuation() -> None:
 
 
 @router.post("/valuate/all")
-async def valuate_all(_=Depends(require_role("admin"))):
+async def valuate_all(_=Depends(require_role("admin")),
+                      __=Depends(require_feature("valuation"))):
     """Batch valuate all items with ISBNs."""
     with get_db() as db:
         items = db.execute(
@@ -187,7 +190,8 @@ async def valuate_all(_=Depends(require_role("admin"))):
 
 
 @router.get("/valuate/stream")
-async def valuate_all_stream(request: Request, _=Depends(require_role("admin"))):
+async def valuate_all_stream(request: Request, _=Depends(require_role("admin")),
+                             __=Depends(require_feature("valuation"))):
     """SSE endpoint for batch valuation with progress updates."""
     with get_db() as db:
         items = db.execute(
@@ -258,7 +262,8 @@ async def valuate_all_stream(request: Request, _=Depends(require_role("admin")))
 
 
 @router.get("/valuation/report")
-async def valuation_report(request: Request, _=Depends(require_role("viewer"))):
+async def valuation_report(request: Request, _=Depends(require_role("viewer")),
+                           __=Depends(require_feature("valuation"))):
     """Insurance valuation report: every item grouped by location with
     per-location subtotals, so the printout documents what exists and
     where it is — not just what has a price."""

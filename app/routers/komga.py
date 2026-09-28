@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Request
 from starlette.responses import StreamingResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.services import komga_libraries, komga_sync
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,9 @@ async def save_libraries(request: Request):
     return {"ok": True, "message": "Komga library selection saved"}
 
 
-@router.get("/sync/stream", dependencies=[Depends(require_role("admin"))])
+@router.get("/sync/stream", dependencies=[
+    Depends(require_role("admin")), Depends(require_feature("komga")),
+])
 async def sync_stream():
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -138,7 +141,9 @@ async def sync_stream():
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
-@router.get("/items/{item_id}/action", dependencies=[Depends(require_role("viewer"))])
+@router.get("/items/{item_id}/action", dependencies=[
+    Depends(require_role("viewer")), Depends(require_feature("komga")),
+])
 async def item_action(item_id: int):
     try:
         url = komga_sync.item_action(item_id)

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import HTTP_TIMEOUT
 from app.database import get_db, get_setting
 from app.services import cover_queue, item_write, periodical_google, periodical_records, periodical_scan, periodicals
@@ -336,7 +337,8 @@ async def confirm_periodical_issue(
 
 
 @router.get("/periodicals")
-async def periodicals_page(request: Request, _=Depends(require_role("viewer"))):
+async def periodicals_page(request: Request, _=Depends(require_role("viewer")),
+                           __=Depends(require_feature("periodicals"))):
     with get_db() as db:
         publications = db.execute(
             """SELECT p.*, COUNT(il.id) AS issue_count
@@ -356,6 +358,7 @@ async def publication_page(
     request: Request,
     publication_id: int,
     _=Depends(require_role("viewer")),
+    __=Depends(require_feature("periodicals")),
 ):
     with get_db() as db:
         publication = db.execute(

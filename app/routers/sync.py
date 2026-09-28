@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.responses import StreamingResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import HTTP_TIMEOUT
 from app.database import get_db, get_setting
 from app.services import audiobookshelf, item_write
@@ -128,7 +129,8 @@ async def save_abs_libraries(request: Request):
     return {"ok": True, "excluded": excluded}
 
 
-@router.post("/audiobookshelf/libraries/cleanup")
+@router.post("/audiobookshelf/libraries/cleanup",
+            dependencies=[Depends(require_feature("abs_sync"))])
 async def cleanup_excluded_libraries():
     """Move to Trash the Shelf items that came from ABS libraries now excluded.
 
@@ -188,7 +190,7 @@ async def cleanup_excluded_libraries():
     return {"ok": True, "deleted": deleted}
 
 
-@router.post("/audiobookshelf")
+@router.post("/audiobookshelf", dependencies=[Depends(require_feature("abs_sync"))])
 async def sync_audiobookshelf(request: Request):
     with get_db() as db:
         abs_url_val = get_setting(db, "abs_url")
@@ -205,7 +207,7 @@ async def sync_audiobookshelf(request: Request):
     return stats
 
 
-@router.get("/audiobookshelf/stream")
+@router.get("/audiobookshelf/stream", dependencies=[Depends(require_feature("abs_sync"))])
 async def sync_audiobookshelf_stream(request: Request):
     """SSE endpoint for sync with progress updates."""
     with get_db() as db:

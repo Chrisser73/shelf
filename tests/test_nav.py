@@ -167,6 +167,80 @@ def test_unknown_keys_in_the_hidden_list_are_ignored(db):
     assert "stats" not in _keys(ADMIN)
 
 
+# --- Feature gating ----------------------------------------------------------
+
+def _set_feature(key, enabled):
+    from app.database import get_db
+    from app.features import set_feature_enabled
+    with get_db() as conn:
+        set_feature_enabled(conn, key, enabled)
+
+
+def test_disabling_a_feature_hides_its_tab_for_every_role(db):
+    _set_feature("stats", False)
+    for user in (ADMIN, EDITOR, VIEWER, None):
+        assert "stats" not in _keys(user)
+
+
+def test_disabling_hardcover_hides_discover_even_with_a_token(db):
+    _set(db, "hardcover_token", "hc-token")
+    assert "discover" in _keys(ADMIN)
+    _set_feature("hardcover", False)
+    assert "discover" not in _keys(ADMIN)
+
+
+def test_hand_hidden_tab_of_an_enabled_feature_is_still_hidden(db):
+    _set(db, "nav_hidden_tabs", json.dumps(["stats"]))
+    assert "stats" not in _keys(ADMIN)
+
+
+def test_disabled_features_tab_stays_out_when_not_hand_hidden(db):
+    _set_feature("stats", False)
+    # nav_hidden_tabs is untouched — the tab is absent purely on the feature flag.
+    assert "stats" not in _keys(ADMIN)
+
+
+def test_hideable_tab_states_reports_feature_off(db):
+    state = _state(hideable_tab_states(), "stats")
+    assert state["feature_off"] is False
+    assert state["feature_label"] == "Statistics"
+
+    _set_feature("stats", False)
+    state = _state(hideable_tab_states(), "stats")
+    assert state["feature_off"] is True
+    assert state["feature_label"] == "Statistics"
+
+
+def test_hideable_tab_states_feature_label_blank_for_a_featureless_tab(db):
+    """`scan` (and `trash`, `logs`) belong to no feature — never turned off,
+    never labelled."""
+    state = _state(hideable_tab_states(), "trash")
+    assert state["feature_off"] is False
+    assert state["feature_label"] == ""
+
+
+# --- Settings page: feature-off annotation -----------------------------------
+
+def test_navigation_row_shows_turned_off_in_features(admin_client, db):
+    _set_feature("stats", False)
+    row = _row(admin_client.get("/settings").text, "stats")
+    assert "Turned off in Features" in row
+    assert _is_checked(row)
+
+    import re
+    checkbox = re.search(r"<input[^>]*>", row).group(0)
+    assert "disabled" not in checkbox
+
+
+def test_navigation_row_feature_off_beats_the_configure_hint(admin_client, db):
+    """discover has both a `requires` hint and, once disabled, a feature-off
+    one — the feature-off message wins; the tab is gone from the nav anyway."""
+    _set_feature("hardcover", False)
+    row = _row(admin_client.get("/settings").text, "discover")
+    assert "Turned off in Features" in row
+    assert "Hidden until" not in row
+
+
 # --- Caching ----------------------------------------------------------------
 
 def test_settings_are_cached_between_calls(db):

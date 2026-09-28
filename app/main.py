@@ -54,6 +54,7 @@ from app.config import (
     get_client_ip,
 )
 from app.currency import CURRENCIES, format_money, get_currency
+from app.features import feature_enabled
 from app.services.national import SEARCH_LANGS
 from app.database import init_db, get_db
 from app.routers import pages, items, item_copies, items_covers, cover_review, cover_review_actions, items_csv, items_catalog, locations, location_order, platforms, settings, sync, checkouts, valuation, hardcover, store, series, share, tags, intake, archive, shelf_fill, romm, komga, periodicals, music, related_media, trash
@@ -231,81 +232,101 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-async def _periodic_abs_sync():
-    """Background task: run ABS sync on schedule if configured."""
+async def _abs_sync_pass() -> bool:
+    """One ABS-sync check-and-maybe-run. Returns True when it synced."""
     from app.services import audiobookshelf
+
+    if not feature_enabled("abs_sync"):
+        return False
 
     intervals = {"daily": 86400, "weekly": 604800}
 
+    with get_db() as db:
+        row = db.execute("SELECT value FROM settings WHERE key = 'abs_sync_interval'").fetchone()
+        interval = row["value"] if row else "off"
+        if interval == "off":
+            return False
+
+        # Check last sync time
+        last = db.execute("SELECT value FROM settings WHERE key = 'abs_last_sync'").fetchone()
+        now = time.time()
+        if last and last["value"]:
+            elapsed = now - float(last["value"])
+            if elapsed < intervals.get(interval, 86400):
+                return False
+
+        from app.database import get_setting
+        abs_url_val = get_setting(db, "abs_url")
+        abs_token_val = get_setting(db, "abs_token")
+
+    if abs_url_val and abs_token_val:
+        await audiobookshelf.sync(abs_url_val, abs_token_val)
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO settings (key, value) VALUES ('abs_last_sync', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = ?",
+                (str(now), str(now)),
+            )
+        logger.info("Periodic Audiobookshelf sync completed")
+        return True
+    return False
+
+
+async def _periodic_abs_sync():
+    """Background task: run ABS sync on schedule if configured."""
     while True:
         await asyncio.sleep(300)  # check every 5 minutes
         try:
-            with get_db() as db:
-                row = db.execute("SELECT value FROM settings WHERE key = 'abs_sync_interval'").fetchone()
-                interval = row["value"] if row else "off"
-                if interval == "off":
-                    continue
-
-                # Check last sync time
-                last = db.execute("SELECT value FROM settings WHERE key = 'abs_last_sync'").fetchone()
-                now = time.time()
-                if last and last["value"]:
-                    elapsed = now - float(last["value"])
-                    if elapsed < intervals.get(interval, 86400):
-                        continue
-
-                from app.database import get_setting
-                abs_url_val = get_setting(db, "abs_url")
-                abs_token_val = get_setting(db, "abs_token")
-
-            if abs_url_val and abs_token_val:
-                await audiobookshelf.sync(abs_url_val, abs_token_val)
-                with get_db() as db:
-                    db.execute(
-                        "INSERT INTO settings (key, value) VALUES ('abs_last_sync', ?) "
-                        "ON CONFLICT(key) DO UPDATE SET value = ?",
-                        (str(now), str(now)),
-                    )
-                logger.info("Periodic Audiobookshelf sync completed")
+            await _abs_sync_pass()
         except Exception:
             logger.exception("Periodic Audiobookshelf sync failed")
 
 
-async def _periodic_hardcover_sync():
-    """Background task: pull reading status changes from Hardcover on schedule."""
+async def _hardcover_sync_pass() -> bool:
+    """One Hardcover-sync check-and-maybe-run. Returns True when it synced."""
     from app.services import hardcover as hc_svc
+
+    if not feature_enabled("hardcover"):
+        return False
 
     intervals = {"daily": 86400, "weekly": 604800}
 
+    with get_db() as db:
+        row = db.execute("SELECT value FROM settings WHERE key = 'hc_sync_interval'").fetchone()
+        interval = row["value"] if row else "off"
+        if interval == "off":
+            return False
+
+        last = db.execute("SELECT value FROM settings WHERE key = 'hc_last_sync'").fetchone()
+        now = time.time()
+        if last and last["value"]:
+            elapsed = now - float(last["value"])
+            if elapsed < intervals.get(interval, 86400):
+                return False
+
+        from app.database import get_setting
+        token = get_setting(db, "hardcover_token")
+
+    token = token or None
+    if token:
+        await hc_svc.sync_reading_statuses(token)
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO settings (key, value) VALUES ('hc_last_sync', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = ?",
+                (str(now), str(now)),
+            )
+        logger.info("Periodic Hardcover sync completed")
+        return True
+    return False
+
+
+async def _periodic_hardcover_sync():
+    """Background task: pull reading status changes from Hardcover on schedule."""
     while True:
         await asyncio.sleep(300)  # check every 5 minutes
         try:
-            with get_db() as db:
-                row = db.execute("SELECT value FROM settings WHERE key = 'hc_sync_interval'").fetchone()
-                interval = row["value"] if row else "off"
-                if interval == "off":
-                    continue
-
-                last = db.execute("SELECT value FROM settings WHERE key = 'hc_last_sync'").fetchone()
-                now = time.time()
-                if last and last["value"]:
-                    elapsed = now - float(last["value"])
-                    if elapsed < intervals.get(interval, 86400):
-                        continue
-
-                from app.database import get_setting
-                token = get_setting(db, "hardcover_token")
-
-            token = token or None
-            if token:
-                await hc_svc.sync_reading_statuses(token)
-                with get_db() as db:
-                    db.execute(
-                        "INSERT INTO settings (key, value) VALUES ('hc_last_sync', ?) "
-                        "ON CONFLICT(key) DO UPDATE SET value = ?",
-                        (str(now), str(now)),
-                    )
-                logger.info("Periodic Hardcover sync completed")
+            await _hardcover_sync_pass()
         except Exception:
             logger.exception("Periodic Hardcover sync failed")
 
@@ -317,6 +338,9 @@ async def check_loan_reminders() -> bool:
     """One reminder pass: send a digest if overdue loans exist, a notify URL
     is configured, and no digest went out in the last 24h. Returns True when
     a digest was sent."""
+    if not feature_enabled("lending"):
+        return False
+
     from app.database import get_setting
     from app.routers.checkouts import get_overdue_loans
     from app.services.notify import send_notification

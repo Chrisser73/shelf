@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import HTTP_TIMEOUT
 from app.database import get_db, get_setting
 from app.services import covers
@@ -37,7 +38,8 @@ _RAW_CODE_MAX = 32
 
 
 @router.get("/store")
-async def store_page(request: Request, _=Depends(require_role("viewer"))):
+async def store_page(request: Request, _=Depends(require_role("viewer")),
+                     __=Depends(require_feature("store"))):
     templates = request.app.state.templates
     return templates.TemplateResponse(request, "store.html", {})
 
@@ -50,7 +52,8 @@ async def service_worker():
 
 
 @router.get("/api/store/data")
-async def store_data(_=Depends(require_role("viewer"))):
+async def store_data(_=Depends(require_role("viewer")),
+                     __=Depends(require_feature("store"))):
     """Compact offline dataset: every owned or wishlisted item with an ISBN,
     plus all barcode forms it can be matched by (stored ISBN/ISBN-10 and
     their conversions). A row that is neither owned nor wishlisted is not in
@@ -93,7 +96,8 @@ async def store_data(_=Depends(require_role("viewer"))):
 
 
 @router.post("/api/store/queue")
-async def store_queue(request: Request, _=Depends(require_role("editor"))):
+async def store_queue(request: Request, _=Depends(require_role("editor")),
+                      __=Depends(require_feature("store"))):
     """Flush queued store scans: add each ISBN as a wishlist item.
 
     A queued scan is never lost — if metadata lookup fails for any reason

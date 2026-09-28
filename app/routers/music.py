@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import HTTP_TIMEOUT, MEDIA_TYPES, MUSIC_MEDIA_TYPES
 from app.database import get_db, get_setting
 from app.services import covers, discogs, discogs_selection, music_catalog, musicbrainz
@@ -112,6 +113,7 @@ async def music_page(
     barcode: str = Query(""),
     catalog_number: str = Query(""),
     _=Depends(require_role("viewer")),
+    __=Depends(require_feature("music")),
 ):
     """Browse catalogued music and search exact MusicBrainz releases."""
     q = q.strip()[:200]
@@ -187,6 +189,7 @@ async def add_music_release(
     location_id: int | None = Form(None),
     owned: int = Form(1),
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("music")),
 ):
     """Add one exact MusicBrainz release to Shelf."""
     release_id = release_id.strip()
@@ -285,6 +288,7 @@ async def music_item_page(
     item_id: int,
     restored: int = 0,
     _=Depends(require_role("viewer")),
+    __=Depends(require_feature("music")),
 ):
     with get_db() as db:
         item = db.execute(
@@ -307,6 +311,7 @@ async def music_item_page(
 async def refresh_music_release(
     item_id: int,
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("music")),
 ):
     with get_db() as db:
         item = db.execute(
@@ -355,6 +360,7 @@ async def discogs_panel(
     barcode: str = Query(""),
     catalog_number: str = Query(""),
     _=Depends(require_role("viewer")),
+    __=Depends(require_feature("music")),
 ):
     """Render the optional exact-pressing panel for one MusicBrainz release."""
     with get_db() as db:
@@ -435,6 +441,7 @@ async def select_discogs_release(
     item_id: int,
     release_id: str = Form(...),
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("music")),
 ):
     """Validate and remember one concrete Discogs release for a music item."""
     with get_db() as db:
@@ -473,6 +480,7 @@ async def select_discogs_release(
 async def clear_discogs_release(
     item_id: int,
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("music")),
 ):
     """Remove only the optional Discogs pressing selection."""
     with get_db() as db:

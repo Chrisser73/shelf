@@ -16,6 +16,10 @@ mid-way heals itself on the next start (since 0.8.1). Downgrading is **not**
 supported: a newer schema may not load in an older image, so take a backup
 before upgrading if you might want to roll back.
 
+An upgrade never turns a feature off. Every optional feature in
+Settings → **Features** stays on after an upgrade, including one that did not
+exist before it, until an admin turns it off.
+
 Watch the first start after an upgrade:
 
 ```bash
@@ -324,14 +328,19 @@ Settings → Data → **Backup & Restore** downloads `shelf.db`. Tick the
 passphrase option and the download is AES-encrypted — safe to store off-site.
 Restore from the same card, then **restart the container** — the restored
 file is picked up on the next start. Note this contains password hashes and encrypted
-credentials, but **no covers**.
+credentials, but **no covers**. It also carries which features are turned on
+or off in Settings → **Features**, because those switches are settings: a
+restore brings them back as they were when the backup was taken.
 
 ### 3. Portable archive
 
 Settings → Data → **Portable archive** exports a zip with items, tags,
 locations, series, reading log, checkouts, physical copies **and cover
 images** — and no
-credentials, users or instance-specific data. It is the safe way to move to
+credentials, users or instance-specific data. That includes the
+Settings → **Features** switches: an archive carries no settings, so
+importing one never turns a feature on or off, and it imports loans and other
+data even for a feature that is off on the receiving server. It is the safe way to move to
 a new server or hand your library to someone else, and it imports with a
 preview step that shows what's new, what's already there and how duplicates
 were matched. See [Import & export](user-guide/import-and-export.md).

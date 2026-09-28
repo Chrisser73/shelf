@@ -6,6 +6,43 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-09-27
+
+Shelf has grown lending, valuation, store mode, sharing, series tracking and a
+row of integrations, and every install carried all of them in its navigation
+whether it used them or not. You can now turn off the parts you do not use.
+Nothing is deleted when you do, and turning a feature back on shows everything
+again.
+
+### Added
+
+- **Settings → Features turns optional parts of Shelf on or off.** Lending,
+  Series, Statistics, Store Mode, Sharing, Valuation, Music, Periodicals,
+  Shelf Fill, Photo Intake, Hardcover, Audiobookshelf sync, Komga and RomM
+  each have a switch. A feature that is off hides its tab, refuses its pages
+  and actions (an admin can turn it back on from the page that says so),
+  pauses its background job and keeps all its data. Everything is on after an
+  upgrade. Turning off Sharing or Lending first says how many share links stop
+  working or how many loans are open. An integration's own settings card stays
+  usable while it is off, so it can be set up and tested first. The switches
+  are settings, so they travel in a database backup and not in a portable
+  archive.
+- **A share link for a feature that is off looks like a link that does not
+  exist.** Someone you sent a link to cannot tell that sharing was turned off.
+  Turning Sharing back on makes the same links work again.
+
+### Known limitations
+
+- **Some controls on other pages still show for a feature that is off, until
+  the next release.** The item page's loan panel, the Hardcover push button,
+  the series gap check, Home's Series and Statistics shortcuts and a Browse
+  card's RomM action still render. Using one changes nothing: it shows a
+  message that the feature is turned off, or, for the loan panel's
+  **Check In**, opens a page that says so.
+- **Scanning, search and Hardcover as a source of book details are not
+  switches.** They are the core of Shelf, and Tags stay on too, because they
+  carry each item's category.
+
 ## [0.54.0] - 2026-09-27
 
 Shelf can now serve plain HTTP to a reverse proxy that already terminates
@@ -4464,6 +4501,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.55.0]: https://github.com/dgahagan/shelf/releases/tag/v0.55.0
 [0.54.0]: https://github.com/dgahagan/shelf/releases/tag/v0.54.0
 [0.53.0]: https://github.com/dgahagan/shelf/releases/tag/v0.53.0
 [0.52.0]: https://github.com/dgahagan/shelf/releases/tag/v0.52.0

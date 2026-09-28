@@ -2,6 +2,11 @@
 
 Shelf tracks who has what, nags you when it's late, and keeps the history.
 
+Lending can be turned off in Settings → **Features**. While it is off, your
+loans and borrowers are kept, the **Lend** and **Return** scan modes refuse
+with a message, and overdue reminders pause. Turning it back on picks up
+where you left off.
+
 ## Borrowers
 
 Settings → Library → **Borrowers**: add the people you lend to (name, optional

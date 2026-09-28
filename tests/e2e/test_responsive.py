@@ -75,6 +75,7 @@ PAGES = (
     ("settings:integrations", "/settings", "tab-integrations"),
     ("settings:data", "/settings", "tab-data"),
     ("settings:users", "/settings", "tab-users"),
+    ("settings:features", "/settings", "tab-features"),
     # Last: /store registers a service worker, and nothing should navigate
     # through this context after that.
     ("store", "/store", None),

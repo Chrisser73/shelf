@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.responses import StreamingResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import HTTP_TIMEOUT
 from app.database import get_db, get_setting
 from app.services import hardcover, covers, lists, restore_report
@@ -46,7 +47,8 @@ async def test_hardcover(request: Request, _=Depends(require_role("admin"))):
 
 
 @router.get("/search")
-async def search_hardcover(request: Request, q: str = "", _=Depends(require_role("viewer"))):
+async def search_hardcover(request: Request, q: str = "", _=Depends(require_role("viewer")),
+                           __=Depends(require_feature("hardcover"))):
     """Search Hardcover catalog. Returns HTMX fragment with results."""
     templates = request.app.state.templates
     with get_db() as db:
@@ -80,7 +82,8 @@ async def search_hardcover(request: Request, q: str = "", _=Depends(require_role
 
 
 @router.post("/add-to-shelf")
-async def add_hardcover_to_shelf(request: Request, _=Depends(require_role("editor"))):
+async def add_hardcover_to_shelf(request: Request, _=Depends(require_role("editor")),
+                                 __=Depends(require_feature("hardcover"))):
     """Add a book from Hardcover search to Shelf as a wishlist item."""
     data = await request.json()
     title = data.get("title", "").strip()
@@ -233,7 +236,8 @@ async def set_hardcover_schedule(interval: str = Form("off"), _=Depends(require_
 
 
 @router.post("/push/{item_id}")
-async def push_to_hardcover(item_id: int, _=Depends(require_role("editor"))):
+async def push_to_hardcover(item_id: int, _=Depends(require_role("editor")),
+                            __=Depends(require_feature("hardcover"))):
     """Push a single item to Hardcover. Returns JSON result."""
     with get_db() as db:
         token = get_setting(db, "hardcover_token")
@@ -259,7 +263,8 @@ async def push_to_hardcover(item_id: int, _=Depends(require_role("editor"))):
 
 
 @router.get("/export/stream")
-async def export_hardcover_stream(request: Request, _=Depends(require_role("editor"))):
+async def export_hardcover_stream(request: Request, _=Depends(require_role("editor")),
+                                  __=Depends(require_feature("hardcover"))):
     """SSE endpoint for bulk exporting items to Hardcover."""
     with get_db() as db:
         token = get_setting(db, "hardcover_token")
@@ -343,7 +348,8 @@ async def export_hardcover_stream(request: Request, _=Depends(require_role("edit
 
 
 @router.get("/import/stream")
-async def import_hardcover_stream(request: Request, _=Depends(require_role("editor"))):
+async def import_hardcover_stream(request: Request, _=Depends(require_role("editor")),
+                                  __=Depends(require_feature("hardcover"))):
     """SSE endpoint for importing books from Hardcover with progress updates."""
     # Read settings
     with get_db() as db:

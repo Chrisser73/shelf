@@ -93,9 +93,13 @@
         }).then(function (r) {
             if (r.status === 401 || r.status === 403) {
                 var hint = $('sync-hint');
-                hint.textContent = 'Sign in to Shelf to sync your queued scans.';
-                hint.classList.remove('hidden');
-                throw new Error('auth');
+                return r.json().catch(function () { return null; }).then(function (body) {
+                    hint.textContent = (r.status === 403 && body && body.error === 'feature_disabled')
+                        ? 'Store Mode is turned off on this Shelf. Your queued scans are kept.'
+                        : 'Sign in to Shelf to sync your queued scans.';
+                    hint.classList.remove('hidden');
+                    throw new Error('auth');
+                });
             }
             if (!r.ok) throw new Error(r.status);
             return r.json();

@@ -2,13 +2,14 @@ import json
 import sqlite3
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, FileResponse
 
 from app.auth import require_role
 from app.config import DATABASE_PATH, DATA_DIR
 from app.crypto import SENSITIVE_KEYS, encrypt_value, get_encryption_key
 from app.currency import CURRENCIES, invalidate_cache as invalidate_currency_cache
+from app import features
 from app.database import get_db, get_setting, set_setting
 from app.nav import HIDEABLE_KEYS, invalidate_cache as invalidate_nav_cache
 from app.services import audiobookshelf
@@ -220,6 +221,35 @@ async def update_nav_settings(request: Request):
         _upsert_setting(db, "nav_hidden_tabs", json.dumps(hidden))
     invalidate_nav_cache()
     return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/features/{key}")
+async def set_feature(key: str, enabled: str = Form(...)):
+    """Turn a feature on ("1") or off ("0") from Settings → Features.
+
+    Probes are not re-run here: the warning is the page's `data-confirm`
+    step, and the stored flag is the only effect. Nothing is deleted.
+    """
+    if key not in features.FEATURES or enabled not in ("0", "1"):
+        raise HTTPException(status_code=404 if key not in features.FEATURES else 400)
+    with get_db() as db:
+        features.set_feature_enabled(db, key, enabled == "1")
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/features/{key}/enable")
+async def enable_feature(key: str):
+    """Turn a feature on from its disabled page.
+
+    Lands on the feature's own entry path from the registry. No request value
+    (a `next` field, the Referer) is ever read for the target: echoing one
+    would be an open redirect on an admin POST.
+    """
+    if key not in features.FEATURES:
+        raise HTTPException(status_code=404)
+    with get_db() as db:
+        features.set_feature_enabled(db, key, True)
+    return RedirectResponse(url=features.FEATURES[key].entry_path, status_code=303)
 
 
 @router.post("/display")
@@ -472,5 +502,6 @@ async def restore_backup(request: Request):
             (live_max,),
         )
     invalidate_nav_cache()  # the restored DB carries its own settings
+    features.invalidate_cache()  # ...including its own feature.* rows
 
     return {"ok": True, "message": "Database restored. All sessions invalidated. Restart the container to apply."}

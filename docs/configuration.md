@@ -64,7 +64,7 @@ a second copy into the form to check it.
 
 ## The Settings page
 
-**Settings** (gear icon, admin only) has four tabs. This is where each option
+**Settings** (gear icon, admin only) has five tabs. This is where each option
 lives:
 
 ### Library
@@ -72,7 +72,7 @@ lives:
 | Card | Options |
 |---|---|
 | **Collection** | Display currency (20 choices; formatting only, never conversion). Preferred language for title searches |
-| **Navigation** | Which tabs appear in the nav. Tabs for unconfigured integrations hide themselves automatically; you can also hide any tab manually |
+| **Navigation** | Which tabs appear in the nav. Tabs for unconfigured integrations hide themselves automatically; you can also hide any tab manually. Hiding a tab here only hides it — its pages keep working. A tab whose feature is turned off under [Features](#features) reads "Turned off in Features" |
 | **Locations** | Add, rename and delete shelves/rooms. Names must be unique and non-blank — a clash is refused with a message rather than saved. Deleting a location unassigns its items |
 | **Borrowers** | People you lend to. Deleting a borrower keeps their loan history |
 | **Game Platforms** | The platform list used for video games — 30 built in, add your own |
@@ -109,6 +109,36 @@ checkbox, never the value. See [Integrations](user-guide/integrations.md).
 ### Users
 
 Add users, set roles, reset passwords. See [Users & roles](user-guide/users-and-roles.md).
+
+### Features
+
+Turn optional parts of Shelf on or off: Lending, Series, Statistics, Store
+Mode, Sharing, Valuation, Music, Periodicals, Shelf Fill, Photo Intake,
+Hardcover, Audiobookshelf sync, Komga and RomM. Everything is on after an
+install or an upgrade. Scanning, Browse, items, locations, tags, Trash,
+settings, users, backups and logs are core and cannot be turned off.
+
+A feature that is off:
+
+- **hides its tab** from the nav,
+- **refuses its pages and actions** — a page says the feature is turned off
+  (an admin gets a **Turn on** button there), and a button on another page
+  shows a message instead of doing anything,
+- **pauses its background job** — Audiobookshelf sync, Hardcover sync and the
+  overdue-loan digest skip their runs until it is back on,
+- **keeps all its data.** Turning it back on shows everything again,
+  including anything added while it was off.
+
+This is stronger than hiding a tab under **Navigation**, which only takes the
+tab out of the nav bar. An integration's own card under **Integrations** stays
+usable while its feature is off, so you can set it up and test the connection
+before you turn it on; its row here says **Needs setup** until it is
+configured.
+
+Two features ask before they turn off, because the change reaches other
+people: **Sharing** says how many share links will stop working, and
+**Lending** says how many loans are open and that overdue reminders will
+pause.
 
 ## Account settings
 

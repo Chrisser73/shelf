@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request, UploadFile, File
 from pydantic import BaseModel, field_validator
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import (
     HTTP_TIMEOUT,
     LOW_RES_LONG_EDGE,
@@ -30,7 +31,10 @@ from app.services.write_targets import UnknownLocationError, validated_location_
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/intake", dependencies=[Depends(require_role("editor"))])
+router = APIRouter(
+    prefix="/api/intake",
+    dependencies=[Depends(require_role("editor")), Depends(require_feature("intake"))],
+)
 
 MAX_PHOTO_DIMENSION = 100_000  # sanity bound on client-reported pixels
 _LOCATION_ERROR = "Selected location no longer exists — choose another location"

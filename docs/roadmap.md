@@ -20,7 +20,10 @@ building it. *Exploring* means the idea is accepted but the shape is not.
 **Planned.** Shelf has grown a lot of surface, and not everyone wants all of it.
 A setup step and a settings page to turn whole feature areas on and off, so an
 install that only catalogues books does not carry lending, valuation, store mode
-and the rest in its navigation.
+and the rest in its navigation. The settings page shipped in 0.55.0 as
+Settings → **Features**. Still to come: the setup step, which picks a set of
+features at install, and removing the controls a turned-off feature still
+leaves on other pages.
 
 Most of the groups below arrive switched off behind this, which is why it comes
 early.
@@ -122,11 +125,11 @@ or not, is in the [changelog](../CHANGELOG.md).
 
 | Version | What landed |
 |---|---|
+| [0.54.0](https://github.com/dgahagan/shelf/releases/tag/v0.54.0) | Put Shelf behind your own HTTPS proxy without a second certificate. Set `SHELF_TLS=off` and Shelf serves plain HTTP to the proxy, which supplies the real certificate. Sign-in works over plain HTTP too, and the camera's "requires HTTPS" message now says how to fix it. HTTPS stays the default. Asked for in [#124](https://github.com/dgahagan/shelf/issues/124). |
+| [0.53.0](https://github.com/dgahagan/shelf/releases/tag/v0.53.0) | A button shows it heard you. While a lookup, cover search or scan is running, the button that started it shows a spinner and cannot be pressed twice, and search-as-you-type boxes show a small spinner without locking. Asked for in [#118](https://github.com/dgahagan/shelf/issues/118). |
 | [0.52.0](https://github.com/dgahagan/shelf/releases/tag/v0.52.0) | Album artwork is shown whole. Records, CDs and cassettes get a square cover box everywhere Shelf shows a cover, instead of a tall book box that cut off the sides, and a release's Music page now shows its artwork. A record's creator reads **Artist** on the edit page, in Photo Intake, and in Browse when a music type is picked. Asked for in [#119](https://github.com/dgahagan/shelf/issues/119). |
 | [0.51.1](https://github.com/dgahagan/shelf/releases/tag/v0.51.1) | Moving a location is simpler to get right. When you edit a location in Settings, its **Parent** list no longer offers places inside that location, so every choice is one Shelf will accept. Both location forms now word each option the same way, as "Inside" plus its full path, and the Settings location list is in tree order |
 | [0.50.0](https://github.com/dgahagan/shelf/releases/tag/v0.50.0) | Tag the items you already own. Select them in Browse and choose **Add tag** or **Remove tag**. Admins rename, scope and delete tags in Settings, which shows how many items carry each. The item edit page has a Tags section, and Browse has an optional **Tags** column whose chips filter by that tag |
-| [0.49.0](https://github.com/dgahagan/shelf/releases/tag/v0.49.0) | Trash now travels with your library. The CSV export marks items in Trash with a `deleted` column, and the portable archive carries deleted items and copies with the dates they were deleted, so moving to a new server no longer empties your Trash. Importing either puts them back in Trash, and an import never moves a live item there. The archive preview says how many items in your Trash it will restore |
-| [0.48.0](https://github.com/dgahagan/shelf/releases/tag/v0.48.0) | Tag a pile as you add it. Type **Default tags** once on Scan, Shelf Fill or Photo Intake, and every item you add from then on carries them, with suggestions for the media type you are scanning. A Music item can now record its exact Discogs pressing, and a magazine issue found by search keeps that result's cover |
 
 ---
 

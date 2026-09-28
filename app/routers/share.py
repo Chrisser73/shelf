@@ -9,6 +9,7 @@ import secrets
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from app import features
 from app.auth import require_role
 from app.database import get_db
 from app.services import lists
@@ -22,10 +23,14 @@ SHARE_ITEM_CAP = 500
 @router.get("/share/{token}")
 async def share_page(request: Request, token: str):
     templates = request.app.state.templates
+    # With Sharing turned off, every token takes the unknown-token path
+    # below: the same statement, so the same bytes. An anonymous visitor
+    # must not learn that sharing exists and is off (the design's decision f).
+    enabled = features.feature_enabled("share")
     with get_db() as db:
         link = db.execute(
             "SELECT * FROM share_links WHERE token = ?", (token,)
-        ).fetchone()
+        ).fetchone() if enabled else None
         if not link:
             return HTMLResponse("Not found", status_code=404,
                                 headers={"X-Robots-Tag": "noindex"})
@@ -58,6 +63,7 @@ async def create_share_link(
     scope: str = Form("wishlist"),
     label: str = Form(""),
     _=Depends(require_role("admin")),
+    __=Depends(features.require_feature("share")),
 ):
     if scope not in SCOPES:
         return JSONResponse(
@@ -73,7 +79,8 @@ async def create_share_link(
 
 
 @router.post("/api/share/{link_id}/delete")
-async def revoke_share_link(link_id: int, _=Depends(require_role("admin"))):
+async def revoke_share_link(link_id: int, _=Depends(require_role("admin")),
+                            __=Depends(features.require_feature("share"))):
     with get_db() as db:
         cursor = db.execute("DELETE FROM share_links WHERE id = ?", (link_id,))
         if cursor.rowcount != 1:

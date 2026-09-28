@@ -4,15 +4,24 @@ The nav renders on every page, so the settings it depends on are read once
 and cached at module level; every settings write path that can change a
 nav-relevant value calls `invalidate_cache()`.
 
-Visibility is presentation only — hidden tabs keep serving their routes.
-Role gating is the exception: it mirrors the security rules the routers
-already enforce and always wins over the visibility config.
+Visibility is presentation only for manual hiding and the `requires` check —
+a hidden tab's route keeps serving. A **disabled feature** is not presentation:
+it gates the tab's routes too (`app.features.require_feature`), so dropping
+its tab here is just the nav agreeing with what the route already refuses.
+Role gating is the other exception: it mirrors the security rules the
+routers already enforce and always wins over the visibility config.
 """
 
 import json
 import logging
 
+from app.features import FEATURES, feature_enabled
+
 logger = logging.getLogger(__name__)
+
+# NAV_TABS key -> the feature key that owns it, derived from the registry so
+# there is exactly one place that maps a tab to its feature.
+_TAB_FEATURE = {tab: key for key, f in FEATURES.items() for tab in f.nav_tabs}
 
 # `menu: "account"` puts a tab in the account dropdown instead of the tab row.
 # It is a rendering destination, not a second kind of tab: role gating, the
@@ -119,13 +128,18 @@ REQUIREMENT_LABELS = {
 def hideable_tab_states(settings: dict[str, str] | None = None) -> list[dict]:
     """Each hideable tab with both inputs to its visibility.
 
-    -> {"key", "label", "hidden", "available", "requirement_label"}
+    -> {"key", "label", "hidden", "available", "requirement_label",
+        "feature_off", "feature_label"}
 
     `available` is the auto-hide input (integration configured or not);
     `hidden` is the manual-hide input (the settings checkbox). The two are
     independent — a tab can be checked visible but still unavailable, or
-    manually hidden despite being fully configured. Callers combine them as
-    needed; this just reports both so the UI can explain the difference.
+    manually hidden despite being fully configured. `feature_off` is a third,
+    independent input: whether the tab's owning feature (if any) is turned
+    off in Features — a disabled feature's tab reads as turned off there
+    rather than as visible, regardless of `hidden`/`available`. Callers
+    combine these as needed; this just reports them so the UI can explain
+    the difference.
     """
     if settings is None:
         settings = _nav_settings()
@@ -134,12 +148,16 @@ def hideable_tab_states(settings: dict[str, str] | None = None) -> list[dict]:
     for tab in HIDEABLE_TABS:
         requires = tab.get("requires")
         available = _is_configured(requires, settings) if requires else True
+        feature = _TAB_FEATURE.get(tab["key"])
+        feature_off = bool(feature) and not feature_enabled(feature)
         states.append({
             "key": tab["key"],
             "label": tab["label"],
             "hidden": tab["key"] in hidden,
             "available": available,
             "requirement_label": REQUIREMENT_LABELS.get(requires, ""),
+            "feature_off": feature_off,
+            "feature_label": FEATURES[feature].label if feature else "",
         })
     return states
 
@@ -171,6 +189,9 @@ def visible_tabs(user: dict | None) -> list[dict]:
             continue
         requires = tab.get("requires")
         if requires and not _is_configured(requires, settings):
+            continue
+        feature = _TAB_FEATURE.get(tab["key"])
+        if feature and not feature_enabled(feature):
             continue
         if tab["key"] in hidden:
             continue

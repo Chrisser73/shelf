@@ -5554,6 +5554,70 @@ grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py test
 
 - **Status:** documented.
 
+## G124 — When a process cache is invalidated from inside a write transaction
+
+- **Rule:** Invalidate immediately **and again after commit**
+  (`app.database.after_commit(db, callback)`), and guard the refill with a
+  generation counter: capture it before the read, store the snapshot only if
+  it is unchanged afterwards. `app/services/trash.py` and `app/features.py`
+  are the two implementations to copy.
+- **Why:** an invalidation before commit does not make the new row visible to
+  other connections. A request that refills the cache in that gap stores the
+  pre-commit value, and nothing clears it — so a feature an admin just turned
+  off keeps serving (a public share link, for one) until the next write or a
+  restart. `database._Connection`'s docstring names the race; a new cache that
+  only calls `invalidate_cache()` walks straight into it.
+- **Evidence:** caught by the codex prep review of `plan-feature-profiles-core`
+  (R1) before the code existed; fixed in `3834640` (2026-09-27), whose tests
+  refill from a second connection between the write and its commit, and force
+  an invalidation mid-refill.
+- **Verify:** `python -m pytest tests/test_features.py -q -k "refill or during_refill"`
+  and `grep -n "after_commit" app/features.py app/services/trash.py`.
+- **Status:** documented. Extends G13 (reset the cache per test) to the write
+  side.
+
+## G125 — When a gated or refusing route is opened by `EventSource`
+
+- **Rule:** never answer an `EventSource` request with an ordinary 4xx body.
+  Return **200**, `text/event-stream`, and one `data: {"type":"error",
+  "message":…}` frame — every stream consumer in `static/js/` already renders
+  that. `features._refusal` branches on `Accept: text/event-stream` first for
+  this reason.
+- **Why:** the browser exposes neither the status nor the body of a failed
+  stream to page code; only `onerror` fires, and every consumer's `onerror`
+  says "Connection lost". A refusal with a real reason reads as a network
+  fault.
+- **Evidence:** codex prep review of `plan-feature-profiles-core` (R2), six
+  stream consumers (`components-settings.js`, `komga-settings.js`,
+  `romm-settings.js`); landed in `d3b4d18` (2026-09-27), pinned per stream in
+  `tests/test_features_gate*.py` via `assert_sse_error`.
+- **Verify:** `grep -rn "assert_sse_error" tests/ | wc -l` (expect ≥ 6).
+- **Status:** documented.
+
+## G126 — When new markup reuses a colour class that E2E tests use as a locator
+
+- **Rule:** before giving a new element on a page `text-shelf-success` (or
+  another status colour), grep `tests/e2e/` for a bare class locator on it.
+  `span.text-shelf-success` is treated as *the* success message by at least
+  three tests (`test_settings.py`, `test_lending.py`, `test_item_copies.py`).
+  Style the new element another way, or give the old message a `data-testid`
+  and move those tests onto it.
+- **Why:** Playwright's `expect(locator)` is strict: a second match fails the
+  test, and markup hidden with `x-show` is still in the DOM, so a new tab's
+  badges collide with a message on another tab. The unit suite cannot see it;
+  only the full E2E run does.
+- **Evidence:** Settings → Features' "On" badge (`8d63b15`) put 14 more
+  `span.text-shelf-success` on `/settings`; three unrelated E2E tests went red
+  at the T11 run of `plan-feature-profiles-core` (2026-09-27). Fixed by
+  restyling the badge. The same run found the second route in: a new E2E
+  test seeded a share link into the session-scoped server DB and left it, so
+  the Sharing card's "Copied!" span (also `text-shelf-success`) rendered for
+  every later test. **An E2E test that seeds rows must remove them** — the
+  `one_share_link` fixture in `tests/e2e/test_features.py` is the shape.
+- **Verify:** `grep -rn 'locator("span.text-shelf' tests/e2e/`
+- **Status:** documented. **Lint candidate:** refuse bare colour-class
+  locators in `tests/e2e/` in `make check-tests`.
+
 ## Graveyard
 
 Retired entries land here with a one-line reason (refactored away, lint

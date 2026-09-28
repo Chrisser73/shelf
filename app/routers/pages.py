@@ -5,6 +5,7 @@ from fastapi.responses import RedirectResponse
 
 from app import browse_filters, nav
 from app.auth import require_role
+from app.features import require_feature
 from app.config import MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES
 from app.services.synopsis import SYNOPSIS_MEDIA_TYPES
 from app.currency import get_currency
@@ -150,7 +151,8 @@ async def browse(
 
 
 @router.get("/discover")
-async def discover(request: Request, _=Depends(require_role("viewer"))):
+async def discover(request: Request, _=Depends(require_role("viewer")),
+                   __=Depends(require_feature("hardcover"))):
     with get_db() as db:
         has_hardcover = bool(get_setting(db, "hardcover_token"))
     return request.app.state.templates.TemplateResponse(
@@ -213,7 +215,8 @@ async def scan(
 
 
 @router.get("/intake")
-async def intake(request: Request, _=Depends(require_role("editor"))):
+async def intake(request: Request, _=Depends(require_role("editor")),
+                 __=Depends(require_feature("intake"))):
     """Shelf-photo bulk intake page."""
     from app.database import get_all_settings
     with get_db() as db:
@@ -425,7 +428,8 @@ async def item_edit(
 
 
 @router.get("/stats")
-async def stats(request: Request, _=Depends(require_role("viewer"))):
+async def stats(request: Request, _=Depends(require_role("viewer")),
+                __=Depends(require_feature("stats"))):
     with get_db() as db:
         by_type = db.execute(
             "SELECT media_type, COUNT(*) as c FROM items_live GROUP BY media_type ORDER BY c DESC"
@@ -653,6 +657,9 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
     # while the nav bar shows it. The no-arg path reads the same env-aware
     # snapshot the nav itself uses.
     hideable_nav_tab_states = hideable_tab_states()
+    # Outside the `with` above: the probes open their own connections (G112).
+    from app.features import feature_rows
+    features_rows = feature_rows()
     # Never hand decrypted credentials to the template — it only needs to know
     # whether one is saved. Fields are write-only; blank submit keeps the value.
     from app.crypto import SENSITIVE_KEYS
@@ -684,6 +691,7 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
          "secrets_present": secrets_present, "abs_url_present": abs_url_present,
          "game_platforms_list": game_platforms_list,
          "hideable_nav_tab_states": hideable_nav_tab_states,
+         "feature_rows": features_rows,
          "borrower_error_message": borrower_error_message,
          "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats,
          "tags": tags, "media_types": MEDIA_TYPES},
