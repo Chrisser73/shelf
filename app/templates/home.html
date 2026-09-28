@@ -40,7 +40,7 @@
         <a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors" data-testid="home-lent-out">
             <p class="text-shelf-muted text-sm">Lent out</p>
         </a>{% endif %}
-        {% if home_tiles.lent_out %}<a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+        {% if feature_flags.lending and home_tiles.lent_out %}<a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
             <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="compass" class="w-4 h-4" aria-hidden="true"></i>Lent out</p>
             <p class="text-3xl font-bold">{{ lent_out_count }}</p>
         </a>
