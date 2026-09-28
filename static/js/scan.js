@@ -106,6 +106,21 @@ function scanPage() {
         init() {
             var self = this;
 
+            // Lending is an admin-wide feature, not merely an action that
+            // happens to fail server-side. Remove its modes before Alpine
+            // paints, and repair a browser that remembered one as its last
+            // selected mode while Lending was switched off elsewhere.
+            var page = document.querySelector('[data-scan-page]');
+            if (page && page.dataset.lendingEnabled === 'false') {
+                this.modes = this.modes.filter(function(m) {
+                    return m.id !== 'lend' && m.id !== 'return';
+                });
+                if (this.mode === 'lend' || this.mode === 'return') {
+                    this.mode = 'add';
+                    localStorage.setItem('shelf_scan_mode', 'add');
+                }
+            }
+
             // The manual panel's open state is seeded server-side from
             // ?add=manual, so there is no URL parsing here and no
             // open-then-populate flash.

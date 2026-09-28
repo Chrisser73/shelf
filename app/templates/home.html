@@ -13,7 +13,7 @@
             <a href="/scan" class="px-4 py-2 bg-shelf-card border border-shelf-border text-shelf-text rounded-lg text-sm hover:bg-shelf-hover transition-colors">Scan item</a>
             <a href="/scan?add=manual" class="px-4 py-2 bg-shelf-card border border-shelf-border text-shelf-text rounded-lg text-sm hover:bg-shelf-hover transition-colors">Add by hand</a>
             {% endif %}
-            <a href="/stats" class="px-4 py-2 bg-shelf-card border border-shelf-border text-shelf-text rounded-lg text-sm hover:bg-shelf-hover transition-colors">Statistics</a>
+            {% if feature_flags.stats %}<a href="/stats" class="px-4 py-2 bg-shelf-card border border-shelf-border text-shelf-text rounded-lg text-sm hover:bg-shelf-hover transition-colors">Statistics</a>{% endif %}
         </div>
     </div>
 
@@ -30,7 +30,7 @@
             <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="heart" class="w-4 h-4" aria-hidden="true"></i>Wishlist</p>
             <p class="text-3xl font-bold">{{ wishlist_count }}</p>
         </a>{% endif %}
-        {% if home_tiles.lent_out %}<a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+        {% if feature_flags.lending and home_tiles.lent_out %}<a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
             <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="compass" class="w-4 h-4" aria-hidden="true"></i>Lent out</p>
             <p class="text-3xl font-bold">{{ lent_out_count }}</p>
         </a>{% endif %}
