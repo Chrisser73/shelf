@@ -290,6 +290,14 @@ function browsePage() {
             var stored = sessionStorage.getItem('shelf-browse-qs');
             if (!stored) return false;
             var params = new URLSearchParams(stored);
+            // #117b: the author chip's name comes from the server, which a
+            // fragment replay never asks for — the chip would show an id. So
+            // an author filter restores as a full page load instead.
+            var author = document.querySelector('[name="author_filter"]');
+            if (params.get('author_filter') && author && !author.dataset.label) {
+                window.location.replace('/browse?' + stored);
+                return true;
+            }
             var applied = new URLSearchParams();
             var any = false;
             var self = this;
@@ -345,7 +353,17 @@ function browsePage() {
                     var opt = el.options[el.selectedIndex];
                     label = opt ? opt.text.replace(/ \(\d+\)$/, '') : el.value;
                 } else {
-                    label = def.prefix ? def.prefix + ': ' + el.value : el.value;
+                    // A hidden control may carry a display label (the author
+                    // filter's name) in place of its raw value.
+                    var shown = el.dataset.label || el.value;
+                    var prefix = def.prefix;
+                    if (def.name === 'author_filter') {
+                        // Author/Artist/Director/Developer, as the sort option
+                        // already switches with the Type filter.
+                        var creator = document.getElementById('sort-option-author');
+                        if (creator && creator.text) prefix = creator.text;
+                    }
+                    label = prefix ? prefix + ': ' + shown : shown;
                 }
                 if (def.prefix && el.tagName === 'SELECT') label = def.prefix + ': ' + label;
                 pills.push({name: def.name, label: label});
@@ -376,7 +394,11 @@ function browsePage() {
             var el = document.querySelector('[name="' + name + '"]');
             if (el) {
                 this.setControlValue(name, def ? def.clearTo : '');
-                htmx.trigger(el, el.tagName === 'SELECT' ? 'change' : 'keyup');
+                if (el.dataset.label) el.dataset.label = '';
+                // A hidden input ignores keyup, so it listens for change like
+                // a select does; text inputs keep their keyup trigger.
+                var isChange = el.tagName === 'SELECT' || el.type === 'hidden';
+                htmx.trigger(el, isChange ? 'change' : 'keyup');
             }
         },
 
@@ -390,6 +412,8 @@ function browsePage() {
                 if (def.clearTo === null) return;
                 self.setControlValue(def.name, def.clearTo);
             });
+            var author = document.querySelector('[name="author_filter"]');
+            if (author) author.dataset.label = '';
             sessionStorage.removeItem('shelf-browse-qs');
             var trigger = document.querySelector('[name="media_type_filter"]') || document.querySelector('[name="q"]');
             if (trigger) htmx.trigger(trigger, 'change');

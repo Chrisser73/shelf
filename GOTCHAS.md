@@ -619,6 +619,16 @@ python -m pytest tests/test_catalogue_add_boundaries.py tests/test_hardcover_isb
 grep -rn "in found.casefold()" app/ | grep -v services/authors.py
 python -m pytest tests/test_authors.py -q
 ```
+- **And `normalize()` is now an identity key, not only a matcher.** The author
+  index (#117b) keys each author on `" ".join(normalize(name))`, so a fold that
+  drops characters no longer just misses a cover — it merges or loses people.
+  It used to split on `[^a-z0-9]`, which deleted every non-Latin letter
+  (`刘慈欣` → `[]`, and `matches("Лев Толстой", "Лев Толстой")` was `False`);
+  it now splits on non-word runs in any script. Any change to `normalize()`
+  changes stored identities too, so it needs a `PARSER_VERSION` bump in
+  `app/services/authors.py`, which re-indexes on the next boot. Never key
+  identity on `matches()` (it merges "J. Smith" into "John Smith"). Evidence:
+  plan-review codex R1, `3393148` (2026-09-28).
 - **Status:** documented.
 
 ## G23 — When capturing a demo or screenshot right after a photo-intake import
@@ -5617,6 +5627,26 @@ grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py test
 - **Verify:** `grep -rn 'locator("span.text-shelf' tests/e2e/`
 - **Status:** documented. **Lint candidate:** refuse bare colour-class
   locators in `tests/e2e/` in `make check-tests`.
+
+## G127 — When an E2E test drives Browse's filter controls, or relies on a filter being restored
+
+- **Rule:** At mobile width the filter `<select>`s (Type, Location, Sort, …)
+  are folded away and not visible, so `select_option` times out. To make
+  Browse run a swap at both widths, use the grid/list toggle
+  (`[data-testid='view-list']` / `view-grid`), which stays visible. And a
+  filter that arrived **in the URL** — a link from an item page, a bookmark —
+  is not written to `sessionStorage` (`shelf-browse-qs`) until some swap runs:
+  `updateUrl()` is called only from the `htmx:afterSwap` listener (G6), never
+  on page load. A test of "leave and come back via a bare `/browse`" must run
+  a swap after the filtered page loads, or it tests whatever was stored before.
+- **Why:** the #117b restore test passed at desktop and timed out at 390 px on
+  the Type select; and arriving at `/browse?author_filter=N` by clicking an
+  author link left the previous session value in place, so the bare-`/browse`
+  return restored an older filter set, not the author.
+- **Evidence:** `67748d4` (2026-09-28), `tests/e2e/test_author_filter.py`.
+- **Status:** documented. The second half is also a product question — a
+  link-arrived filter is not what a later bare `/browse` restores — left for a
+  decision rather than changed silently.
 
 ## Graveyard
 

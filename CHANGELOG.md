@@ -6,6 +6,54 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-09-28
+
+An item's authors used to be one piece of text. Clicking it searched for that
+whole text, so on a book with a co-author, a translator or an introduction, the
+link found little besides the book you were already on. Each author is now a
+person of their own: every name on an item page is its own link, and Browse
+can show everything by one author.
+
+### Added
+
+- **Each author on an item page is its own link.** `Martin Fowler, Kent Beck`
+  is two links. A credit written with a role after a dash, such as
+  `Ken Liu - translator`, shows the role beside the name (*Ken Liu ·
+  translator*). Shelf knows the usual credit words (translator, editor,
+  narrator, illustrator, foreword, introduction, adaptation and similar). Any
+  other word after a dash stays part of the name.
+- **Browse filters to one author.** Click an author on an item page and Browse
+  shows everything by that person, with an **Author** chip that names them.
+  The chip says **Artist** or the matching word once a Type filter is set. The
+  filter combines with every other filter, and a Browse link you keep goes on
+  working after the item is edited.
+- **Spellings of the same name link to the same author.** `J.R.R. Tolkien` and
+  `J. R. R. Tolkien`, or `Stanisław Lem` and `Stanislaw Lem`, are one author.
+  `J. Smith` and `John Smith` stay two, because nothing says they are one
+  person.
+
+### Changed
+
+- **The author link on an item page no longer runs a text search.** It used to
+  search Browse for the whole authors text; it now filters to one author.
+  Searching still matches text, so typing `Ken Liu` into Search finds every
+  item whose authors contain those words, as before.
+- **The first start after the upgrade builds an author index.** It logs one
+  line, `Built author index: N items, M authors`. Your authors fields are only
+  read, never rewritten, and nothing changes in a CSV export or a portable
+  archive: the index is rebuilt from the authors field wherever the items land.
+
+### Known limitations
+
+- **A name stored surname-first reads as two authors.** `Williams, Robin`
+  cannot be told apart from two co-authors, so it gives "Williams" and
+  "Robin". Edit the field to `Robin Williams` and it becomes one.
+- **`&` and `and` inside a name never split it**, so a duo such as
+  `Simon & Garfunkel` stays one credit.
+- **There is no list of all authors and no author page.** An author is reached
+  from an item page, and renaming or merging authors is not offered; edit the
+  authors field instead.
+
 ## [0.55.0] - 2026-09-27
 
 Shelf has grown lending, valuation, store mode, sharing, series tracking and a
@@ -4501,6 +4549,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.56.0]: https://github.com/dgahagan/shelf/releases/tag/v0.56.0
 [0.55.0]: https://github.com/dgahagan/shelf/releases/tag/v0.55.0
 [0.54.0]: https://github.com/dgahagan/shelf/releases/tag/v0.54.0
 [0.53.0]: https://github.com/dgahagan/shelf/releases/tag/v0.53.0

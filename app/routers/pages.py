@@ -9,6 +9,7 @@ from app.features import require_feature
 from app.config import MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES
 from app.services.synopsis import SYNOPSIS_MEDIA_TYPES
 from app.currency import get_currency
+from app.services import author_index
 from app.services import browse_counts
 from app.services import lists
 from app.services import isbn as isbn_svc
@@ -119,6 +120,12 @@ async def browse(
 
         has_more = len(items) < total_filtered
 
+        # The author filter's chip shows a name, not an id (#117b).
+        author_filter_label = (
+            author_index.name_for(db, values["author_filter"])
+            if values["author_filter"] else None
+        )
+
         load_more_url = "/api/search?" + browse_filters.querystring(
             values, extra=["page=2"]
         )
@@ -136,6 +143,7 @@ async def browse(
         "load_more_url": load_more_url,
         "seven_days_ago": (datetime.now(tz=None) - timedelta(days=7)).strftime("%Y-%m-%d"),
         "initial_query": values["q"],
+        "author_filter_label": author_filter_label,
         "initial_filters": {name: values[name] for name in browse_filters.FILTER_NAMES},
     }
     # `render_oob_counts` is deliberately NOT set: `browse.html` includes
@@ -325,6 +333,8 @@ async def item_detail(
 
         reading_history = get_reading_history(db, item_id)
 
+        item_authors = author_index.authors_for(db, item_id)
+
         # Series progress from two labelled sources: local siblings and the
         # Hardcover series_meta row. Never blended into one number — see
         # .devdocs plan §4. NOCASE identity, matching /api/series/check, the
@@ -377,6 +387,7 @@ async def item_detail(
             "abs_url": abs_url,
             "reading_history": reading_history,
             "series_progress": series_progress,
+            "item_authors": item_authors,
         },
     )
 

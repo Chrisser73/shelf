@@ -417,8 +417,11 @@ class TestMigrationLoggingDefersOutsideTransaction:
         # Everything after 14 is pending in this fixture — derived rather than
         # hardcoded so adding a migration doesn't fail this test.
         pending = [m for m in MIGRATIONS if m[0] > 14]
-        assert len(logs) == len(pending)
+        applied = [line for line in logs if line.startswith("Applied migration")]
+        assert len(applied) == len(pending)
         assert any("Applied migration 15" in line for line in logs)
+        # The boot steps report through the same list (the author index build).
+        assert any(line.startswith("Built author index") for line in logs)
         # Nothing was emitted while the transaction was open.
         assert [r for r in caplog.records if "Applied migration" in r.getMessage()] == []
 

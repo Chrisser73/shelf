@@ -136,7 +136,7 @@ key material.
 
 ### Collection Management
 - Home overview — totals, what is lent out, missing covers, a media-type breakdown and recent additions, with Browse kept for searching and bulk editing
-- Filter and search by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), and custom tags
+- Filter and search by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), custom tags, and author — every author on an item page is a link to everything by that person, co-authors and translators each counted on their own
 - Shelf Fill — keep one shelf selected and scan item after item onto it; Arrange drags the copies on a shelf into the order they really sit in, or sorts them by title, creator, series, release or issue
 - Physical copies — own two of something and track them apart: add a copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes. Removing the copy marked primary promotes the next one and the item's location follows it
 - Trash — deleting an item or removing a copy moves it to Trash with its tags, loans, copies and history intact; editors restore, admins empty it, prompted once rows pass a retention window (180 days by default)

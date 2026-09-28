@@ -30,6 +30,22 @@ Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
 
+### After upgrading to 0.56.0
+
+**The first start builds an author index.** Shelf reads every item's authors
+field and records each author separately, so the item page can link each name
+and Browse can filter by one author. It takes a moment on the first start and
+logs one line — `Built author index: N items, M authors`. **No item data
+changes**: the authors field is only read, never rewritten, and a name that
+was split wrongly is fixed by editing the field (see
+[Items](user-guide/items.md#whats-on-the-page)).
+
+The index is not part of a CSV export or a portable archive. It is rebuilt
+from the authors field wherever the items land — after an import, a database
+restore, or a later release that changes how the field is read.
+
+**No migrations run.** Two tables are added alongside the existing ones.
+
 ### After upgrading to 0.51.0
 
 **`SHELF_TRUST_PROXY` is now the proxy's address.** Set it to the address
@@ -344,6 +360,8 @@ data even for a feature that is off on the receiving server. It is the safe way 
 a new server or hand your library to someone else, and it imports with a
 preview step that shows what's new, what's already there and how duplicates
 were matched. See [Import & export](user-guide/import-and-export.md).
+The author index is not in the archive either: it is rebuilt from each item's
+authors field on the receiving server.
 
 A sensible routine: an automated copy of `data/` (e.g. nightly via your
 backup tool), plus a portable archive before any big change.

@@ -43,6 +43,27 @@ its home.
   series and position, platform (games), synopsis. **Fetch synopsis** pulls
   a description from Open Library, Google Books or Hardcover if one wasn't
   captured on add.
+
+  **Each author is a link** to Browse filtered to that person's items (see
+  [the Author filter](browse-and-search.md#filters)). Shelf reads the authors
+  field as a comma-separated list: `Martin Fowler, Kent Beck` is two authors,
+  and `William E. Shotts, Jr.` stays one. A contributor written with a
+  role after a dash — `Cixin Liu, Ken Liu - translator` — shows the role
+  beside the name (*Ken Liu · translator*). Shelf knows the usual credit
+  words (translator, editor, narrator, illustrator, foreword, introduction,
+  adaptation and similar); any other word after a dash stays part of the
+  name. Names written differently
+  but meaning the same person, such as `J.R.R. Tolkien` and
+  `J. R. R. Tolkien` or `Stanisław Lem` and `Stanislaw Lem`, link to the same
+  author; `J. Smith` and `John Smith` are kept apart, since nothing says they
+  are one person.
+
+  The field itself is never rewritten — the links are worked out from it. So
+  if a name is split wrongly, fix the text with **Edit**. The common case is a
+  name stored surname-first: `Williams, Robin` reads as two authors, "Williams"
+  and "Robin", and editing it to `Robin Williams` makes it one. An `&` or an
+  `and` inside a name is never split, so a duo such as `Simon & Garfunkel`
+  stays one artist.
 - **Reading status** — Want to read / Reading / Read, with start and finish
   dates. Viewers can set this too; it's the one thing they can change. It
   appears on books, audiobooks, ebooks and comics — discs and

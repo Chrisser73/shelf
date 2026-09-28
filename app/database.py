@@ -386,6 +386,27 @@ CREATE TABLE IF NOT EXISTS item_tags (
 );
 CREATE INDEX IF NOT EXISTS idx_item_tags_tag ON item_tags(tag_id);
 
+-- The author index (#117b). An index over items.authors, which stays the
+-- record: app/services/author_index.py is the only writer, called from the
+-- item_write funnel and the boot rebuild. AUTOINCREMENT so an author id freed
+-- by garbage collection is never reused by a different person — a kept
+-- /browse?author_filter= URL must not silently point at someone else.
+CREATE TABLE IF NOT EXISTS authors (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    name_key   TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS item_authors (
+    item_id   INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    author_id INTEGER NOT NULL REFERENCES authors(id) ON DELETE CASCADE,
+    position  INTEGER NOT NULL,
+    role      TEXT,
+    PRIMARY KEY (item_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_item_authors_author ON item_authors(author_id);
+
 -- complete/hc_total/hc_missing/hc_checked_at are also added via ALTER in
 -- MIGRATIONS (16-19) for upgrades of a database that already has this
 -- table; baked in here too (same pattern as users.token_version above) so a
@@ -677,6 +698,10 @@ def _run_migrations(db: sqlite3.Connection) -> list[str]:
     retired = _retire_kids_book(db)
     if retired:
         logs.append(retired)
+    from app.services import author_index  # deferred, like item_merge above
+    built = author_index.rebuild_all(db)
+    if built:
+        logs.append(built)
     return logs
 
 

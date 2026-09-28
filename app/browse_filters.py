@@ -120,6 +120,21 @@ def _tag(value):
     )
 
 
+def _author(value):
+    """One author from the index (#117b) — an id, cast exactly as
+    `location_filter` is, so a hand-edited or stale value gives an empty grid
+    rather than a 500 (#40). `i` is already `items_live`, so a trashed item
+    cannot match whatever its index rows say."""
+    built = _column("ia.author_id", cast=int)(value)
+    if built == _NEVER:
+        return _NEVER
+    return (
+        "EXISTS (SELECT 1 FROM item_authors ia "
+        "WHERE ia.item_id = i.id AND ia.author_id = ?)",
+        built[1],
+    )
+
+
 @dataclass(frozen=True)
 class BrowseFilter:
     """One Browse filter, in every form the app needs it.
@@ -183,6 +198,10 @@ FILTERS: tuple[BrowseFilter, ...] = (
     BrowseFilter("owned", condition=_owned),
     BrowseFilter("lent_out", condition=_lent_out),
     BrowseFilter("tag", prefix="Tag", condition=_tag, quote_in_qs=True),
+    # Set from an item page's author link; a hidden control, since hundreds
+    # of authors make no usable dropdown. The chip shows the author's name
+    # (the control's data-label), never the id.
+    BrowseFilter("author_filter", prefix="Author", condition=_author),
     BrowseFilter("language", prefix="Language", condition=_column("i.language")),
     # `view` is the odd one: client-owned state (localStorage) that is sent to
     # the server so it can pick the grid or list template. It is not a filter

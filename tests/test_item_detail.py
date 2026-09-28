@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.services.item_copies import insert_copy
-from app.services.item_write import update_item_fields
+from app.services.item_write import insert_item, update_item_fields
 from tests.conftest import _insert_item, _insert_location
 
 
@@ -822,3 +822,70 @@ class TestCopiesBlock:
 
         assert "No location" in html
         assert "/browse?location_filter=None" not in html
+
+
+class TestAuthorLinks:
+    """T7 — each author of a co-authored item links separately to Browse's
+    per-author filter, rather than one link searching the whole joined
+    string (which for a co-authored book matched only that exact pairing)."""
+
+    @staticmethod
+    def _author_ids(db, item_id):
+        return [r[0] for r in db.execute(
+            "SELECT author_id FROM item_authors WHERE item_id = ? ORDER BY position",
+            (item_id,))]
+
+    def test_two_authors_render_separate_links_in_order_with_role(
+        self, viewer_client, db
+    ):
+        item_id = insert_item(
+            db, title="Three-Body", authors="Cixin Liu, Ken Liu - translator")
+        db.commit()
+        ids = self._author_ids(db, item_id)
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        first = html.index(f"/browse?author_filter={ids[0]}")
+        second = html.index(f"/browse?author_filter={ids[1]}")
+        assert first < second
+        assert "Cixin Liu" in html
+        assert "Ken Liu" in html
+        assert "&middot; translator" in html
+        assert "?q=" not in html
+
+    def test_single_author_renders_exactly_one_link(self, viewer_client, db):
+        item_id = insert_item(db, title="Solo", authors="Kent Beck")
+        db.commit()
+        author_id = self._author_ids(db, item_id)[0]
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert html.count("/browse?author_filter=") == 1
+        assert f"/browse?author_filter={author_id}" in html
+        assert "Kent Beck" in html
+
+    def test_index_rows_missing_falls_back_to_unlinked_text(
+        self, viewer_client, db
+    ):
+        """The index is derived; if its rows are gone (should not happen),
+        the page still shows the stored string, just without a link."""
+        item_id = insert_item(db, title="Orphaned", authors="Some Author")
+        db.commit()
+        db.execute("DELETE FROM item_authors WHERE item_id = ?", (item_id,))
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert "Some Author" in html
+        assert "/browse?author_filter=" not in html
+
+    def test_author_name_is_html_escaped(self, viewer_client, db):
+        item_id = insert_item(db, title="Escaped", authors='<b>Evil</b>, "Quoted" Name')
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert "<b>Evil</b>" not in html
+        assert "&lt;b&gt;Evil&lt;/b&gt;" in html
+        assert '"Quoted" Name' not in html
+        assert "&#34;Quoted&#34; Name" in html or "&quot;Quoted&quot; Name" in html

@@ -118,6 +118,18 @@ class TestBuildWhere:
             where, params = bf.build_where(values, exclude=f.name)
             assert where.count("?") == len(params)
 
+    def test_author_is_an_exists_over_the_index(self):
+        where, params = bf.build_where({"author_filter": "7"})
+        assert "EXISTS (SELECT 1 FROM item_authors ia" in where
+        assert "ia.item_id = i.id" in where
+        assert params == [7]
+
+    @pytest.mark.parametrize("value", ["abc", "1.5", "-", "9" * 22])
+    def test_an_uncastable_author_matches_nothing(self, value):
+        # Never None: that would drop the condition and show everything under
+        # an active Author chip.
+        assert bf.build_where({"author_filter": value}) == ("WHERE 1 = 0", [])
+
     def test_location_is_cast_to_int(self):
         _where, params = bf.build_where({"location_filter": "7"})
         assert params == [7]

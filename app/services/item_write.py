@@ -77,6 +77,7 @@ from typing import Any, Iterable, Mapping
 
 from app.config import MEDIA_TYPES, canonical_media_type
 from app.database import get_game_platforms
+from app.services import author_index
 from app.services import isbn as isbn_svc
 from app.services import item_copies
 from app.services import lists
@@ -600,6 +601,10 @@ def insert_item(db, fields: Mapping[str, Any] | None = None, *,
         item_copies.sync_primary_location(db, item_id, values["location_id"])
     _apply_membership(db, [item_id], wishlisted, values)
     tags.attach_pending(db, item_id)
+    # The author index (#117b). Not on the restored-twin return above: a
+    # restore changes no field, and the trashed row's index is still there.
+    if values.get("authors"):
+        author_index.reindex_item(db, item_id, values["authors"])
     return item_id
 
 
@@ -729,6 +734,8 @@ def update_item_fields(db, item_id: int, fields: Mapping[str, Any]) -> None:
     _refuse_owned_wishlist(db, wishlisted, fields, [item_id])
 
     values = _execute_update(db, fields, "id = ?", [item_id], "update_item_fields")
+    if "authors" in values:
+        author_index.reindex_item(db, item_id, values["authors"])
     if "location_id" in values and db.execute(
         "SELECT 1 FROM items_live WHERE id = ?", (item_id,)
     ).fetchone():
@@ -754,6 +761,8 @@ def update_items_fields(db, item_ids: Iterable[int],
     _refuse_owned_wishlist(db, wishlisted, fields, ids)
 
     values = _execute_update(db, fields, f"id IN ({marks})", ids, "update_items_fields")
+    if "authors" in values:
+        author_index.reindex_items(db, ids, values["authors"])
     existing_ids = [
         row["id"] for row in db.execute(
             f"SELECT id FROM items_live WHERE id IN ({marks})", ids

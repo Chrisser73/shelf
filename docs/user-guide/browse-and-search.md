@@ -68,8 +68,18 @@ Filter chips along the top, all combinable:
 | **Owned** | All / Owned / Wishlist / Not owned or wishlisted |
 | **Lent out** | Items currently checked out |
 | **Tag** | Any custom tag |
+| **Author** | One author, set by clicking their name on an [item page](items.md#whats-on-the-page) |
 | **Language** | Edition language (captured on lookup) |
 | **Source** | How the item arrived — a sync (RomM, Komga, Audiobookshelf), a metadata provider, a CSV import, Photo Intake, or Manual. Only sources your library actually contains are listed |
+
+The **Author** filter has no dropdown — a library can hold hundreds of names.
+You set it from an item page: each author there is a link, and clicking one
+opens Browse showing everything by that person. Its chip names the author, and
+takes the same word the Type filter gives the author column (**Artist** for
+music, and so on). It combines with every other filter, so "this author's
+books on the living-room shelf" is two clicks. It matches one person, where
+**Search** matches text: searching `Ken Liu` still finds every item whose
+author text contains those words.
 
 Counts next to each value update as you narrow down, and they tell you what
 you would get if you picked that value — counted against your other active

@@ -162,6 +162,15 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         # title to report here.
         "SELECT title FROM items WHERE id = ? AND deleted_at IS NOT NULL": 1,
     },
+    "app/services/author_index.py": {
+        # reindex_items: the author index covers trashed rows too (soft
+        # delete writes nothing to children), so the existence check before
+        # linking finds the rows the view hides (G107).
+        "SELECT id FROM items WHERE id IN (": 1,
+        # rebuild_all: the boot build indexes every physical row, trashed
+        # ones included, for the same reason.
+        "SELECT id, authors FROM items WHERE authors IS NOT NULL": 1,
+    },
     "app/services/trash.py": {
         # expired_count's two halves. It counts exactly the rows the views
         # hide: trashed items, and trashed copies whose item is live (the

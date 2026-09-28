@@ -1159,3 +1159,64 @@ class TestTheRetiredMediaTypeAlias:
         """Canonicalising must not become a way to smuggle a bad value in."""
         with pytest.raises(UnknownMediaType):
             insert_item(db, title="X", media_type="not_a_type")
+
+
+#: The author index (#117b) is written only by `app/services/author_index.py`.
+AUTHOR_INDEX_WRITE = re.compile(
+    r"(INSERT\s+INTO|DELETE\s+FROM)\s+(authors|item_authors)\b", re.I)
+AUTHOR_INDEX_IMPORT = re.compile(
+    r"from\s+app\.services\s+import\s+[^\n]*\bauthor_index\b"
+    r"|from\s+app\.services\.author_index\s+import"
+    r"|import\s+app\.services\.author_index\b")
+AUTHOR_INDEX_WRITER = "app/services/author_index.py"
+AUTHOR_INDEX_IMPORTERS = {
+    "app/services/item_write.py",  # the funnel keeps the index in step
+    "app/database.py",             # the boot-time build
+    "app/routers/pages.py",        # read helpers for Browse and the item page
+}
+
+
+def _author_index_offenders(root: Path, repo_root: Path):
+    """(writers, importers) outside the allowed sets, by repo-relative path (G88)."""
+    writers, importers = [], []
+    for path in root.rglob("*.py"):
+        rel = path.relative_to(repo_root).as_posix()
+        buf, line_for = _normalised_source(path)
+        if rel != AUTHOR_INDEX_WRITER:
+            writers += [f"{rel}:{line_for(m.start())}"
+                        for m in AUTHOR_INDEX_WRITE.finditer(buf)]
+        if rel not in AUTHOR_INDEX_IMPORTERS and rel != AUTHOR_INDEX_WRITER:
+            importers += [f"{rel}:{line_for(m.start())}"
+                          for m in AUTHOR_INDEX_IMPORT.finditer(buf)]
+    return writers, importers
+
+
+class TestAuthorIndexWritePath:
+    def test_only_author_index_writes_the_index(self):
+        writers, importers = _author_index_offenders(APP_DIR, REPO_ROOT)
+        assert not writers, (
+            "authors/item_authors are written only by "
+            f"{AUTHOR_INDEX_WRITER} (called from item_write):\n  "
+            + "\n  ".join(writers))
+        assert not importers, (
+            f"only {sorted(AUTHOR_INDEX_IMPORTERS)} may import author_index:\n  "
+            + "\n  ".join(importers))
+
+    def test_the_guard_sees_a_planted_writer_and_an_impostor(self, tmp_path):
+        """G31/G88: a write planted elsewhere — including in a file that only
+        shares the writer's basename — and a split literal are both caught."""
+        app = tmp_path / "app"
+        (app / "services").mkdir(parents=True)
+        (app / "routers").mkdir()
+        (app / "services" / "author_index.py").write_text(
+            'db.execute("INSERT INTO item_authors VALUES (1)")\n')
+        (app / "routers" / "author_index.py").write_text(
+            'db.execute("DELETE FROM authors WHERE id = ?")\n')
+        (app / "services" / "other.py").write_text(
+            'from app.services import author_index\n'
+            'db.execute("INSERT INTO "\n'
+            '           "item_authors (item_id) VALUES (?)")\n')
+        writers, importers = _author_index_offenders(app, tmp_path)
+        assert sorted(w.split(":")[0] for w in writers) == [
+            "app/routers/author_index.py", "app/services/other.py"]
+        assert [i.split(":")[0] for i in importers] == ["app/services/other.py"]

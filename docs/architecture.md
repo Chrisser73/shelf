@@ -114,7 +114,8 @@ Main tables: `items` (everything — books, discs, games; ~38 columns incl.
 `media_type`, `owned`, `reading_status`, `series_name`/`position`,
 `location_id`, value columns, language, external ids), `item_copies`,
 `locations`, `borrowers` + `checkouts`, `tags` (`name` unique NOCASE, plus a
-nullable `media_type` **scope**) + `item_tags`, `series_meta` (Hardcover
+nullable `media_type` **scope**) + `item_tags`, `authors` + `item_authors`
+(the author index, below), `series_meta` (Hardcover
 completeness), `reading_log`, `users`, `settings` (k/v, secrets encrypted),
 `share_links`, `scan_log`, `game_platforms`, `valuation_history`,
 `cover_queue`, `lists` (named lists — one seeded row, `wishlist`) +
@@ -151,6 +152,26 @@ lock, so a second boot does nothing. **It reads the physical `items` table**,
 allowlisted by path in `scripts/check_items_live.py`: a trashed row must be
 rewritten too, and the twin lookup predicts a `UNIQUE(isbn, media_type)`
 collision, which a view that hides trashed rows cannot do.
+
+**The author index is derived, never edited.** `authors` (one row per person:
+`name` as first indexed, `name_key` unique, `AUTOINCREMENT` so a freed id is
+never handed to someone else) and `item_authors` (`item_id`, `author_id`,
+`position`, `role`; `ON DELETE CASCADE` both ways, like `item_tags`) index
+`items.authors`, which stays the record. The invariant: *`item_authors` equals
+`authors.parse(items.authors)` for every physical row; it is written only by
+`app/services/author_index.py`, called from the `item_write` funnel and one
+boot step, and rebuilt whenever the parser version changes.* Trashed rows keep
+their index rows, as with tags — every read reaches them through `items_live`.
+The boot step, `author_index.rebuild_all`, runs after `_retire_kids_book`: when
+`settings.authors_index_version` is absent or differs from
+`authors.PARSER_VERSION` it re-indexes every physical row in one
+`BEGIN IMMEDIATE` transaction (links replaced, authors upserted by key, so
+unchanged names keep their ids) and records the version; otherwise it only
+sweeps authors that a purge or merge left with no link, and writes nothing
+when there are none. Archives exclude `settings`, so an imported library
+rebuilds. The two tables live only in `MIGRATION_TABLES` — no numbered
+migration, per `tests/test_schema_ownership.py`. `tests/test_item_write.py`
+pins that no other module writes them.
 
 **`kids_book` survives as an input alias.** `config.MEDIA_TYPE_ALIASES` maps
 it to `book` and `canonical_media_type()` resolves it, so an old CSV, an old
@@ -379,6 +400,23 @@ Intake, the synopsis lookup, Audiobookshelf and Hardcover sync, and the
 cover search all read position 0 as the primary author. Open Library's cap is
 on author *keys*, applied before any request, so a long contributor list costs
 at most four extra paced requests (~1.4 s) on an interactive scan.
+
+**`authors.parse()` is `join_names` run backwards**, and it feeds the author
+index (see Data). Its rule was measured against a real 622-row collection and
+does no more than that table needed: split on commas; a bare `Jr.`/`Sr.`/`II`
+/`III`/`IV` segment rejoins the name before it; a trailing ` - <one word>` is
+a role (`Ken Liu - translator`) only when the word is a known credit word
+(`_ROLE_WORDS`), so an unknown word or a longer dash phrase stays part of the
+name; a leading `and ` is dropped; `&` and an inner ` and ` never split, so
+`Simon & Garfunkel` stays one credit; repeats of a name key are dropped, first
+wins. Identity is `name_key = " ".join(normalize(name))` — the same
+normaliser `matches()` uses, and deliberately not `matches()` itself, which
+would merge "J. Smith" into "John Smith". `normalize()` keeps letters in any
+script, so a CJK, Cyrillic or Arabic name has a key. **Known limits,
+accepted:** `Last, First` (`Williams, Robin`) reads as two authors — nothing in
+the string tells it from two co-authors — and is fixed by editing the text;
+`et al` has no rule (none measured). A rule change bumps `PARSER_VERSION`, and
+the next boot re-indexes everything.
 
 The national leg is a registry, `services/national.py`: unhyphenated ISBN-13
 registration-group prefixes mapped to provider modules, resolved by

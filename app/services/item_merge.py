@@ -132,8 +132,10 @@ def reparent_children(db, keep_id: int, other_id: int) -> None:
     ``komga_records``, ``periodical_issues`` and the ``music_*`` tables each
     key a single item by design — a row there describes *this* item's
     external record or its track list, not a fact about the work that should
-    survive onto another row. They are left to the cascade. Everything whose
-    loss the user would notice, and could not reconstruct, is moved here — a
+    survive onto another row. They are left to the cascade. So is
+    ``item_authors``: it is an index derived from each row's own ``authors``
+    string, and the kept row's fill re-derives it through ``item_write``.
+    Everything whose loss the user would notice, and could not reconstruct, is moved here — a
     trashed copy is restorable, so its loss is exactly what that sentence
     forbids, and ``_reparent_copies`` selects from the physical table for
     that reason.

@@ -307,6 +307,16 @@
     <!-- Hidden view mode input for HTMX requests -->
     <input type="hidden" name="view" :value="viewMode">
 
+    {# The author filter (#117b), set from an item page's author link. Hidden —
+       hundreds of authors make no usable dropdown — so it carries its own
+       request (G54): clearing its chip fires `change` here. data-label is the
+       name browse.js shows on the chip; the id never reaches the user. #}
+    {% set author_value = (initial_filters or {}).get('author_filter', '') %}
+    <input type="hidden" name="author_filter" value="{{ author_value }}"
+           data-label="{{ author_filter_label or '' }}"
+           hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+           hx-include="{{ filter_includes('author_filter') }}">
+
     <!-- Item Grid -->
     <div id="item-grid">
         {% include "fragments/item_grid.html" %}

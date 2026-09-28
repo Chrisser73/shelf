@@ -3,8 +3,8 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-4398%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![E2E tests](https://img.shields.io/badge/e2e%20tests-299%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-4485%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![E2E tests](https://img.shields.io/badge/e2e%20tests-303%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
 A self-hosted home library catalog with barcode scanning, multi-mode scanning workflows, automatic metadata lookup, cover art, and collection management — all in a single Docker container.
@@ -191,6 +191,7 @@ each option before anything is sent.
 - **Arrange a shelf** — any location gets an Arrange page where you drag the physical copies into the order they actually sit in, or order them automatically by title, creator, series, release or issue. The order belongs to the copy, so duplicates stay distinct and can sit side by side
 - **Related media groups** — connect the different forms of one work (a novel, its audiobook, its film adaptation) as `format`, `related` or `adaptation`. Every item shows its whole group in a panel on the item page, with direct links marked apart from the ones reached through a third item; editors search the catalogue to add a relationship, viewers see the group read-only. A group is the connected set of links, so linking A to B and B to C presents all three. Matching is manual by design. See [Related Media](docs/related-media.md)
 - **Game platforms** — customizable list of platforms, add your own for niche or retro systems
+- **Authors as links** — every author on an item page links to everything by that person: `Martin Fowler, Kent Beck` is two authors, a translator is shown as one (*Ken Liu · translator*), and `J.R.R.` and `J. R. R. Tolkien` are the same author. Browse filters to one author and combines it with any other filter. The authors field stays exactly as stored — fix a mis-split by editing it. See [Items](docs/user-guide/items.md#whats-on-the-page)
 - **Checkout system** — lend to borrowers with the Lend scan mode, filter by "Lent Out" in browse
 - **Loan reminders** — overdue loans get a red badge, and an optional daily digest (ntfy or webhook) nags you about them; configure under Settings → Library → Lending
 - **Wishlist** — a list of what you want, kept alongside your catalog. Owning and wishing are separate: an item can also be neither — a book you read from the library stays in your catalog, with its reading history, without being owned or wished for
