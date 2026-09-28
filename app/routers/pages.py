@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 
 from app import browse_filters, features, nav
 from app.auth import require_role
-from app.features import require_feature
+from app.features import feature_enabled,  require_feature
 from app.config import (
     MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES, STATUS_MEDIA_TYPES,
     status_labels, READ_LABELS, WATCH_LABELS, PLAY_LABELS,
@@ -50,6 +50,10 @@ async def index(
             **summary,
             "media_type_labels": MEDIA_TYPES,
             "home_tiles": home_tiles,
+            "feature_flags": {
+                "lending": feature_enabled("lending"),
+                "stats": feature_enabled("stats"),
+            },
         },
     )
 
@@ -167,6 +171,11 @@ async def browse(
         "initial_query": values["q"],
         "author_filter_label": author_filter_label,
         "initial_filters": {name: values[name] for name in browse_filters.FILTER_NAMES},
+        "always_show_game_title": always_show_game_title,
+        "show_platform_logo_in_collection": show_platform_logo_in_collection,
+        "show_collector_condition_in_collection": show_collector_condition_in_collection,
+        "platform_logo_paths": platform_logo_paths,
+        "game_platforms": game_platforms,
     }
     # `render_oob_counts` is deliberately NOT set: `browse.html` includes
     # `fragments/filter_counts_oob.html` via the item grid, and setting it
@@ -241,7 +250,7 @@ async def scan(
         {"media_types": MEDIA_TYPES, "game_platforms": game_platforms,
          "locations": locations, "borrowers": borrowers,
          "manual_open": add == "manual", "manual_prefill": manual_prefill,
-         "off_scan_modes": features.disabled_scan_modes()},
+         "off_scan_modes": features.disabled_scan_modes(),"lending_enabled": feature_enabled("lending")},
     )
 
 
@@ -779,6 +788,7 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
          "feature_rows": features_rows,
          "profile_rows": profile_rows,
          "current_profile": current_profile,
+         "lending_enabled": feature_enabled("lending"),
          "borrower_error_message": borrower_error_message,
          "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats,
          "tags": tags, "media_types": MEDIA_TYPES,

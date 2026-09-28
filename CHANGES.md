@@ -4,6 +4,21 @@ This file is the central record of customizations in this fork. The upstream
 [`README.md`](README.md) continues to document Shelf itself; this file covers
 only added or changed fork-specific features.
 
+## V1.2.0 — Upgrade V1.2
+
+- The global **Features** controls now consistently govern the matching UI.
+  When Lending is off, Scan no longer offers Lend or Return, the Home "Lent
+  out" tile and its personal Appearance option are hidden, and the Lending
+  settings card points to Features instead of exposing inactive controls.
+  A browser that remembered Lend or Return automatically returns to Add.
+- When Statistics is off, its direct Home link is hidden too.
+- These are availability rules for the whole Shelf; personal Appearance
+  preferences are deliberately retained and become visible again when the
+  feature is enabled. No collection or lending data is deleted.
+- Browse now supplies platform labels consistently to both first-page and
+  asynchronously refreshed list views, including the optional Platform
+  column.
+
 ## V1.0.0 — Upgrade V1
 
 This first fork release bundles the platform-aware game catalogue, Lucide UI

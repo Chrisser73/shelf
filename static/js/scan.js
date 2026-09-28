@@ -106,6 +106,21 @@ function scanPage() {
         init() {
             var self = this;
 
+            // Lending is an admin-wide feature, not merely an action that
+            // happens to fail server-side. Remove its modes before Alpine
+            // paints, and repair a browser that remembered one as its last
+            // selected mode while Lending was switched off elsewhere.
+            var page = document.querySelector('[data-scan-page]');
+            if (page && page.dataset.lendingEnabled === 'false') {
+                this.modes = this.modes.filter(function(m) {
+                    return m.id !== 'lend' && m.id !== 'return';
+                });
+                if (this.mode === 'lend' || this.mode === 'return') {
+                    this.mode = 'add';
+                    localStorage.setItem('shelf_scan_mode', 'add');
+                }
+            }
+
             // Lending off (or any feature whose scan_modes the registry
             // disabled) removes its modes from the row. Read through the
             // root's data attribute, tolerating its absence or an empty
