@@ -81,7 +81,7 @@ PROMPT = (
     "about the item — use null whenever the digits are not visible. "
     f"(4) Set media_type to one of: {', '.join(MEDIA_TYPES)}. For video games, "
     "also provide the console or platform name in platform, the publisher and release year when recognizable, "
-    "and collector_condition as one of cib, boxed or loose when the physical packaging makes it clear; otherwise use null. "
+    "and collector_condition as one of cib, boxed or loose when the physical packaging makes it clear; otherwise omit that field. "
     "(5) The response property is named books for backward compatibility, but "
     "it must contain every catalog item, not only books. "
     "(6) Skip objects that are not catalog items."
@@ -103,7 +103,7 @@ JSON_ONLY_SUFFIX = (
     # _clean would coerce the latter to "read", silently dropping the badge.
     ' Respond with JSON only. Each "source" must be exactly "read" or '
     '"recognized"; use JSON null for an unread creator or ISBN. Example: '
-    '{"books": [{"title": "Dune", "authors": null, "publisher": null, "publish_year": null, "isbn": null, "media_type": "book", "platform": null, "collector_condition": null, "source": "read"}]}'
+    '{"books": [{"title": "Dune", "authors": null, "publisher": null, "publish_year": null, "isbn": null, "media_type": "book", "platform": null, "source": "read"}]}'
 )
 
 # Local models can recognize a cover or cartridge yet return an empty list when
@@ -136,7 +136,10 @@ BOOKS_SCHEMA = {
                     "isbn": {"type": ["string", "null"]},
                     "media_type": {"type": "string", "enum": list(MEDIA_TYPES)},
                     "platform": {"type": ["string", "null"]},
-                    "collector_condition": {"type": ["string", "null"], "enum": ["cib", "boxed", "loose", None]},
+                    # Anthropic structured output rejects mixed null/string
+                    # enums. The property is optional, so absence cleanly
+                    # represents an unknown condition for every provider.
+                    "collector_condition": {"type": "string", "enum": ["cib", "boxed", "loose"]},
                     "source": {"type": "string", "enum": ["read", "recognized"]},
                 },
                 "required": ["title", "authors", "isbn", "media_type", "source"],
