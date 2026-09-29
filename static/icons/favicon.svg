@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Based on apps_game_launcher.svg from Papirus icon theme.
+  Source: https://github.com/PapirusDevelopmentTeam/papirus-icon-theme
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="Shelf">
+  <defs>
+    <filter id="shadow" x="-.08" y="-.08" width="1.16" height="1.16"><feGaussianBlur stdDeviation="3.2"/></filter>
+  </defs>
+  <circle cx="96" cy="100" r="80" fill="#000" opacity=".2" filter="url(#shadow)"/>
+  <circle cx="96" cy="96" r="80" fill="#7054e0"/>
+  <path d="M96 16A80 80 0 0016 96a80 80 0 00.02.47A80 80 0 0196 17a80 80 0 0179.97 79.51A80 80 0 00176 96 80 80 0 0096 16z" fill="#fff" opacity=".1"/>
+  <g fill="#000" opacity=".2" transform="translate(0 2)">
+    <circle cx="71" cy="75" r="18"/><circle cx="71" cy="120" r="18"/><circle cx="120" cy="120" r="18"/>
+    <path d="M109 60a4 4 0 00-2.83 6.83l8.67 8.67-8.67 8.67a4 4 0 005.66 5.66l8.67-8.67 8.67 8.67a4 4 0 005.66-5.66l-8.67-8.67 8.67-8.67a4 4 0 00-5.66-5.66l-8.67 8.67-8.67-8.67A4 4 0 00109 60z"/>
+  </g>
+  <g fill="#fff"><circle cx="71" cy="75" r="18"/><circle cx="71" cy="120" r="18"/><circle cx="120" cy="120" r="18"/></g>
+  <g fill="#7054e0"><circle cx="71" cy="75" r="10"/><circle cx="71" cy="120" r="10"/><circle cx="120" cy="120" r="10"/></g>
+  <g fill="#fff764"><path d="M132 58a4 4 0 00-2.83 1.17l-23 23a4 4 0 005.66 5.66l23-23A4 4 0 00132 58z"/><path d="M109 58a4 4 0 00-2.83 6.83l23 23a4 4 0 005.66-5.66l-23-23A4 4 0 00109 58z"/></g>
+</svg>
