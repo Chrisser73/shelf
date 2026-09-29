@@ -466,6 +466,10 @@ templates.env.globals["browse_filter_config"] = browse_filters.client_config
 # Browse's list-view column set is derived, not written — see app/browse_columns.py.
 templates.env.globals["browse_columns"] = browse_columns.COLUMNS
 templates.env.globals["browse_column_config"] = browse_columns.client_config
+# A template reads a flag through this one global, never a per-route context
+# key, so a fragment re-rendered from a new route can't forget it — an
+# unknown key raises rather than rendering as falsy.
+templates.env.globals["feature_on"] = feature_enabled
 
 # Wrap TemplateResponse to auto-inject 'user' from request.state
 _original_template_response = templates.TemplateResponse

@@ -816,6 +816,14 @@ assert messages == ["Delete location 'Shelf A'?"]
   Mutation-checked: commenting out the `confirm()` in `browse.js` fails it with
   `expected exactly one confirm(), got []`. **Every dialog handler in the suite
   now records its message**, so the Verify grep below should stay all-green.
+- **Recording is not enough if the dialog is optional.** A handler that
+  asserts "no dialog when nothing is at stake, else the exact text" is
+  vacuous whenever the shared session DB happens to hold nothing at stake,
+  which is every clean run. `tests/e2e/test_feature_sweep.py`'s `lending_off`
+  fixture took the no-dialog arm on every run until the Codex diff review of
+  `plan-feature-profiles-sweep` (2026-09-28). Seed the state that makes the
+  dialog fire, remove it in teardown, and assert the exact text; a no-dialog
+  case, if wanted, is a separate test.
 - **Verify:** every dialog handler in the e2e suite records its message —
   each hit below should sit next to an assertion on the recorded list:
 
@@ -4263,6 +4271,16 @@ grep -n "NOT NULL" app/database.py | grep -i "ALTER TABLE items"
 grep -rn 'x-show="[^"]*"' app/templates/ | grep -E 'name="[a-z_]+"' | grep -v ':disabled'
 ```
 
+- **Two ways to miss it, both from one plan.** `plan-feature-profiles-sweep`
+  (2026-09-28) cleared Scan's Lend-only `borrower_id` select because
+  "`scan.js` sends `borrower_id` only in `lend` mode". That read the
+  `formData.set(...)` line and missed the `new FormData(form)` above it, which
+  collects every successful control first; the Codex diff review caught the
+  stale POST. The grep above missed it too: the `x-show` sits on a wrapper
+  `<div>` and the named `<select>` is a child, on another line. Check the
+  submission path the code actually builds, and read the wrapper as well as
+  the control. Fixed with `:disabled="mode !== 'lend'"` and an E2E pin that
+  reads the Add-mode POST body (`tests/e2e/test_scan.py`).
 - **Status:** documented — a lint candidate, and the grep above is most of
   one. What stops it graduating is that "hidden because it does not apply" and
   "hidden but still meant" are indistinguishable from the markup.
@@ -5082,6 +5100,14 @@ python -m pytest tests/test_copies_live_contract.py -q
     re-add path failed loudly because the guards correctly miss a trashed row
     and the lookup does run; stub it with a *different* value instead, so
     "shows the stored row" is an assertion and not a tautology.
+- **A presence check that the page chrome satisfies.** The render census
+  (`tests/test_feature_sweep.py`, `8e4ec83`, 2026-09-28) first counted every
+  URL attribute on a page. The nav bar links `/series`, `/stats`, `/store`,
+  `/discover` and the rest on **every** page, so the "each swept feature
+  renders with everything on" half was true for every tab feature no matter
+  what the page body did. Exclude the chrome (nav links carry
+  `data-nav-tab` / `data-nav-menu-tab`) from a presence half, and keep it in
+  the absence half, where it is a real check.
 - **Status:** documented. Not a lint candidate — whether a mutation aimed at
   the right line is a judgement about intent.
 
@@ -5647,6 +5673,29 @@ grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py test
 - **Status:** documented. The second half is also a product question — a
   link-arrived filter is not what a later bare `/browse` restores — left for a
   decision rather than changed silently.
+
+## G128 — When adding a guard to a template line a test pins by its literal source
+
+- **Rule:** before editing a template condition, grep `tests/` for the exact
+  line (`grep -rn "if item.source == 'romm'" tests/`). Where a test reads the
+  template's **source** and asserts that line, add the new condition as an
+  inner `{% if %}` and leave the pinned line byte-identical, rather than
+  extending it with `and …`.
+- **Why:** such tests exist to fix a structural fact (the RomM action is a
+  sibling of the item link, not inside it; the script tags are one per line).
+  Extending the pinned line changes nothing the test cares about, but it
+  reddens the test. The plan says an existing test must pass unmodified, so
+  the builder is then stuck between breaking acceptance and editing a pin.
+- **Evidence:** `plan-feature-profiles-sweep`, 2026-09-28.
+  `tests/test_romm_browse_action.py` pins `{% if item.source == 'romm' %}` in
+  `item_card.html`, so the RomM guard nests `feature_on('romm')` inside it
+  (`0ba7b93`). `test_romm_full_integration.py:115` and
+  `test_komga_full_integration.py:123` pin the `<script>` tag lines in
+  `item_detail.html`, so each tag was wrapped with its line unchanged
+  (`8c31fef`). The impl plan's guard table had called for the extended form.
+- **Verify:** `grep -rln "read_text()" tests/ | xargs grep -lE "\.html"`
+  lists the tests that read template source.
+- **Status:** documented.
 
 ## Graveyard
 

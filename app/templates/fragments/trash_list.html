@@ -64,7 +64,7 @@
             <div class="min-w-0 basis-full sm:flex-1">
                 <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-shelf-text text-sm font-medium truncate">{{ row.title }}</span>
-                    {% if row.has_open_loan %}
+                    {% if row.has_open_loan and feature_on('lending') %}
                     <span data-testid="trash-loaned-{{ row.id }}"
                           class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-500/90 text-white shrink-0">Loaned</span>
                     {% endif %}

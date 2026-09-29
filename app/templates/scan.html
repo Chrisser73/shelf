@@ -5,7 +5,7 @@
 <script src="/static/vendor/zxing-browser-0.1.5.min.js"></script>
 {% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto" x-data="scanPage">
+<div class="max-w-3xl mx-auto" x-data="scanPage" data-off-modes="{{ off_scan_modes }}">
 
     <!-- Mode Switcher -->
     <div class="flex flex-wrap gap-2 mb-4">
@@ -147,7 +147,7 @@
                 <!-- Borrower (lend only) -->
                 <div x-show="mode === 'lend'" x-transition style="display:none">
                     <label class="block text-sm font-medium text-shelf-muted mb-1">Borrower</label>
-                    <select name="borrower_id" x-model="borrowerId"
+                    <select name="borrower_id" x-model="borrowerId" :disabled="mode !== 'lend'"
                             class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2.5 text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none">
                         <option value="">Select borrower...</option>
                         {% for b in borrowers %}

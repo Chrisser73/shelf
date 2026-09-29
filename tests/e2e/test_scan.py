@@ -2450,3 +2450,53 @@ def test_shelf_fill_enter_submits_with_default_tags(live_server, authed_page):
 
     assert _item_tag_names(data_dir, item_id) == []
     assert_page_clean(authed_page)
+
+
+def test_add_scan_after_lend_does_not_post_the_hidden_borrower(live_server, authed_page):
+    """G90: `x-show` hides the Lend-only borrower select but leaves it in the
+    form, and scan.js builds its body with `new FormData(form)`. Only
+    `:disabled` keeps a borrower picked in Lend out of an Add-mode POST.
+    The request is intercepted and answered here, so nothing is written."""
+    from urllib.parse import parse_qs
+
+    data_dir = live_server["data_dir"]
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        borrower = conn.execute(
+            "INSERT INTO borrowers (name) VALUES ('Hidden Borrower')"
+        ).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    def _answer(route):
+        route.fulfill(status=200, content_type="text/html", body="")
+
+    try:
+        authed_page.route("**/api/scan", _answer)
+        authed_page.goto(f"{live_server['url']}/scan")
+        switcher = authed_page.locator("div.flex.flex-wrap.gap-2.mb-4")
+        switcher.get_by_role("button", name="Lend", exact=True).click()
+        borrower_select = authed_page.locator('select[name="borrower_id"]')
+        expect(borrower_select).to_be_visible()
+        borrower_select.select_option(str(borrower))
+
+        switcher.get_by_role("button", name="Add", exact=True).click()
+        expect(borrower_select).to_be_hidden()
+
+        authed_page.locator("#isbn-input").fill("9780000000002")
+        with authed_page.expect_request(
+            lambda r: r.method == "POST" and r.url.endswith("/api/scan")
+        ) as request_info:
+            authed_page.locator("#isbn-input").press("Enter")
+        posted = parse_qs(request_info.value.post_data or "", keep_blank_values=True)
+        assert posted.get("mode") == ["add"], posted
+        assert "borrower_id" not in posted, posted
+    finally:
+        authed_page.unroute("**/api/scan")
+        conn = sqlite3.connect(str(data_dir / "shelf.db"))
+        try:
+            conn.execute("DELETE FROM borrowers WHERE id = ?", (borrower,))
+            conn.commit()
+        finally:
+            conn.close()

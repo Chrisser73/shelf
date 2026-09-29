@@ -21,7 +21,8 @@ reading status, or anything about users. It's a cover wall with titles.
   wishlist link you sent in November is still right in December.
 - With Sharing turned off in Settings → **Features**, every link answers
   "Not found" until you turn it back on. The links are kept, and they work
-  again as soon as Sharing is on.
+  again as soon as Sharing is on. Meanwhile the **Sharing** card still lists
+  them, but cannot create, copy, open or revoke one.
 
 ## Outside the LAN
 

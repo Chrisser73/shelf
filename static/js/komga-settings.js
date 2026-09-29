@@ -131,35 +131,41 @@
             setStatus(data.message || (data.ok ? 'Library selection saved' : 'Save failed'), Boolean(data.ok));
         });
 
-        document.getElementById('komga-sync').addEventListener('click', function () {
-            result.textContent = '';
-            progress.textContent = 'Starting Komga sync…';
-            progressBar.style.width = '0%';
-            const stream = new EventSource('/api/komga/sync/stream');
-            stream.onmessage = function (event) {
-                const data = JSON.parse(event.data);
-                if (data.type === 'progress') {
-                    const pct = data.total ? Math.round(data.current / data.total * 100) : 0;
-                    progress.textContent = data.current + ' / ' + data.total + ' — ' + data.title + ' (' + data.status + ')';
-                    progressBar.style.width = pct + '%';
-                } else if (data.type === 'done') {
-                    progressBar.style.width = '100%';
-                    progress.textContent = 'Sync complete';
-                    result.textContent = 'Created: ' + data.created + ', adopted: ' + data.adopted + ', updated: ' + data.updated + ', skipped: ' + data.skipped + (data.in_trash ? ', in Trash: ' + data.in_trash : '') + ', errors: ' + data.errors;
-                    stream.close();
-                } else if (data.type === 'error') {
-                    progress.textContent = '';
-                    result.textContent = data.message || 'Sync failed';
+        // The Sync Now button is gone while the Komga feature is off
+        // (app/templates/fragments/settings/komga.html), so bind only when
+        // it rendered.
+        const syncButton = document.getElementById('komga-sync');
+        if (syncButton) {
+            syncButton.addEventListener('click', function () {
+                result.textContent = '';
+                progress.textContent = 'Starting Komga sync…';
+                progressBar.style.width = '0%';
+                const stream = new EventSource('/api/komga/sync/stream');
+                stream.onmessage = function (event) {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'progress') {
+                        const pct = data.total ? Math.round(data.current / data.total * 100) : 0;
+                        progress.textContent = data.current + ' / ' + data.total + ' — ' + data.title + ' (' + data.status + ')';
+                        progressBar.style.width = pct + '%';
+                    } else if (data.type === 'done') {
+                        progressBar.style.width = '100%';
+                        progress.textContent = 'Sync complete';
+                        result.textContent = 'Created: ' + data.created + ', adopted: ' + data.adopted + ', updated: ' + data.updated + ', skipped: ' + data.skipped + (data.in_trash ? ', in Trash: ' + data.in_trash : '') + ', errors: ' + data.errors;
+                        stream.close();
+                    } else if (data.type === 'error') {
+                        progress.textContent = '';
+                        result.textContent = data.message || 'Sync failed';
+                        result.className = 'mt-2 text-xs text-shelf-error';
+                        stream.close();
+                    }
+                };
+                stream.onerror = function () {
+                    result.textContent = 'Connection to sync stream was lost';
                     result.className = 'mt-2 text-xs text-shelf-error';
                     stream.close();
-                }
-            };
-            stream.onerror = function () {
-                result.textContent = 'Connection to sync stream was lost';
-                result.className = 'mt-2 text-xs text-shelf-error';
-                stream.close();
-            };
-        });
+                };
+            });
+        }
 
         loadStatus();
     }

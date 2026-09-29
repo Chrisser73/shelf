@@ -88,6 +88,11 @@ be turned off.
   gate, every exemption names a real route, every nav tab belongs to exactly
   one feature or to `CORE_NAV_TABS`, and every gate resolves after its role
   check.
+- **The render census** (`tests/test_feature_sweep.py`) is its page-level
+  counterpart: with each feature off in turn, the pages that stay on carry
+  none of its gated URLs and none of its registry `client` names (the
+  scripts and Alpine components its JS reaches routes through); with
+  everything on, each swept feature's references render.
 
 The nav drops a disabled feature's tab in `visible_tabs`, beside the role and
 integration checks. Manual tab hiding (Settings → Navigation) stays

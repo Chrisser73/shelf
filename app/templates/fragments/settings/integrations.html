@@ -2,6 +2,7 @@
    which was 1,517 lines: the largest template with the thinnest E2E
    coverage. Included by settings.html inside its `settingsTabs` x-data,
    so `tab` and `setTab()` resolve from the parent scope. #}
+{% import "fragments/settings/feature_off_note.html" as feature_notes %}
     <!-- Integrations Tab -->
     <div x-show="tab === 'integrations'" class="space-y-8">
 
@@ -15,6 +16,7 @@
             <h2 class="text-lg font-semibold">Audiobookshelf Sync</h2>
             <button @click="showAbsHelp = true" class="text-xs text-shelf-accent2 hover:text-shelf-accent transition-colors">Setup guide</button>
         </div>
+        {{ feature_notes.feature_off_note('abs_sync') }}
 
         <!-- Help Modal -->
         <div x-show="showAbsHelp" x-transition.opacity class="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center" @click.self="showAbsHelp = false" style="display:none">
@@ -95,12 +97,15 @@
         </form>
 
         <div class="border-t border-shelf-border pt-4">
+            {% if feature_on('abs_sync') %}
             <button @click="startSync()"
                     :disabled="syncing || !absSyncReady"
+                    data-testid="abs-sync-now"
                     class="px-4 py-2 bg-shelf-hover text-shelf-text rounded-lg text-sm hover:bg-shelf-border transition-colors disabled:opacity-50">
                 <span x-show="!syncing" x-text="syncLabel"></span>
                 <span x-show="syncing">Syncing...</span>
             </button>
+            {% endif %}
 
             <!-- Progress bar -->
             <div x-show="syncing && syncTotal > 0" class="mt-3">
@@ -188,11 +193,14 @@
                                 <span x-show="!libsSaving">Save Selection</span>
                                 <span x-show="libsSaving">Saving&hellip;</span>
                             </button>
+                            {% if feature_on('abs_sync') %}
                             <button @click="cleanup()" :disabled="cleaning || excludedIds().length === 0"
+                                    data-testid="abs-cleanup"
                                     class="px-3 py-1.5 bg-shelf-error/20 text-shelf-error rounded-lg text-xs hover:bg-shelf-error/30 transition-colors disabled:opacity-50">
                                 <span x-show="!cleaning">Move Excluded Items to Trash</span>
                                 <span x-show="cleaning">Moving&hellip;</span>
                             </button>
+                            {% endif %}
                         </div>
                         <p class="text-xs text-shelf-muted">Saves the selection, then moves items already synced from unchecked libraries to Trash.</p>
                         <template x-if="cleanResult && cleanResult.ok">
@@ -212,6 +220,7 @@
             <h2 class="text-lg font-semibold">Hardcover</h2>
             <button @click="showHcHelp = true" class="text-xs text-shelf-accent2 hover:text-shelf-accent transition-colors">Setup guide</button>
         </div>
+        {{ feature_notes.feature_off_note('hardcover') }}
 
         <!-- Help Modal -->
         <div x-show="showHcHelp" x-transition.opacity class="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center" @click.self="showHcHelp = false" style="display:none">
@@ -272,8 +281,9 @@
             </button>
         </form>
 
+        {% if feature_on('hardcover') %}
         <!-- Import from Hardcover -->
-        <div class="border-t border-shelf-border pt-4 mt-4">
+        <div class="border-t border-shelf-border pt-4 mt-4" data-testid="hc-import">
             <h3 class="text-sm font-semibold mb-3">Import Library from Hardcover</h3>
 
             <!-- Status filter checkboxes -->
@@ -366,6 +376,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
         <!-- Sync Schedule -->
         <div class="border-t border-shelf-border pt-4 mt-4">
@@ -382,8 +393,9 @@
             </form>
         </div>
 
+        {% if feature_on('hardcover') %}
         <!-- Export to Hardcover -->
-        <div class="border-t border-shelf-border pt-4 mt-4">
+        <div class="border-t border-shelf-border pt-4 mt-4" data-testid="hc-export">
             <h3 class="text-sm font-semibold mb-3">Export to Hardcover</h3>
             <p class="text-xs text-shelf-muted mb-3">Push your Shelf collection to your Hardcover library. Only items with an ISBN can be exported.</p>
 
@@ -444,6 +456,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
     </div>
 
     <!-- Valuation -->
@@ -454,6 +467,7 @@
             <h2 class="text-lg font-semibold">Collection Valuation</h2>
             <button @click="showHelp = true" class="text-xs text-shelf-accent2 hover:text-shelf-accent transition-colors">How to get a key?</button>
         </div>
+        {{ feature_notes.feature_off_note('valuation') }}
 
         <!-- Help Modal -->
         <div x-show="showHelp" x-transition.opacity class="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center" @click.self="showHelp = false" style="display:none">
@@ -516,12 +530,15 @@
             </button>
         </form>
         <div class="border-t border-shelf-border pt-4 space-y-2">
+            {% if feature_on('valuation') %}
             <button @click="startValuation()"
                     :disabled="valuating || (!apiKey && !apiKeySaved)"
+                    data-testid="valuation-run"
                     class="px-4 py-2 bg-shelf-hover text-shelf-text rounded-lg text-sm hover:bg-shelf-border transition-colors disabled:opacity-50">
                 <span x-show="!valuating" x-text="(apiKey || apiKeySaved) ? 'Valuate Collection' : 'Enter API key to valuate'"></span>
                 <span x-show="valuating">Valuating...</span>
             </button>
+            {% endif %}
 
             {% if currency().code != "USD" %}
             <p class="text-xs text-shelf-muted">ISBNdb prices are USD list prices. Shelf applies no conversion — batch valuation will store USD amounts displayed with your configured currency symbol.</p>
@@ -569,7 +586,9 @@
                 </div>
             </div>
 
-            <a href="/api/valuation/report" class="text-shelf-accent2 hover:text-shelf-accent text-sm inline-block">View Valuation Report</a>
+            {% if feature_on('valuation') %}
+            <a href="/api/valuation/report" data-testid="valuation-report" class="text-shelf-accent2 hover:text-shelf-accent text-sm inline-block">View Valuation Report</a>
+            {% endif %}
         </div>
     </div>
 
@@ -726,6 +745,7 @@
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6"
          x-data="{ visionProvider: '{{ settings.get('vision_provider', '') }}' }">
         <h2 class="text-lg font-semibold mb-1">Photo Intake (Vision)</h2>
+        {{ feature_notes.feature_off_note('intake') }}
         <p class="text-sm text-shelf-muted mb-4">Bulk-add books by photographing a shelf, a stack, or covers face-up &mdash; a vision model reads spines and recognizes covers. Use the Anthropic API (best accuracy, pay per photo), any OpenAI-compatible endpoint (OpenAI, OpenRouter, or a local server like vLLM / LM Studio), or a local Ollama model (free and private, needs a vision-capable model like gemma3).</p>
         <form action="/api/settings/vision" method="post" class="space-y-3">
             <div>

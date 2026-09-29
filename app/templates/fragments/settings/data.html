@@ -2,6 +2,7 @@
    which was 1,517 lines: the largest template with the thinnest E2E
    coverage. Included by settings.html inside its `settingsTabs` x-data,
    so `tab` and `setTab()` resolve from the parent scope. #}
+{% import "fragments/settings/feature_off_note.html" as feature_notes %}
     <!-- Data Tab -->
     <div x-show="tab === 'data'" class="space-y-8">
 
@@ -228,6 +229,7 @@
     <!-- Share Links -->
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6" x-data="sharePanel">
         <h2 class="text-lg font-semibold mb-1">Sharing</h2>
+        {{ feature_notes.feature_off_note('share') }}
         <p class="text-sm text-shelf-muted mb-4">Public read-only links to your wishlist (for gift ideas) or collection. Anyone with the link can view titles, authors, and covers — never locations, loans, or values. Revoke a link at any time.</p>
 
         {% if share_links %}
@@ -237,6 +239,7 @@
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if sl.scope == 'wishlist' %}bg-shelf-warning/90 text-black{% else %}bg-shelf-accent/80 text-white{% endif %} uppercase">{{ sl.scope }}</span>
                 <span class="text-sm">{{ sl.label or 'Untitled link' }}</span>
                 <code class="text-xs text-shelf-muted truncate max-w-[220px]">/share/{{ sl.token }}</code>
+                {% if feature_on('share') %}
                 <div class="ml-auto flex items-center gap-2">
                     <button type="button" data-token="{{ sl.token }}"
                             @click="copyLink('{{ sl.token }}', {{ sl.id }})"
@@ -246,16 +249,18 @@
                     </button>
                     <a href="/share/{{ sl.token }}" target="_blank" rel="noopener"
                        class="px-2 py-1 bg-shelf-hover text-shelf-text rounded text-xs hover:bg-shelf-border transition-colors">Open</a>
-                    <form action="/api/share/{{ sl.id }}/delete" method="post" class="inline">
+                    <form action="/api/share/{{ sl.id }}/delete" method="post" class="inline" data-testid="share-revoke">
                         <button type="submit" class="px-2 py-1 bg-shelf-error/20 text-shelf-error rounded text-xs hover:bg-shelf-error/30 transition-colors">Revoke</button>
                     </form>
                 </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
         {% endif %}
 
-        <form action="/api/share" method="post" class="flex gap-2 items-end flex-wrap">
+        {% if feature_on('share') %}
+        <form action="/api/share" method="post" class="flex gap-2 items-end flex-wrap" data-testid="share-create">
             <select name="scope" class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text">
                 <option value="wishlist">Wishlist</option>
                 <option value="collection">Collection</option>
@@ -266,6 +271,7 @@
                 Create Link
             </button>
         </form>
+        {% endif %}
     </div>
 
     <!-- Backup & Restore -->

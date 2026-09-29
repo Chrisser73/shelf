@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse
 
-from app import browse_filters, nav
+from app import browse_filters, features, nav
 from app.auth import require_role
 from app.features import require_feature
 from app.config import MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES
@@ -218,7 +218,8 @@ async def scan(
         "scan.html",
         {"media_types": MEDIA_TYPES, "game_platforms": game_platforms,
          "locations": locations, "borrowers": borrowers,
-         "manual_open": add == "manual", "manual_prefill": manual_prefill},
+         "manual_open": add == "manual", "manual_prefill": manual_prefill,
+         "off_scan_modes": features.disabled_scan_modes()},
     )
 
 

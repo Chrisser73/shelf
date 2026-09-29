@@ -2,6 +2,7 @@
    which was 1,517 lines: the largest template with the thinnest E2E
    coverage. Included by settings.html inside its `settingsTabs` x-data,
    so `tab` and `setTab()` resolve from the parent scope. #}
+{% import "fragments/settings/feature_off_note.html" as feature_notes %}
     <!-- Library Tab -->
     <div x-show="tab === 'library'" class="space-y-8">
 
@@ -169,6 +170,7 @@
     <!-- Borrowers -->
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6">
         <h2 class="text-lg font-semibold mb-4">Borrowers</h2>
+        {{ feature_notes.feature_off_note('lending') }}
 
         {% if borrower_error_message %}
         <div data-testid="borrower-error-banner"
@@ -182,24 +184,28 @@
             {% for b in borrowers %}
             <div class="flex flex-wrap items-center justify-between gap-2 bg-shelf-bg rounded-lg px-4 py-2">
                 <span>{{ b.name }}</span>
-                <form action="/api/borrowers/{{ b.id }}/delete" method="post" class="inline"
+                {% if feature_on('lending') %}
+                <form action="/api/borrowers/{{ b.id }}/delete" method="post" class="inline" data-testid="borrower-remove"
                       {% if b.returned_loan_count %}data-confirm="Remove borrower '{{ b.name }}'? This also permanently deletes their {{ b.returned_loan_count }} past loan record(s)."{% else %}data-confirm="Remove borrower '{{ b.name }}'?"{% endif %}>
                     <button type="submit" class="text-shelf-muted hover:text-shelf-error text-sm transition-colors">
                         Remove
                     </button>
                 </form>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
         {% endif %}
 
-        <form action="/api/borrowers" method="post" class="flex gap-2">
+        {% if feature_on('lending') %}
+        <form action="/api/borrowers" method="post" class="flex gap-2" data-testid="borrower-add">
             <input type="text" name="name" placeholder="Add borrower..." required
                    class="flex-1 min-w-0 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
             <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
                 Add
             </button>
         </form>
+        {% endif %}
     </div>
 
     <!-- Game Platforms -->
@@ -236,6 +242,7 @@
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6" x-data="lendingPanel"
          data-notify-saved="{{ '1' if secrets_present['notify_url'] else '' }}">
         <h2 class="text-lg font-semibold mb-1">Lending</h2>
+        {{ feature_notes.feature_off_note('lending') }}
         <p class="text-sm text-shelf-muted mb-4">Loans past their due date — or, when no due date was set, out longer than the window below — show an <span class="text-shelf-error">Overdue</span> badge. Configure a notification URL to get a daily digest of overdue loans.</p>
         <form method="POST" action="/api/settings/lending" class="space-y-4">
             <div>

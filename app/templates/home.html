@@ -13,11 +13,17 @@
             <a href="/scan" class="px-4 py-2 bg-shelf-card border border-shelf-border text-shelf-text rounded-lg text-sm hover:bg-shelf-hover transition-colors">Scan item</a>
             <a href="/scan?add=manual" class="px-4 py-2 bg-shelf-card border border-shelf-border text-shelf-text rounded-lg text-sm hover:bg-shelf-hover transition-colors">Add by hand</a>
             {% endif %}
+            {% if feature_on('stats') %}
             <a href="/stats" class="px-4 py-2 bg-shelf-card border border-shelf-border text-shelf-text rounded-lg text-sm hover:bg-shelf-hover transition-colors">Statistics</a>
+            {% endif %}
         </div>
     </div>
 
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8" data-testid="home-summary">
+    {# Lending off drops the Lent-out tile. The five that remain fill whole
+       rows only if the grid has five columns at lg and the last tile spans
+       the gap at the narrower widths. #}
+    {% set lending_tile = feature_on('lending') %}
+    <div class="grid grid-cols-2 sm:grid-cols-3 {{ 'lg:grid-cols-6' if lending_tile else 'lg:grid-cols-5' }} gap-4 mb-8" data-testid="home-summary">
         <a href="/browse" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
             <p class="text-shelf-muted text-sm">Catalogue</p>
             <p class="text-3xl font-bold">{{ total_count }}</p>
@@ -30,15 +36,17 @@
             <p class="text-shelf-muted text-sm">Wishlist</p>
             <p class="text-3xl font-bold">{{ wishlist_count }}</p>
         </a>
-        <a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+        {% if lending_tile %}
+        <a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors" data-testid="home-lent-out">
             <p class="text-shelf-muted text-sm">Lent out</p>
             <p class="text-3xl font-bold">{{ lent_out_count }}</p>
         </a>
+        {% endif %}
         <div class="bg-shelf-card border border-shelf-border rounded-lg p-5">
             <p class="text-shelf-muted text-sm">Missing covers</p>
             <p class="text-3xl font-bold">{{ missing_cover_count }}</p>
         </div>
-        <div class="bg-shelf-card border border-shelf-border rounded-lg p-5">
+        <div class="bg-shelf-card border border-shelf-border rounded-lg p-5 {{ '' if lending_tile else 'col-span-2 lg:col-span-1' }}" data-testid="home-media-types">
             <p class="text-shelf-muted text-sm">Media types</p>
             <p class="text-3xl font-bold">{{ media_types|length }}</p>
         </div>
@@ -76,14 +84,18 @@
                     <p class="font-medium">Browse</p>
                     <p class="text-xs text-shelf-muted mt-1">Search, filter, sort and bulk-edit the full catalogue.</p>
                 </a>
+                {% if feature_on('series') %}
                 <a href="/series" class="block bg-shelf-bg border border-shelf-border rounded-lg px-4 py-3 hover:bg-shelf-hover transition-colors">
                     <p class="font-medium">Series</p>
                     <p class="text-xs text-shelf-muted mt-1">See runs, gaps and completeness without crowding Browse.</p>
                 </a>
+                {% endif %}
+                {% if feature_on('stats') %}
                 <a href="/stats" class="block bg-shelf-bg border border-shelf-border rounded-lg px-4 py-3 hover:bg-shelf-hover transition-colors">
                     <p class="font-medium">Statistics</p>
                     <p class="text-xs text-shelf-muted mt-1">Open the deeper collection dashboard and charts.</p>
                 </a>
+                {% endif %}
             </div>
         </section>
     </div>

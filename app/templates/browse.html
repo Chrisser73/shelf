@@ -214,6 +214,7 @@
                 <option value="none" {{ 'selected' if f.owned == 'none' else '' }}>Not owned or wishlisted ({{ neither_count }})</option>
             </select>
 
+            {% if feature_on('lending') %}
             <!-- Lent Out Filter -->
             <select name="lent_out"
                     hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
@@ -222,6 +223,7 @@
                 <option value="" {{ 'selected' if not f.lent_out else '' }}>All Items</option>
                 <option value="1" {{ 'selected' if f.lent_out == '1' else '' }}>Lent Out{% if lent_out_count %} ({{ lent_out_count }}){% endif %}</option>
             </select>
+            {% endif %}
 
             <!-- Reading Status Filter -->
             <select id="reading-status-filter" name="reading_status"

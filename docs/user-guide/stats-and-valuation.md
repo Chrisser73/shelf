@@ -18,6 +18,11 @@ fills in retroactively.
 
 ## Valuation (ISBNdb)
 
+Valuation can be turned off in Settings → **Features**. While it is off,
+estimated values leave the item page, the Stats page loses its **Est. Value**
+tile and value chart, and Settings loses the valuate button and the report
+link. A value you typed yourself (a manual value) still shows.
+
 Settings → Integrations → **Collection Valuation** takes an
 [ISBNdb](https://isbndb.com) API key (paid; the basic tier suffices). Then:
 

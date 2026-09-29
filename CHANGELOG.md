@@ -6,6 +6,39 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-09-28
+
+0.55.0 let you turn off the parts of Shelf you do not use, but only their tabs
+and pages went away. Their buttons, badges and links stayed on every other
+page. An install with Lending off still showed a loan panel on every item and
+offered Lend and Return in Scan. Pressing one of those changed nothing, but a
+small Shelf still looked like a big one. Now a feature that is off is gone
+from the pages you do use too.
+
+### Changed
+
+- **A feature that is off now also disappears from the pages that stay on.**
+  The item page, Home, Browse, Trash, Scan and Stats drop its buttons, badges,
+  links and read-outs. With Lending off, for example, there is no loan panel,
+  no Loaned badge, no Lent-out tile or filter, and no Lend or Return scan
+  mode. A scanner last left in Lend opens in Add. Home's summary tiles
+  rearrange to fill their rows. This retires 0.55.0's known limitation, "Some
+  controls on other pages still show for a feature that is off."
+- **Fields you typed onto an item stay, even when their feature is off.** With
+  Series off, an item still shows its series name and number as plain text,
+  just not as a link or with the "you own N of …" read-out. With Valuation
+  off, a manual value still shows, while an estimated value does not.
+- **A feature's Settings card says when it is turned off,** links to
+  Features, and keeps only its setup controls. The sync, import, export,
+  valuate and share-link buttons go until the feature is back on, while the
+  connection fields and **Test** stay, so you can still set a feature up
+  before turning it on. The Borrowers card keeps its list of names but
+  cannot add or remove one while Lending is off.
+- **A page never offers a way to turn a feature back on.** That is done in
+  Settings → Features, or from the page a turned-off feature shows in its
+  place. An old bookmark to Browse's lent-out filter still works; only the
+  filter's menu is gone.
+
 ## [0.56.0] - 2026-09-28
 
 An item's authors used to be one piece of text. Clicking it searched for that
@@ -4551,6 +4584,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.57.0]: https://github.com/dgahagan/shelf/releases/tag/v0.57.0
 [0.56.0]: https://github.com/dgahagan/shelf/releases/tag/v0.56.0
 [0.55.0]: https://github.com/dgahagan/shelf/releases/tag/v0.55.0
 [0.54.0]: https://github.com/dgahagan/shelf/releases/tag/v0.54.0

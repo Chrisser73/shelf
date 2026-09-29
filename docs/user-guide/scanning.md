@@ -22,7 +22,9 @@ previous one is still being looked up is ignored.
 
 ## Scan modes
 
-The mode is sticky — set it once and scan a pile.
+The mode is sticky — set it once and scan a pile. With Lending turned off in
+Settings → **Features**, Scan offers no **Lend** or **Return** mode, and a
+device last left in one of them opens in **Add**.
 
 | Mode | What happens on each scan |
 |---|---|

@@ -122,8 +122,10 @@ A feature that is off:
 
 - **hides its tab** from the nav,
 - **refuses its pages and actions** — a page says the feature is turned off
-  (an admin gets a **Turn on** button there), and a button on another page
-  shows a message instead of doing anything,
+  (an admin gets a **Turn on** button there),
+- **disappears from the pages that stay on** — the item page, Home, Browse,
+  Scan and Stats drop its buttons, badges, links and read-outs. Fields you
+  typed onto an item stay, such as a series name or a manual value,
 - **pauses its background job** — Audiobookshelf sync, Hardcover sync and the
   overdue-loan digest skip their runs until it is back on,
 - **keeps all its data.** Turning it back on shows everything again,
@@ -133,7 +135,9 @@ This is stronger than hiding a tab under **Navigation**, which only takes the
 tab out of the nav bar. An integration's own card under **Integrations** stays
 usable while its feature is off, so you can set it up and test the connection
 before you turn it on; its row here says **Needs setup** until it is
-configured.
+configured. The card says the feature is turned off, links back here, and
+keeps only its setup controls: sync, import, export and run buttons go until
+the feature is back on.
 
 Two features ask before they turn off, because the change reaches other
 people: **Sharing** says how many share links will stop working, and

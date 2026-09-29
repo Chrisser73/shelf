@@ -1,8 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ item.title }} — Shelf{% endblock %}
 {% block head %}
+{% if feature_on('romm') %}
 <script src="/static/js/romm-item.js"></script>
+{% endif %}
+{% if feature_on('komga') %}
 <script src="/static/js/komga-item.js"></script>
+{% endif %}
 {% endblock %}
 {% block content %}
 <div class="max-w-4xl mx-auto">
@@ -85,10 +89,14 @@
                     {% endif %}
                     {% if item.series_name %}
                     <div><span class="text-shelf-muted">Series:</span>
+                        {% if feature_on('series') %}
                         <a href="/series" class="text-shelf-accent2 hover:text-shelf-accent transition-colors">{{ item.series_name }}</a>{% if item.series_position is not none %} #{{ item.series_position|int if item.series_position == item.series_position|int else item.series_position }}{% endif %}
-                        {% if series_progress %}<span class="text-xs text-shelf-muted" data-testid="series-progress">
+                        {% else %}
+                        <span data-testid="series-name">{{ item.series_name }}</span>{% if item.series_position is not none %} #{{ item.series_position|int if item.series_position == item.series_position|int else item.series_position }}{% endif %}
+                        {% endif %}
+                        {% if series_progress and feature_on('series') %}<span class="text-xs text-shelf-muted" data-testid="series-progress">
                             {%- if series_progress.top and (series_progress.count >= 2 or series_progress.gaps) %} · you own {{ series_progress.owned }} of 1–{{ series_progress.top }}{% if series_progress.gaps %}, missing {% for g in series_progress.gaps[:8] %}#{{ g }}{% if not loop.last %}, {% endif %}{% endfor %}{% if series_progress.gaps|length > 8 %}…{% endif %}{% endif %}{% endif %}
-                            {%- if series_progress.hc_total %} · {{ series_progress.hc_total }} in series (Hardcover){% endif %}
+                            {%- if series_progress.hc_total and feature_on('hardcover') %} · <span data-testid="series-hc-total">{{ series_progress.hc_total }} in series (Hardcover)</span>{% endif %}
                         </span>{% endif %}
                     </div>
                     {% endif %}
@@ -101,8 +109,8 @@
                     {% include "fragments/item_copies.html" %}
                     {% if item.manual_value is not none %}
                     <div><span class="text-shelf-muted">Value:</span> <span class="text-shelf-success">{{ item.manual_value|money }}</span> <span class="text-xs text-shelf-muted">(manual)</span></div>
-                    {% elif item.estimated_value %}
-                    <div><span class="text-shelf-muted">Est. Value:</span> <span class="text-shelf-success">{{ item.estimated_value|money }}</span>{% if item.value_updated_at %} <span class="text-xs text-shelf-muted" data-testid="value-as-of">(as of {{ item.value_updated_at[:10] }})</span>{% endif %}</div>
+                    {% elif item.estimated_value and feature_on('valuation') %}
+                    <div data-testid="estimated-value"><span class="text-shelf-muted">Est. Value:</span> <span class="text-shelf-success">{{ item.estimated_value|money }}</span>{% if item.value_updated_at %} <span class="text-xs text-shelf-muted" data-testid="value-as-of">(as of {{ item.value_updated_at[:10] }})</span>{% endif %}</div>
                     {% endif %}
                 </div>
 
@@ -146,9 +154,9 @@
                 </div>
                 {% endif %}
 
+                {% if abs_url and feature_on('abs_sync') %}
                 <!-- Audiobookshelf Playback -->
-                {% if abs_url %}
-                <div class="mb-4">
+                <div class="mb-4" data-testid="abs-playback">
                     <a href="{{ abs_url }}" target="_blank" rel="noopener"
                        class="inline-flex items-center gap-1 px-3 py-1.5 bg-shelf-accent/20 text-shelf-accent2 rounded-lg text-sm hover:bg-shelf-accent/30 transition-colors">
                         {% if item.media_type == 'ebook' %}&#128214; Read on Audiobookshelf{% else %}&#9654; Listen on Audiobookshelf{% endif %}
@@ -159,8 +167,8 @@
                 {# Hardcover Sync — a books service, and the push needs an ISBN or an
                    existing Hardcover id; the id terms keep an already-synced row visible. #}
                 {% if item.media_type in book_media_types and (item.isbn or item.hardcover_book_id or item.hardcover_user_book_id) %}
+                {% if has_hardcover and feature_on('hardcover') and user and user.role in ('admin', 'editor') %}
                 <!-- Hardcover Sync -->
-                {% if has_hardcover and user and user.role in ('admin', 'editor') %}
                 <div class="mb-4" x-data="hardcoverPush" data-item-id="{{ item.id }}">
                     <button @click="push"
                             :disabled="hcPushing"
@@ -180,9 +188,9 @@
                 {% endif %}
                 {% endif %}
 
+                {% if not abs_url and linked_abs_items and feature_on('abs_sync') %}
                 <!-- Also in Audiobookshelf (linked digital copy, direct deep link) -->
-                {% if not abs_url and linked_abs_items %}
-                <div class="mb-4">
+                <div class="mb-4" data-testid="abs-also-in">
                     {% for la in linked_abs_items %}
                     <a href="{{ la.abs_url }}" target="_blank" rel="noopener"
                        class="inline-flex items-center gap-1 px-3 py-1.5 bg-shelf-accent/20 text-shelf-accent2 rounded-lg text-sm hover:bg-shelf-accent/30 transition-colors mr-2">
@@ -217,8 +225,8 @@
                 </div>
                 {% endif %}
 
+                {% if feature_on('lending') and ((user and user.role in ('admin', 'editor')) or current_checkout or checkout_history) %}
                 <!-- Lending -->
-                {% if (user and user.role in ('admin', 'editor')) or current_checkout or checkout_history %}
                 <div class="mb-6" x-data="{ showLendForm: false }">
                     <p class="text-sm font-medium text-shelf-muted mb-2">Lending</p>
                     {% if current_checkout %}

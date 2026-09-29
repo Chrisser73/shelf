@@ -106,6 +106,23 @@ function scanPage() {
         init() {
             var self = this;
 
+            // Lending off (or any feature whose scan_modes the registry
+            // disabled) removes its modes from the row. Read through the
+            // root's data attribute, tolerating its absence or an empty
+            // value (G91: no throw inside init()). If the mode restored
+            // from localStorage above is no longer offered, fall back to
+            // 'add' the same way the manual-panel normalization below
+            // does — this also tidies any other unknown stored value,
+            // since an id that matches nothing in `this.modes` is caught
+            // by the same check regardless of why it is unknown.
+            var offEl = document.querySelector('[data-off-modes]');
+            var offModes = (offEl && offEl.dataset.offModes) ? offEl.dataset.offModes.split(' ') : [];
+            this.modes = this.modes.filter(function(m) { return offModes.indexOf(m.id) === -1; });
+            if (!this.modes.some(function(m) { return m.id === self.mode; })) {
+                this.mode = 'add';
+                localStorage.setItem('shelf_scan_mode', 'add');
+            }
+
             // The manual panel's open state is seeded server-side from
             // ?add=manual, so there is no URL parsing here and no
             // open-then-populate flash.

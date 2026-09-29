@@ -9,6 +9,7 @@ from app.features import (
     feature_enabled,
     set_feature_enabled,
 )
+from tests.test_features_gate import off
 
 
 def _raw(db, key, value):
@@ -163,6 +164,41 @@ def test_registry_has_the_fourteen_designed_features():
         "lending", "series", "stats", "store", "share", "valuation", "music",
         "periodicals", "shelf_fill", "intake", "hardcover", "abs_sync", "komga", "romm",
     ]
+
+
+# --- feature_on template global, disabled_scan_modes, client names --------
+
+
+def test_feature_on_global_is_feature_enabled():
+    from app.main import templates
+    assert templates.env.globals["feature_on"] is feature_enabled
+
+
+def test_feature_on_unknown_key_raises():
+    from app.main import templates
+    with pytest.raises(KeyError):
+        templates.env.from_string("{{ feature_on('nope') }}").render()
+
+
+def test_disabled_scan_modes_with_lending_off():
+    off("lending")
+    assert features.disabled_scan_modes() == "lend return"
+
+
+def test_disabled_scan_modes_with_everything_on():
+    assert features.disabled_scan_modes() == ""
+
+
+def test_registry_client_entries_are_nonempty_and_whitespace_free():
+    checked = 0
+    for key, f in FEATURES.items():
+        for name in f.client:
+            checked += 1
+            assert name, f"FEATURES[{key!r}].client has an empty entry"
+            assert not any(c.isspace() for c in name), (
+                f"FEATURES[{key!r}].client entry {name!r} has whitespace"
+            )
+    assert checked >= 3
 
 
 # --- The registry lint ------------------------------------------------------

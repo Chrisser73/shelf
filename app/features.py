@@ -48,6 +48,10 @@ class Feature:
     # this feature unless listed in `ungated` or `inline` (the registry lint
     # in tests/test_features.py holds this). Dotted, never basenames (G88).
     modules: tuple[str, ...] = ()
+    # Script filenames and Alpine.data names only this feature uses on pages
+    # that stay on. The rendered HTML never contains the URLs its JS fetches,
+    # so the render census (tests/test_feature_sweep.py) reads this instead.
+    client: tuple[str, ...] = ()
     # Gated routes that live in core modules (pages.py).
     routes: tuple[Route, ...] = ()
     # Routes in `modules` that stay reachable while off, and why.
@@ -224,6 +228,7 @@ FEATURES: dict[str, Feature] = {
         modules=("app.routers.hardcover",),
         routes=(("GET", "/discover"),),
         configured=_hardcover_configured,
+        client=("hardcoverPush",),
         ungated={
             ("POST", "/api/hardcover/test"): _CONFIG,
             ("POST", "/api/hardcover/schedule"): _CONFIG,
@@ -247,6 +252,7 @@ FEATURES: dict[str, Feature] = {
         description="Link comics and manga to a Komga server.",
         modules=("app.routers.komga",),
         configured=_komga_configured,
+        client=("komga-item.js",),
         ungated={
             ("GET", "/api/komga/status"): _CONFIG,
             ("POST", "/api/komga/settings"): _CONFIG,
@@ -260,6 +266,7 @@ FEATURES: dict[str, Feature] = {
         description="Link video games to a RomM server.",
         modules=("app.routers.romm",),
         configured=_romm_configured,
+        client=("romm-item.js",),
         ungated={
             ("GET", "/api/romm/status"): _CONFIG,
             ("POST", "/api/romm/settings"): _CONFIG,
@@ -317,6 +324,15 @@ def feature_enabled(key: str) -> bool:
     if key not in FEATURES:
         raise KeyError(key)
     return _flags()[key]
+
+
+def disabled_scan_modes() -> str:
+    """The scan_modes of every disabled feature, in registry order,
+    space-joined. Reads through _flags() rather than a cache of its own
+    (G13: the existing cache is already reset by tests/conftest.py)."""
+    flags = _flags()
+    modes = [mode for key, f in FEATURES.items() if not flags[key] for mode in f.scan_modes]
+    return " ".join(modes)
 
 
 def _invalidate_all() -> None:
