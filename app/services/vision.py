@@ -35,11 +35,15 @@ from app.services import isbn as isbn_svc
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
+DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+DEFAULT_OPENAI_MODEL = "gpt-6-luna"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "gemma3:12b"
+# The recommended reverse-proxy window is 1200 seconds. Leave a little room
+# for the proxy to return Shelf's JSON result instead of producing its own
+# timeout page first.
+OLLAMA_REQUEST_TIMEOUT = 1100.0
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -68,6 +72,9 @@ PROMPT = (
     "stylized or partial text — give its canonical title and creator and set "
     '"source" to "recognized". Prefer "read" whenever the full title is legible, '
     "and never replace a legible title with a different item's. "
+    "Titles and metadata may use any writing system, including Japanese kana "
+    "or kanji. When readable, preserve the printed original script exactly; "
+    "do not translate, romanize, or invent a Latin title. "
     '(3) Give "isbn" only if the ISBN digits are actually printed and readable '
     "in the photo, usually beside the back-cover barcode, and transcribe those "
     "digits exactly. Never supply an ISBN from memory or from what you know "
@@ -352,6 +359,7 @@ async def _detect_anthropic(images: list[tuple[bytes, str]], settings: dict) -> 
     if not api_key:
         raise VisionError("Anthropic API key is not configured")
     model = settings.get("anthropic_vision_model") or DEFAULT_ANTHROPIC_MODEL
+    reasoning = settings.get("anthropic_vision_reasoning") or ""
 
     import anthropic
 
@@ -370,11 +378,19 @@ async def _detect_anthropic(images: list[tuple[bytes, str]], settings: dict) -> 
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
+        options = {
+            "model": model,
+            "max_tokens": 16000,
+            "output_config": {"format": {"type": "json_schema", "schema": BOOKS_SCHEMA}},
+            "messages": [{"role": "user", "content": content}],
+        }
+        # Adaptive thinking is opt-in. Leaving it unset remains compatible
+        # with older Claude models and avoids reasoning-token cost by default.
+        if reasoning:
+            options["thinking"] = {"type": "adaptive"}
+            options["output_config"]["effort"] = reasoning
         response = await client.messages.create(
-            model=model,
-            max_tokens=16000,
-            output_config={"format": {"type": "json_schema", "schema": BOOKS_SCHEMA}},
-            messages=[{"role": "user", "content": content}],
+            **options,
         )
     except anthropic.AuthenticationError:
         raise VisionError("Anthropic API key was rejected — check it in Settings")
@@ -414,6 +430,7 @@ async def _detect_openai(images: list[tuple[bytes, str]], settings: dict) -> lis
         raise VisionError("OpenAI API key is not configured")
     base_url = (settings.get("openai_base_url") or DEFAULT_OPENAI_BASE_URL).rstrip("/")
     model = settings.get("openai_vision_model") or DEFAULT_OPENAI_MODEL
+    reasoning = settings.get("openai_vision_reasoning") or "low"
 
     content: list[dict] = [{"type": "text", "text": _prompt_for(len(images)) + JSON_ONLY_SUFFIX}]
     for image_bytes, mime in images:
@@ -425,16 +442,20 @@ async def _detect_openai(images: list[tuple[bytes, str]], settings: dict) -> lis
 
     payload = {
         "model": model,
-        # Classic Chat Completions field — the form every OpenAI-compatible
-        # server understands (reasoning models use max_completion_tokens, but
-        # those aren't the vision target here).
-        "max_tokens": 16000,
         "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": content}],
     }
+    # GPT-5.6/6 reasoning models use this Chat Completions spelling and the
+    # completion-token field.  Leaving the setting blank preserves broad
+    # OpenAI-compatible-server compatibility.
+    if reasoning:
+        payload["reasoning_effort"] = reasoning
+        payload["max_completion_tokens"] = 16000
+    else:
+        payload["max_tokens"] = 16000
     headers = {"Authorization": f"Bearer {api_key}"}
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=OLLAMA_REQUEST_TIMEOUT) as client:
             resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
     except httpx.HTTPError:
         raise VisionError(f"Could not reach the OpenAI API at {base_url}")

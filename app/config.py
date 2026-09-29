@@ -206,6 +206,7 @@ GAME_PLATFORMS = {
     "xboxone": "Xbox One",
     "xboxsx": "Xbox Series X/S",
     "pc": "PC",
+    "mac": "Mac",
     "other": "Other",
 }
 

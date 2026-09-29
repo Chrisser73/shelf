@@ -4,9 +4,10 @@ import asyncio
 import logging
 import os
 import sqlite3
+import uuid
 
 import httpx
-from fastapi import APIRouter, Depends, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Form
 from pydantic import BaseModel, field_validator
 
 from app.auth import require_role
@@ -41,6 +42,11 @@ _LOCATION_ERROR = "Selected location no longer exists — choose another locatio
 
 # Same five types cover enrichment treats as the book catalogue.
 BOOK_SEARCH_MEDIA_TYPES = cover_queue.COVER_REQUEUE_MEDIA_TYPES
+
+# A browser connection closing does not reliably cancel a long-running ASGI
+# handler. Keep the running task by an unguessable client job id so the
+# browser can explicitly stop the current Ollama request when it gives up.
+_ANALYSIS_TASKS: dict[str, asyncio.Task] = {}
 
 
 class PlanRequest(BaseModel):
@@ -90,12 +96,38 @@ async def plan_photo(payload: PlanRequest):
 
 
 @router.post("/analyze")
-async def analyze_photo(photos: list[UploadFile] = File(...)):
+async def analyze_photo(photos: list[UploadFile] = File(...), job_id: str = Form("")):
     """Run the configured vision provider over an uploaded shelf photo.
 
     One file is the normal path; multiple files are overlapping tiles of a
     single photo, cropped client-side in reading order (see /plan).
     """
+    if not job_id:
+        job_id = uuid.uuid4().hex
+    try:
+        uuid.UUID(hex=job_id)
+    except ValueError:
+        return {"ok": False, "message": "Invalid analysis job"}
+
+    task = asyncio.current_task()
+    if task is not None:
+        _ANALYSIS_TASKS[job_id] = task
+    try:
+        return await _analyze_photo(photos)
+    except asyncio.CancelledError:
+        logger.info("Intake analysis cancelled: %s", job_id)
+        # Returning JSON keeps the original browser fetch well-formed. The
+        # task cancellation has already propagated into the active provider
+        # request, closing it for Ollama, Anthropic, and OpenAI-compatible
+        # backends alike.
+        return {"ok": False, "cancelled": True,
+                "message": "Analysis cancelled — the AI request was stopped."}
+    finally:
+        _ANALYSIS_TASKS.pop(job_id, None)
+
+
+async def _analyze_photo(photos: list[UploadFile]):
+    """Implementation kept separate so cancellation registration is tiny."""
     images: list[tuple[bytes, str]] = []
     parts: list[str] = []
     total_bytes = 0
@@ -145,6 +177,16 @@ async def analyze_photo(photos: list[UploadFile] = File(...)):
             if existing:
                 book["existing"] = dict(existing)
     return {"ok": True, "books": books}
+
+
+@router.post("/analyze/cancel")
+async def cancel_analysis(job_id: str = ""):
+    """Cancel an in-flight intake request and close its Ollama HTTP call."""
+    task = _ANALYSIS_TASKS.get(job_id)
+    if task and not task.done():
+        task.cancel()
+        return {"ok": True}
+    return {"ok": False, "message": "Analysis is no longer running"}
 
 
 class IntakeBook(BaseModel):

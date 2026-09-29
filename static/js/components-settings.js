@@ -37,12 +37,77 @@ function notifySettingsResult(result, successMessage) {
 
 document.addEventListener('alpine:init', function () {
 
+    Alpine.data('visionSettings', function () {
+        return {
+            visionProvider: '', ollamaModel: '', ollamaModels: [],
+            ollamaModelsLoading: false, ollamaModelsMessage: '', visionTesting: false, visionTestResult: false, visionConnectionStatus: '',
+            init() {
+                this.visionProvider = this.$el.dataset.visionProvider || '';
+                this.ollamaModel = this.$el.dataset.ollamaModel || '';
+                this.visionConnectionStatus = this.$el.dataset.visionConnectionStatus || '';
+                if (this.visionProvider === 'ollama') this.loadOllamaModels();
+            },
+            providerChanged() {
+                // Connection state belongs to the previous provider, not the
+                // currently selected unsaved form values.
+                this.visionConnectionStatus = '';
+                this.visionTestResult = false;
+            },
+            async loadOllamaModels() {
+                var url = (this.$refs.ollamaUrl.value || '').trim();
+                if (!url) { this.ollamaModelsMessage = 'Enter an Ollama URL first.'; return; }
+                this.ollamaModelsLoading = true; this.ollamaModelsMessage = '';
+                var result = await postJSON('/api/settings/vision/ollama-models?url=' + encodeURIComponent(url), {
+                    headers: { 'X-CSRF-Token': window.csrfToken() }
+                });
+                this.ollamaModelsLoading = false;
+                if (!result.ok) {
+                    this.ollamaModelsMessage = result.message || 'Could not load models.';
+                    showToast(this.ollamaModelsMessage, 'error');
+                    return;
+                }
+                this.ollamaModels = result.models || [];
+                if (!this.ollamaModels.some(model => model.name === this.ollamaModel)) {
+                    this.ollamaModel = this.ollamaModels.length ? this.ollamaModels[0].name : '';
+                }
+                this.ollamaModelsMessage = this.ollamaModels.length
+                    ? this.ollamaModels.length + ' installed model' + (this.ollamaModels.length === 1 ? '' : 's') + ' found.'
+                    : 'No models found on this Ollama server.';
+            },
+            async testVisionConnection() {
+                this.visionTesting = true; this.visionTestResult = false;
+                var result = await postJSON('/api/settings/vision/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
+                    body: JSON.stringify({
+                        provider: this.visionProvider,
+                        anthropic_api_key: this.$refs.anthropicApiKey.value,
+                        openai_base_url: this.$refs.openaiBaseUrl.value,
+                        openai_api_key: this.$refs.openaiApiKey.value,
+                        ollama_url: this.$refs.ollamaUrl.value
+                    })
+                });
+                this.visionTesting = false; this.visionTestResult = result;
+                this.visionConnectionStatus = result.ok ? 'ok' : 'error';
+                showToast(result.message || (result.ok ? 'Connected' : 'Connection failed'), result.ok ? 'success' : 'error');
+            }
+        };
+    });
+
     // settings.html — tab bar (persists active tab in localStorage)
     Alpine.data('settingsTabs', function () {
         return {
             tab: 'library',
             init() {
-                this.tab = localStorage.getItem('shelf_settings_tab') || 'library';
+                var requested = new URLSearchParams(window.location.search).get('tab');
+                this.tab = requested || localStorage.getItem('shelf_settings_tab') || 'library';
+                if (window.location.hash === '#photo-intake-vision') {
+                    this.tab = 'integrations';
+                    this.$nextTick(function() {
+                        var target = document.getElementById('photo-intake-vision');
+                        if (target) target.scrollIntoView({ block: 'start' });
+                    });
+                }
             },
             setTab(name) {
                 this.tab = name;

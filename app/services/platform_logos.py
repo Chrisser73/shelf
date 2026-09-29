@@ -40,6 +40,7 @@ DEFAULT_PLATFORM_LOGOS = {
     "xboxone": "xbox_one.svg",
     "xboxsx": "xbox_series.svg",
     "pc": "windows.svg",
+    "mac": "apple_macintosh.svg",
 }
 
 
