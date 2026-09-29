@@ -140,7 +140,7 @@ listed as not owned on the wishlist, including the ones you had already read.
 To take the read ones off in one go:
 
 1. **Browse → Owned: Wishlist**.
-2. **Reading status: Read**.
+2. **Status: Finished**.
 3. **Select**, then **Select All**.
 4. **Wishlist… → Remove from wishlist → Apply**.
 

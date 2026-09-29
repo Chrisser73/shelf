@@ -9,6 +9,7 @@ import pytest
 from app.database import get_db
 from app.services import provider_result
 from app.services import item_copies
+from app.services import upc as upc_svc
 from app.services.item_copies import insert_copy
 from app.services.item_write import insert_item
 from tests.conftest import (
@@ -668,6 +669,40 @@ class TestQuickRateMode:
 
         with get_db() as check_db:
             row = check_db.execute("SELECT reading_status, date_finished FROM items WHERE id = ?", (item_id,)).fetchone()
+        assert row["reading_status"] == "read"
+        assert row["date_finished"] is not None
+
+    @pytest.mark.parametrize("media_type, code, word", [
+        ("book", "9780000000712", "read"),
+        ("dvd", "012569803121", "watched"),
+        ("video_game", "078073003501", "played"),
+    ])
+    def test_quick_rate_says_the_media_types_own_verb(
+        self, admin_client, db, media_type, code, word
+    ):
+        isbn = code if media_type == "book" else None
+        upc = None if media_type == "book" else upc_svc.normalize_upc(code)
+        item_id = _insert_item(
+            db, title="Rate Me Too", isbn=isbn, upc=upc, media_type=media_type,
+        )
+        db.commit()
+        resp = admin_client.post("/api/scan", data={
+            "isbn": code, "mode": "quick_rate",
+        })
+        assert resp.status_code == 200
+        assert f"Marked as {word}".encode() in resp.content
+        assert "HX-Trigger" not in resp.headers
+
+        badge = re.search(
+            r'data-scan-badge[^>]*>\s*([^<]+?)\s*<', resp.text, re.DOTALL,
+        )
+        assert badge and word in badge.group(1)
+
+        with get_db() as check_db:
+            row = check_db.execute(
+                "SELECT reading_status, date_finished FROM items WHERE id = ?",
+                (item_id,),
+            ).fetchone()
         assert row["reading_status"] == "read"
         assert row["date_finished"] is not None
 

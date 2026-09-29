@@ -12,6 +12,7 @@ were"; this is that split.
 """
 
 from app import features
+from app.config import status_labels
 from app.database import get_db
 from app.routers import items_common
 from app.services import item_copies
@@ -322,12 +323,13 @@ def _scan_mode_quick_rate(request, templates, item: dict, raw: str):
         })
 
     items_common._log_scan(raw, item.get("media_type", ""), "marked_read", item["id"], "quick_rate")
+    labels = status_labels(item.get("media_type"))
     resp = templates.TemplateResponse(
         request, "fragments/scan_result.html",
         {"status": "marked_read", "isbn": raw, "title": item["title"],
          "item_id": item["id"], "cover_path": item.get("cover_path"),
          "media_type": item.get("media_type"),
-         "authors": item.get("authors"), "message": "Marked as read"},
+         "authors": item.get("authors"), "message": f"Marked as {labels.done_lower}"},
     )
     return resp
 

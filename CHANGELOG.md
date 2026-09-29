@@ -6,6 +6,54 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-09-29
+
+A film or a video game could already be marked finished by Quick Rate, but
+every word Shelf then used was a book word. The scan said "Marked as read",
+Browse offered "Read", and Stats counted the film as a book read this year.
+The item page of a DVD or a game had no status control at all. Now discs are
+watched and games are played, everywhere Shelf shows a status, and both have
+the same status control a book has.
+
+### Added
+
+- **DVDs, Blu-rays and video games have a Status section on their item page.**
+  A disc offers *Want to Watch / Watching / Watched* and a game *Want to Play /
+  Playing / Played*, with the same start and finish dates and the same history
+  a book has ("Played 2 times"). The edit form's Status field uses the same
+  words. Music and magazines still show a status only while one is set, so it
+  can be cleared.
+
+### Changed
+
+- **Quick Rate says what it did in the item's own word.** Scanning a disc says
+  "Marked as watched", a game "Marked as played", and a book "Marked as read".
+  The list heading now reads "Marked as finished", because one session can mix
+  them. What is stored is the same for every type.
+- **Browse's Status filter follows the Type filter.** With Type set to DVD it
+  offers Watch words, with Video Game Play words, and with a book type Read
+  words. With no type chosen it offers *Want to / In progress / Finished*, and
+  one **Finished** choice finds finished books, films and games together. The
+  bulk-edit status menu uses those neutral words too.
+- **Stats counts this year's finishes by kind.** The "Read in 2026" card is now
+  "Finished in 2026" and reads, for example, *16 read · 2 watched · 1 played*,
+  leaving out any kind with none. The **Books Read per Year** chart now counts
+  only books, audiobooks, ebooks, comics and manga. Before, it counted every
+  finished item, including films, games, music and magazines, so its bars may
+  be lower after you upgrade.
+- **Hardcover sync only touches books.** An item that was retyped from a book to
+  a disc, a game, music or a magazine keeps its Hardcover link but is no longer
+  pushed to Hardcover or overwritten by it. A film's Watched status stays in
+  Shelf. The book family (book, audiobook, ebook, comic, manga) syncs as
+  before.
+
+### Security
+
+- **PyJWT is updated to 2.14.0** for advisory GHSA-w6j9-cwv2-h6wq. Shelf signs
+  its session tokens with its own key and never reads the kind of key set the
+  advisory concerns, so no install was exposed. The update clears the
+  dependency audit.
+
 ## [0.58.0] - 2026-09-29
 
 0.55.0 let you turn off the parts of Shelf you do not use, but a new install
@@ -4607,6 +4655,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.59.0]: https://github.com/dgahagan/shelf/releases/tag/v0.59.0
 [0.58.0]: https://github.com/dgahagan/shelf/releases/tag/v0.58.0
 [0.57.0]: https://github.com/dgahagan/shelf/releases/tag/v0.57.0
 [0.56.0]: https://github.com/dgahagan/shelf/releases/tag/v0.56.0

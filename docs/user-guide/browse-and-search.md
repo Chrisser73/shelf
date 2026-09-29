@@ -64,7 +64,7 @@ Filter chips along the top, all combinable:
 | **Search** | Free text over title, author, ISBN, series, publisher |
 | **Type** | Book, audiobook, eBook, DVD / Blu-ray, CD, comic, Manga, video game |
 | **Location** | Any location, or "no location" |
-| **Reading status** | Want to read, reading, read, none |
+| **Status** | Follows the Type filter: Want to read / Reading / Read for books, Want to watch / Watching / Watched for DVDs, Want to play / Playing / Played for video games. With no type chosen it shows Want to / In progress / Finished, and one Finished choice spans every type |
 | **Owned** | All / Owned / Wishlist / Not owned or wishlisted |
 | **Lent out** | Items currently checked out |
 | **Tag** | Any custom tag |
@@ -125,7 +125,7 @@ bar appears with actions:
 
 - **Move** to a location
 - **Change type**
-- **Set reading status**
+- **Set status** — Want to / In progress / Finished, or clear it
 - **Add to / remove from wishlist**
 - **Set series** (or clear it)
 - **Add tag** / **Remove tag** — type a tag name or pick one, then choose the
@@ -133,7 +133,7 @@ bar appears with actions:
 - **Delete Selected** — moves the items to Trash
 
 Anyone can use **Select**; what happens next depends on your role. Move,
-Change type, Set reading status, the wishlist action and Set series are
+Change type, Set status, the wishlist action and Set series are
 **admin** only. Add tag and Remove tag are for **editors and admins** — a
 viewer does not see them. Delete Selected moves items to Trash and needs an
 **editor** or admin. Bulk actions are immediate — filter carefully first.

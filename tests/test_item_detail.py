@@ -133,6 +133,16 @@ class TestReadingHistory:
         assert "Read 2 times" in html
         assert "2025-01-20" in html
         assert "2026-02-10" in html
+
+    def test_a_game_history_says_played(self, viewer_client, db):
+        item_id = _insert_item(db, title="Replayed Game", isbn=None, media_type="video_game")
+        self._log(db, item_id, "2025-01-01", "2025-01-20")
+        self._log(db, item_id, "2026-02-01", "2026-02-10")
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert "Played 2 times" in html
         # newest first
         assert html.index("2026-02-10") < html.index("2025-01-20")
 
@@ -301,11 +311,11 @@ class TestBookShapedControls:
     RETRY = "retry-cover"
     PUSH = "Push to Hardcover"
     SYNCED = "Synced to Hardcover"
-    HEADING = ">Reading Status</p>"
+    HEADING = ">Status</p>"
     SECTION = 'id="reading-status-section"'
     CLEAR = 'title="Clear status"'
 
-    @pytest.mark.parametrize("media_type", ["cd", "video_game"])
+    @pytest.mark.parametrize("media_type", ["cd"])
     def test_a_disc_or_cartridge_loses_all_three_and_keeps_the_page(
         self, editor_client, db, monkeypatch, media_type,
     ):
@@ -325,6 +335,38 @@ class TestBookShapedControls:
         assert 'data-testid="cover-controls"' in html
         assert f'href="/item/{item_id}/edit' in html
         assert "hx-delete=" in html
+
+    @pytest.mark.parametrize("media_type, want, doing, done", [
+        ("dvd", "Want to Watch", "Watching", "Watched"),
+        ("video_game", "Want to Play", "Playing", "Played"),
+    ])
+    def test_a_disc_or_game_gets_its_own_status_words(
+        self, editor_client, db, media_type, want, doing, done,
+    ):
+        item_id = _insert_item(db, title="Own Verb", isbn=None, media_type=media_type)
+        db.commit()
+
+        html = editor_client.get(f"/item/{item_id}").text
+
+        assert self.HEADING in html
+        section = re.search(r'<div id="reading-status-section">.*?</div>\s*</div>', html, re.S)
+        assert section
+        for word in (want, doing, done):
+            assert word in section.group(0)
+        assert "Want to Read" not in section.group(0)
+
+    def test_the_toggle_rerenders_a_disc_in_its_own_words(self, viewer_client, db):
+        """The route renders the fragment with only `item` in context, so the
+        words must reach it through the status_labels global."""
+        item_id = _insert_item(db, title="Toggle DVD", isbn=None, media_type="dvd")
+        db.commit()
+
+        resp = viewer_client.post(f"/api/items/{item_id}/reading-status", data={"status": "read"})
+
+        assert resp.status_code == 200
+        assert "Watched" in resp.text
+        assert ">Read<" not in resp.text
+        assert "Status: Watched" in resp.headers["HX-Trigger"]
 
     def test_a_book_without_an_isbn_keeps_reading_status_only(
         self, editor_client, db, monkeypatch,
@@ -372,9 +414,10 @@ class TestBookShapedControls:
 
     def test_a_disc_with_a_stale_status_can_still_clear_it(self, viewer_client, db):
         """The undo path — and the G65 pin: the toggle route renders the
-        fragment without book_media_types in context and must not care."""
+        fragment without status_media_types in context and must not care. A CD,
+        because a DVD now keeps its section after clearing."""
         item_id = _insert_item(
-            db, title="Read DVD", isbn=None, media_type="dvd", reading_status="read",
+            db, title="Read CD", isbn=None, media_type="cd", reading_status="read",
         )
         db.commit()
 

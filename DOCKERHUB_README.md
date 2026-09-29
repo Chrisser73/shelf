@@ -125,7 +125,7 @@ key material.
 | **Move** | Select a target location, then batch-scan items to relocate them |
 | **Inventory** | Select a location, scan everything there, then check for missing items. Counts physical copies, so a book with copies in two rooms is expected in both; a scan that cannot say *which* copy reports instead of moving one |
 | **Lookup** | Scan to check if an item is in your collection — no changes made |
-| **Quick Rate** | Scan to mark items as read/completed |
+| **Quick Rate** | Scan to mark items read, watched or played |
 
 ### Media Types
 - Books, audiobooks, eBooks, magazines, DVDs, Blu-rays, vinyl, cassettes, CDs, digital music, comics, manga, and video games
@@ -137,7 +137,7 @@ key material.
 ### Collection Management
 - Choose your features — pick Minimal, Standard or Everything in the setup wizard, then turn any optional part (Lending, Sharing, Valuation, the integrations, …) on or off in Settings → Features; data is kept while a feature is off
 - Home overview — totals, what is lent out, missing covers, a media-type breakdown and recent additions, with Browse kept for searching and bulk editing
-- Filter and search by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), custom tags, and author — every author on an item page is a link to everything by that person, co-authors and translators each counted on their own
+- Filter and search by media type, location, status (read, watched, played), ownership, lending status, source (which sync, provider or import an item arrived from), custom tags, and author — every author on an item page is a link to everything by that person, co-authors and translators each counted on their own
 - Shelf Fill — keep one shelf selected and scan item after item onto it; Arrange drags the copies on a shelf into the order they really sit in, or sorts them by title, creator, series, release or issue
 - Physical copies — own two of something and track them apart: add a copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes. Removing the copy marked primary promotes the next one and the item's location follows it
 - Trash — deleting an item or removing a copy moves it to Trash with its tags, loans, copies and history intact; editors restore, admins empty it, prompted once rows pass a retention window (180 days by default)
@@ -150,7 +150,7 @@ key material.
 - Public share links — read-only wishlist or collection pages for gift ideas, revocable anytime
 - Goodreads & StoryGraph import — upload your export as-is; format auto-detected, covers fetched automatically
 - Custom tags — free-form tags (`signed`, `first-edition`, …) on the item and edit pages or applied in bulk from Browse, with a tag filter and an optional Tags column on Browse, a tag manager in Settings (rename, scope, delete, counts), and default tags for a scanning session on Scan, Shelf Fill or Photo Intake
-- Bulk editing — select items in Browse to move them, change type or reading status, add to or remove from the wishlist, set and clear series, or add and remove a tag in one go
+- Bulk editing — select items in Browse to move them, change type or status, add to or remove from the wishlist, set and clear series, or add and remove a tag in one go
 - Valuation report — location-grouped, print-ready collection value report for insurance (via ISBNdb)
 - Display currency — 20 currencies for every value surface (formatting, not conversion)
 - CSV import/export, plus a portable archive — export the whole collection as one zip **including physical copies and cover art** and merge it into any Shelf instance without refetching a cover
@@ -158,7 +158,7 @@ key material.
 ### Multi-User
 - **Admin** — full control: settings, users, locations, tag rename/scope/delete, sync, bulk ops, logs, delete permanently / empty Trash
 - **Editor** — add/edit items, delete to Trash and restore, scan, manage covers, apply tags, checkout/checkin
-- **Viewer** — browse, search, reading status, export, view stats
+- **Viewer** — browse, search, set status (read, watched, played), export, view stats
 
 ## Optional Integrations
 

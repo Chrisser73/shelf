@@ -5733,6 +5733,25 @@ grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py test
 - **Status:** documented. Lint candidate in principle, but "needed before
   choosing" is a judgement.
 
+## G130 — When a test seeds a `upc` and then scans or looks it up
+
+- **Rule:** seed `upc=upc_svc.normalize_upc(code)` (`app/services/upc.py`),
+  never the raw 12-digit UPC-A, whenever the test then finds the item by
+  barcode — `/api/scan` in any mode, or a dupe check. A raw seed is fine only
+  where nothing matches on it.
+- **Why:** `items.upc` is stored as EAN-13, and the scan path normalizes the
+  scanned code before it looks. A 12-digit seed is a row no scan can reach,
+  so the test sees *not found* instead of the item, and the failure reads as
+  a routing or mode bug rather than a fixture one.
+- **Evidence:** `feat/watched-played` T2 (`0509e1e`, 2026-09-29): the Quick
+  Rate verb case seeded a DVD and a game by raw UPC, and two of three
+  parametrised cases returned `not_owned`. Fixed by normalizing the seed, the
+  pattern `tests/test_scan_upc_enrichment.py` already used.
+- **Verify:** `grep -rn 'upc="[0-9]\{12\}"' tests/` — each hit should be a
+  test that never scans or dedupes on that code.
+- **Status:** documented. Not a lint candidate: a raw seed is legitimate where
+  nothing matches on it.
+
 ## Graveyard
 
 Retired entries land here with a one-line reason (refactored away, lint

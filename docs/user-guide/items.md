@@ -64,10 +64,13 @@ its home.
   and "Robin", and editing it to `Robin Williams` makes it one. An `&` or an
   `and` inside a name is never split, so a duo such as `Simon & Garfunkel`
   stays one artist.
-- **Reading status** — Want to read / Reading / Read, with start and finish
-  dates. Viewers can set this too; it's the one thing they can change. It
-  appears on books, audiobooks, ebooks and comics — discs and
-  games don't carry one.
+- **Status** — with start and finish dates, in words that fit the item:
+  books, audiobooks, ebooks, comics and manga are read (Want to read /
+  Reading / Read), DVDs and Blu-rays are watched (Want to watch / Watching /
+  Watched), and video games are played (Want to play / Playing / Played).
+  Viewers can set this too; it's the one thing they can change. Music and
+  magazines don't carry one; the section appears on them only while a status
+  is still set, so it can be cleared.
 - **Location**. Locations can be nested, and an item shows the full path —
   see [Locations](locations.md). Every location shown here is a link to
   Browse filtered to that location.
@@ -76,7 +79,7 @@ its home.
   wishlist box is greyed out while *I own this item* is ticked, and ticking
   it clears the wishlist box. Untick both for a book you read but don't own
   (a library copy, a borrowed one): it stays in your catalogue with its
-  reading status and dates, and it is left out of the Owned and Wishlist
+  status and dates, and it is left out of the Owned and Wishlist
   filters, Store Mode and the valuation.
 - **Copies** — the physical objects you own, as opposed to the catalogue entry
   describing them. An item with more than one copy shows a **Copies** list
@@ -165,7 +168,7 @@ else on the form is saved** — correct it or empty the field and save again.
 Entering an ISBN-10 stores both forms (the ISBN-13 and the ISBN-10 it
 implies); a 979 ISBN has no ISBN-10 and stores none. Emptying the field
 clears the ISBN. The same banner appears for a media type, location, game
-platform or reading status Shelf doesn't recognise, and for a non-number in
+platform or status Shelf doesn't recognise, and for a non-number in
 a number field.
 
 **An ISBN you leave alone is left as it is**, even when it would not pass
@@ -242,7 +245,10 @@ JPEG, PNG, GIF or WebP under 10 MB"*.
 
 With Hardcover connected, status changes sync both ways on the schedule you
 set — Shelf is the source of truth for *owning*, Hardcover for *reading*, and
-the sync reconciles the reading side.
+the sync reconciles the reading side. Hardcover is for books, so only books,
+audiobooks, ebooks, comics and manga sync. A disc's, game's, album's or
+magazine's status stays in Shelf: it is never sent to Hardcover and never
+overwritten from it, even when the item was once a book linked to Hardcover.
 
 ## Duplicates and merging
 

@@ -214,13 +214,14 @@
                 </div>
                 {% endif %}
 
-                {# Reading Status — the book family, or anything else while a status is
-                   still set so it can be cleared. The gate lives here, not in the
-                   fragment: the toggle route renders that without book_media_types. #}
-                {% if item.media_type in book_media_types or item.reading_status %}
-                <!-- Reading Status -->
+                {# Status — the book family plus the types with their own verb (dvd,
+                   video_game), or anything else while a status is still set so it can
+                   be cleared. The gate lives here, not in the fragment: the toggle
+                   route renders that without status_media_types. #}
+                {% if item.media_type in status_media_types or item.reading_status %}
+                <!-- Status -->
                 <div class="mb-6">
-                    <p class="text-sm font-medium text-shelf-muted mb-2">Reading Status</p>
+                    <p class="text-sm font-medium text-shelf-muted mb-2">Status</p>
                     {% include "fragments/reading_status.html" %}
                 </div>
                 {% endif %}

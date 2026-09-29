@@ -3,8 +3,8 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-4600%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![E2E tests](https://img.shields.io/badge/e2e%20tests-309%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-4648%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![E2E tests](https://img.shields.io/badge/e2e%20tests-310%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
 A self-hosted home library catalog with barcode scanning, multi-mode scanning workflows, automatic metadata lookup, cover art, and collection management — all in a single Docker container.
@@ -136,7 +136,7 @@ of this whole directory carries the keys next to the data they protect.
 | **Move** | Select a target location, then batch-scan items to relocate them |
 | **Inventory** | Select a location, scan everything there, then check for missing items. Counts physical copies, so a book with copies in two rooms is expected in both; a scan that cannot say *which* copy reports instead of moving one |
 | **Lookup** | Scan to check if an item is in your collection — no changes made |
-| **Quick Rate** | Scan to mark items as read/completed |
+| **Quick Rate** | Scan to mark items read, watched or played |
 
 Camera scanning picks its decoder to suit the device: iOS Safari drives the
 camera with ZXing, every other platform uses html5-qrcode. The scan page and
@@ -180,7 +180,7 @@ each option before anything is sent.
 ### Collection Management
 - **Choose your features** — the setup wizard starts you on Minimal, Standard or Everything, and Settings → Features turns any optional part (Lending, Sharing, Valuation, Photo Intake, the integrations, …) on or off later, one at a time or by applying a profile. A feature that is off leaves the pages you use, and its data is kept for when it comes back. See [Configuration → Features](docs/configuration.md#features)
 - **Home overview** — Shelf opens on a page that answers "what is happening in my library?": catalogue, owned and wishlist totals, what is lent out, missing covers, a media-type breakdown and recent additions. Browse stays the place for searching, filtering and bulk editing. See [Home](docs/user-guide/home.md)
-- **Filter and search** — by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), and free text
+- **Filter and search** — by media type, location, status (read, watched, played), ownership, lending status, source (which sync, provider or import an item arrived from), and free text
 - **Reading tracking** — want-to-read, reading, and read with start/finish dates
 - **Custom tags** — free-form tags (`signed`, `first-edition`, whatever you like) as chips on the item page and its edit page, applied to many items at once from the Browse bulk bar, with a tag filter and an optional Tags column on Browse. Admins rename, scope and delete tags in Settings, which shows how many items carry each. Set **default tags** for a scanning session on Scan, Shelf Fill or Photo Intake and every item you add is tagged as it arrives, with suggestions for the media type you are scanning
 - **Synopses** — item descriptions fetched automatically on add, plus a one-click backfill for your existing catalog (Open Library, Google Books, Hardcover)
@@ -197,7 +197,7 @@ each option before anything is sent.
 - **Loan reminders** — overdue loans get a red badge, and an optional daily digest (ntfy or webhook) nags you about them; configure under Settings → Library → Lending
 - **Wishlist** — a list of what you want, kept alongside your catalog. Owning and wishing are separate: an item can also be neither — a book you read from the library stays in your catalog, with its reading history, without being owned or wished for
 - **Series tracking** — a Series page groups your library by series with position numbers, flags likely gaps, and (with Hardcover configured) checks the full series and adds missing volumes to your wishlist in one click. Each series can carry its own synopsis, written inline or fetched from Hardcover. Rename a series (renaming onto an existing name merges the two — the quick fix for duplicate series records left by metadata lookup) or disband it entirely, right from the series card
-- **Bulk editing** — select multiple items in Browse to move them, change type or reading status, add them to or remove them from the wishlist, set and clear their series, or add and remove a tag in one go
+- **Bulk editing** — select multiple items in Browse to move them, change type or status, add them to or remove them from the wishlist, set and clear their series, or add and remove a tag in one go
 - **Choose your columns** — Browse's list view has a column picker (value, series, publisher, year, pages, language, added date, platform, ISBN/UPC, and more), on top of the author/type/location/status shown by default; the choice is remembered per browser, not per account
 - **Valuation report** — location-grouped, print-ready report of your collection's list-price value for insurance documentation ([print view](screenshots/valuation-report-print.png)); prices via ISBNdb
 - **Display currency** — pick from 20 currencies under Settings → Collection and every value surface follows. This is formatting, not conversion: Shelf never converts amounts between currencies, so the figure ISBNdb returns is the figure shown
@@ -275,7 +275,7 @@ marked `noindex`, and revocable at any time.
 |------|--------|
 | **Admin** | Everything: settings, users, locations, tag rename/scope/delete, sync, bulk ops, logs, delete permanently / empty Trash |
 | **Editor** | Add/edit items, delete to Trash and restore, scan (all modes), covers (find/upload/paste URL/remove, and the cover review queue), checkout/checkin, apply tags (one item or a Browse selection), import/export |
-| **Viewer** | Browse, search, reading status, export CSV, view stats |
+| **Viewer** | Browse, search, set status (read, watched, played), export CSV, view stats |
 
 ## Metadata Sources
 

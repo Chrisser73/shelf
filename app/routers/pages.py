@@ -6,7 +6,10 @@ from fastapi.responses import RedirectResponse
 from app import browse_filters, features, nav
 from app.auth import require_role
 from app.features import require_feature
-from app.config import MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES
+from app.config import (
+    MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES, STATUS_MEDIA_TYPES,
+    status_labels, READ_LABELS, WATCH_LABELS, PLAY_LABELS,
+)
 from app.services.synopsis import SYNOPSIS_MEDIA_TYPES
 from app.currency import get_currency
 from app.services import author_index
@@ -376,6 +379,7 @@ async def item_detail(
             "all_tags": all_tags,
             "media_types": MEDIA_TYPES,
             "book_media_types": BOOK_MEDIA_TYPES,
+            "status_media_types": STATUS_MEDIA_TYPES,
             "synopsis_media_types": SYNOPSIS_MEDIA_TYPES,
             "game_platforms": game_platforms,
             "has_hardcover": has_hardcover,
@@ -473,9 +477,9 @@ async def stats(request: Request, _=Depends(require_role("viewer")),
 
         # --- Dashboard chart data (see .devdocs/archive/completed/STATS_DASHBOARD.md) ---
         read_by_year = db.execute(
-            "SELECT substr(date_finished, 1, 4) as y, COUNT(*) as c FROM items_live "
+            "SELECT substr(date_finished, 1, 4) AS y, media_type, COUNT(*) AS c FROM items_live "
             "WHERE reading_status = 'read' AND date_finished IS NOT NULL "
-            "GROUP BY y ORDER BY y"
+            "GROUP BY y, media_type ORDER BY y"
         ).fetchall()
         growth_rows = db.execute(
             "SELECT substr(created_at, 1, 7) as m, COUNT(*) as c FROM items_live "
@@ -497,8 +501,22 @@ async def stats(request: Request, _=Depends(require_role("viewer")),
 
     from datetime import date as _date
     current_year = str(_date.today().year)
-    read_pairs = [(r["y"], r["c"]) for r in read_by_year]
-    read_this_year = dict(read_pairs).get(current_year, 0)
+
+    by_key: dict[str, dict[str, int]] = {}
+    book_by_year: dict[str, int] = {}
+    for r in read_by_year:
+        key = status_labels(r["media_type"]).key
+        by_key.setdefault(key, {})
+        by_key[key][r["y"]] = by_key[key].get(r["y"], 0) + r["c"]
+        if r["media_type"] in BOOK_MEDIA_TYPES:
+            book_by_year[r["y"]] = book_by_year.get(r["y"], 0) + r["c"]
+
+    read_pairs = sorted(book_by_year.items())
+    finished_this_year = [
+        (by_key.get(k, {}).get(current_year, 0), labels.done_lower)
+        for k, labels in (("read", READ_LABELS), ("watch", WATCH_LABELS), ("play", PLAY_LABELS))
+    ]
+    finished_this_year = [(n, word) for n, word in finished_this_year if n > 0]
 
     running = 0
     growth_pairs = []
@@ -545,7 +563,7 @@ async def stats(request: Request, _=Depends(require_role("viewer")),
             "without_isbn": without_isbn,
             "recent": recent,
             "media_types": MEDIA_TYPES,
-            "read_this_year": read_this_year,
+            "finished_this_year": finished_this_year,
             "current_year": current_year,
             "current_value": current_value,
             "chart_read": chart_read,

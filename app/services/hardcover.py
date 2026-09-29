@@ -4,6 +4,7 @@ import logging
 
 import httpx
 
+from app.config import BOOK_MEDIA_TYPES
 from app.services import authors as authors_svc
 from app.services import outbound, provider_result
 from app.services.isbn import isbn13_to_isbn10
@@ -574,9 +575,13 @@ async def sync_reading_statuses(token: str) -> dict:
     unchanged = 0
 
     with get_db() as db:
-        # Get all Shelf items linked to Hardcover
+        # Book-family rows only: an item retyped to a disc or game keeps its
+        # Hardcover IDs, and its status must stay in Shelf.
+        family = sorted(BOOK_MEDIA_TYPES)
         linked = db.execute(
-            "SELECT id, hardcover_book_id, reading_status FROM items_live WHERE hardcover_book_id IS NOT NULL"
+            "SELECT id, hardcover_book_id, reading_status FROM items_live "
+            f"WHERE hardcover_book_id IS NOT NULL AND media_type IN ({','.join('?' * len(family))})",
+            family,
         ).fetchall()
 
         for item in linked:

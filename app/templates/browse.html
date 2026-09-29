@@ -23,11 +23,12 @@
             </select>
             <button @click="bulkUpdate({media_type: bulkTypeVal})" x-show="bulkTypeVal"
                     class="px-3 py-1 bg-shelf-accent text-white rounded-lg text-xs">Apply</button>
+            {% set bsl = status_labels(none) %}
             <select x-model="bulkStatusVal" class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">
                 <option value="">Set status...</option>
-                <option value="want_to_read">Want to Read</option>
-                <option value="reading">Reading</option>
-                <option value="read">Read</option>
+                <option value="want_to_read">{{ bsl.want }}</option>
+                <option value="reading">{{ bsl.doing }}</option>
+                <option value="read">{{ bsl.done }}</option>
                 <option value="__clear__">Clear Status</option>
             </select>
             <button @click="bulkUpdate({reading_status: bulkStatusVal === '__clear__' ? '' : bulkStatusVal})" x-show="bulkStatusVal"
@@ -226,15 +227,16 @@
             {% endif %}
 
             <!-- Reading Status Filter -->
+            {% set sl = status_labels(active_type or none) %}
             <select id="reading-status-filter" name="reading_status"
                     hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
                     hx-include="{{ filter_includes('reading_status') }}"
                     class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                 <option value="" {{ 'selected' if not f.reading_status else '' }}>All Statuses</option>
                 {% set rsc = reading_status_counts or {} %}
-                <option value="want_to_read" {{ 'selected' if f.reading_status == 'want_to_read' else '' }}>Want to Read{% if rsc.get('want_to_read') %} ({{ rsc.want_to_read }}){% endif %}</option>
-                <option value="reading" {{ 'selected' if f.reading_status == 'reading' else '' }}>Reading{% if rsc.get('reading') %} ({{ rsc.reading }}){% endif %}</option>
-                <option value="read" {{ 'selected' if f.reading_status == 'read' else '' }}>Read{% if rsc.get('read') %} ({{ rsc.read }}){% endif %}</option>
+                <option value="want_to_read" {{ 'selected' if f.reading_status == 'want_to_read' else '' }}>{{ sl.want }}{% if rsc.get('want_to_read') %} ({{ rsc.want_to_read }}){% endif %}</option>
+                <option value="reading" {{ 'selected' if f.reading_status == 'reading' else '' }}>{{ sl.doing }}{% if rsc.get('reading') %} ({{ rsc.reading }}){% endif %}</option>
+                <option value="read" {{ 'selected' if f.reading_status == 'read' else '' }}>{{ sl.done }}{% if rsc.get('read') %} ({{ rsc.read }}){% endif %}</option>
             </select>
 
             <!-- Tag Filter (only when tags exist) -->

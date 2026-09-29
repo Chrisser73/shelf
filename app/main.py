@@ -52,6 +52,7 @@ from app.config import (
     cover_shape,
     creator_label,
     get_client_ip,
+    status_labels,
 )
 from app.currency import CURRENCIES, format_money, get_currency
 from app.features import feature_enabled
@@ -470,6 +471,9 @@ templates.env.globals["browse_column_config"] = browse_columns.client_config
 # key, so a fragment re-rendered from a new route can't forget it — an
 # unknown key raises rather than rendering as falsy.
 templates.env.globals["feature_on"] = feature_enabled
+# The toggle route re-renders reading_status.html with only `item` in context,
+# so the status words must come from a global.
+templates.env.globals["status_labels"] = status_labels
 
 # Wrap TemplateResponse to auto-inject 'user' from request.state
 _original_template_response = templates.TemplateResponse

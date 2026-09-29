@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -26,6 +27,43 @@ MEDIA_TYPES = {
 # release-based. `dvd` and `video_game` belong to no family; `cd` belongs to
 # the music one. Declared here, beside the types themselves.
 BOOK_MEDIA_TYPES = frozenset({"book", "audiobook", "ebook", "comic", "manga"})
+
+
+# The words a stored reading_status value is shown as. The stored values stay
+# want_to_read / reading / read for every type; only the words change. A Python
+# map rather than a Jinja macro because plan-wrapups renders the same words in
+# Python.
+@dataclass(frozen=True)
+class StatusLabels:
+    key: str
+    want: str
+    doing: str
+    done: str
+    done_lower: str
+
+    def label(self, value):
+        """The word for a stored reading_status value; "" for None or unknown."""
+        return {"want_to_read": self.want, "reading": self.doing, "read": self.done}.get(value, "")
+
+
+READ_LABELS = StatusLabels("read", "Want to Read", "Reading", "Read", "read")
+WATCH_LABELS = StatusLabels("watch", "Want to Watch", "Watching", "Watched", "watched")
+PLAY_LABELS = StatusLabels("play", "Want to Play", "Playing", "Played", "played")
+# For places that show several types at once.
+NEUTRAL_LABELS = StatusLabels("neutral", "Want to", "In progress", "Finished", "finished")
+
+# Overrides only, as CREATOR_LABELS does; every other type reads.
+STATUS_VERBS = {"dvd": WATCH_LABELS, "video_game": PLAY_LABELS}
+
+# A type with its own verb gets its own status control on the item page.
+STATUS_MEDIA_TYPES = BOOK_MEDIA_TYPES | frozenset(STATUS_VERBS)
+
+
+def status_labels(media_type):
+    """The verb set for a media type: neutral for None or "", read by default."""
+    if not media_type:
+        return NEUTRAL_LABELS
+    return STATUS_VERBS.get(media_type, READ_LABELS)
 
 # Retired physical types, mapped to the canonical value that replaced them.
 # `kids_book` was a user *category* wearing a format's clothes — it had no

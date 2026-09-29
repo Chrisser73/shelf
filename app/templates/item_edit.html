@@ -53,7 +53,7 @@
     </div>
     {% elif error == "invalid_reading_status" %}
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
-        That reading status isn't one of Want to Read, Reading or Read. Nothing was saved.
+        That status isn't one Shelf recognises. Nothing was saved.
     </div>
     {% elif error == "invalid_owned" %}
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
@@ -129,15 +129,16 @@
                 </select>
             </div>
 
-            <div data-media-types="book audiobook ebook comic manga" data-always-visible="{{ 'true' if item.reading_status or item.date_started or item.date_finished else 'false' }}" class="space-y-4">
+            <div data-media-types="book audiobook ebook comic manga dvd video_game" data-always-visible="{{ 'true' if item.reading_status or item.date_started or item.date_finished else 'false' }}" class="space-y-4">
                 <div>
-                    <label for="reading_status" class="block text-sm font-medium text-shelf-muted mb-1">Reading Status</label>
+                    <label for="reading_status" class="block text-sm font-medium text-shelf-muted mb-1">Status</label>
+                    {% set sl = status_labels(item.media_type) %}
                     <select id="reading_status" name="reading_status"
                             class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                         <option value="">None</option>
-                        <option value="want_to_read" {% if item.reading_status == 'want_to_read' %}selected{% endif %}>Want to Read</option>
-                        <option value="reading" {% if item.reading_status == 'reading' %}selected{% endif %}>Reading</option>
-                        <option value="read" {% if item.reading_status == 'read' %}selected{% endif %}>Read</option>
+                        <option value="want_to_read" {% if item.reading_status == 'want_to_read' %}selected{% endif %}>{{ sl.want }}</option>
+                        <option value="reading" {% if item.reading_status == 'reading' %}selected{% endif %}>{{ sl.doing }}</option>
+                        <option value="read" {% if item.reading_status == 'read' %}selected{% endif %}>{{ sl.done }}</option>
                     </select>
                 </div>
                 <div class="grid grid-cols-2 gap-4">

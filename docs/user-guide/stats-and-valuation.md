@@ -5,14 +5,18 @@
 The **Stats** tab renders server-side SVG charts (no JavaScript, print-
 friendly):
 
-- **Books read per year** — finished items by year, from reading-status dates
+- **Finished in <year>** — this year's finished items, split into read ·
+  watched · played; a part with nothing in it is left out
+- **Books read per year** — finished books by year, from status dates. Only
+  books, audiobooks, ebooks, comics and manga count here; a finished film,
+  game, album or magazine does not
 - **Collection growth** — items added over time
 - **Top authors**
 - **Collection value over time** — the total from valuation runs, once you've done one
 - **By media type** and **by location** breakdowns
 - **Recently added** (last 30 days)
 
-Reading dates come from the item's reading status; imports from Goodreads /
+Reading dates come from the item's status; imports from Goodreads /
 StoryGraph / Hardcover bring their dates with them, so the history chart
 fills in retroactively.
 

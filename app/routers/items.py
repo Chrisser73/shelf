@@ -13,7 +13,7 @@ from app import nav
 from app.auth import require_role
 
 logger = logging.getLogger(__name__)
-from app.config import MEDIA_TYPES, HTTP_TIMEOUT, DEFAULT_PAGE_SIZE, canonical_media_type
+from app.config import MEDIA_TYPES, BOOK_MEDIA_TYPES, HTTP_TIMEOUT, DEFAULT_PAGE_SIZE, canonical_media_type, status_labels
 from app.database import (get_db, get_setting, gc_orphaned_series_meta,
                           get_reading_history)
 from app.routers.series import MAX_SERIES_NAME
@@ -1339,11 +1339,11 @@ async def set_reading_status(request: Request, item_id: int, status: str = Form(
         # history or a status toggle swaps in a section whose history vanished.
         reading_history = get_reading_history(db, item_id)
 
-    # Fire-and-forget: push status to Hardcover if linked
-    if item["hardcover_user_book_id"]:
+    # Fire-and-forget: push to Hardcover if linked; a retyped disc or game keeps its IDs
+    if item["hardcover_user_book_id"] and item["media_type"] in BOOK_MEDIA_TYPES:
         asyncio.create_task(_push_status_to_hardcover(item_id, status))
 
-    label = {"want_to_read": "Want to Read", "reading": "Reading", "read": "Read"}.get(status, "Cleared")
+    label = status_labels(item["media_type"]).label(status) or "Cleared"
     resp = templates.TemplateResponse(
         request, "fragments/reading_status.html",
         {"item": item, "reading_history": reading_history},

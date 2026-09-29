@@ -12,9 +12,9 @@
         <p class="text-shelf-muted text-sm">Wishlist</p>
         <p class="text-3xl font-bold">{{ wishlist_count }}</p>
     </div>
-    <div class="bg-shelf-card border border-shelf-border rounded-lg p-5">
-        <p class="text-shelf-muted text-sm">Read in {{ current_year }}</p>
-        <p class="text-3xl font-bold">{{ read_this_year }}</p>
+    <div class="bg-shelf-card border border-shelf-border rounded-lg p-5" data-testid="stats-finished-year">
+        <p class="text-shelf-muted text-sm">Finished in {{ current_year }}</p>
+        <p class="text-3xl font-bold">{% if finished_this_year %}{% for n, word in finished_this_year %}{% if not loop.first %} · {% endif %}{{ n }} <span class="text-sm text-shelf-muted font-normal">{{ word }}</span>{% endfor %}{% else %}0{% endif %}</p>
     </div>
     {% if feature_on('valuation') %}
     <div class="bg-shelf-card border border-shelf-border rounded-lg p-5" data-testid="stats-est-value">

@@ -30,6 +30,20 @@ Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
 
+### After upgrading to 0.59.0
+
+**Stats' Books Read per Year chart may show lower bars.** It now counts only
+books, audiobooks, ebooks, comics and manga. A film, game, album or magazine
+you marked finished used to count there too. It still counts in the
+**Finished in <year>** card, as *watched*, *played* or *read*.
+
+**Hardcover sync skips anything that is not a book.** An item you once linked
+to Hardcover as a book and later changed to a DVD, game, music or magazine
+keeps its link, but its status is no longer sent to Hardcover or overwritten
+from it.
+
+**No migrations run, and no stored data changes.**
+
 ### After upgrading to 0.56.0
 
 **The first start builds an author index.** Shelf reads every item's authors

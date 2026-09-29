@@ -27,7 +27,7 @@ New here? Start with **[Installation](installation.md)**, then
 | [Editing barcodes](user-guide/editing-barcodes.md) | Scanning or typing a retail UPC/EAN on the item edit page |
 | [Photo Intake](user-guide/photo-intake.md) | Bulk-add from a shelf photo: vision backends, tiling, cost, reviewing results |
 | [Browse & search](user-guide/browse-and-search.md) | Filters, views, sorting, tags, bulk editing |
-| [Items](user-guide/items.md) | The item page, editing, covers, synopses, reading status, locations, merging |
+| [Items](user-guide/items.md) | The item page, editing, covers, synopses, status (read, watched, played), locations, merging |
 | [Music](user-guide/music.md) | Cataloguing exact releases from MusicBrainz: formats, track lists, multi-disc, identifiers |
 | [Periodicals](user-guide/periodicals.md) | Magazines as publication plus issue, and what a 977 barcode resolves to |
 | [Locations](user-guide/locations.md) | Nested locations: creating, moving, renaming and deleting them, and what a full path means |

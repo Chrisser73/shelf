@@ -302,7 +302,7 @@
         {% elif status == 'elsewhere' %}elsewhere
         {% elif status == 'found' %}found
         {% elif status == 'not_owned' %}not found
-        {% elif status == 'marked_read' %}read
+        {% elif status == 'marked_read' %}{{ status_labels(media_type or none).done_lower }}
         {% elif status == 'already_checked_out' %}already lent
         {% elif status == 'not_checked_out' %}not lent
         {% elif status == 'in_trash' %}in Trash

@@ -1533,8 +1533,10 @@ class TestLanguageFilter:
         })
         html = resp.content.decode()
         import re
-        m = re.search(r'<option value="read"[^>]*>Read(?: \((\d+)\))?</option>', html)
-        assert m, "Read option missing"
+        # No media_type_filter is active, so the option carries the neutral
+        # word ("Finished"), not the book word "Read".
+        m = re.search(r'<option value="read"[^>]*>Finished(?: \((\d+)\))?</option>', html)
+        assert m, "Finished option missing"
         # 2 items are 'read' overall but only 1 is German.
         assert m.group(1) == "1", m.group(0)
 
@@ -1692,6 +1694,17 @@ class TestEditFormValueFunnel:
         assert resp.headers["location"].startswith(f"/item/{item_id}")
         row = self._row(item_id, "isbn", "isbn10")
         assert (row["isbn"], row["isbn10"]) == ("9780547928227", "054792822X")
+
+    def test_a_dvd_edit_form_carries_watch_words_and_round_trips_status(self, editor_client, db):
+        item_id = _insert_item(db, title="Edit DVD", isbn=None, media_type="dvd")
+        db.commit()
+        _, html = _rendered_form(editor_client, item_id)
+        select = re.search(r'<select id="reading_status".*?</select>', html, re.S)
+        assert select and ">Want to Watch</option>" in select.group(0)
+
+        resp = self._post(editor_client, item_id, reading_status="read")
+        assert resp.status_code == 303
+        assert self._row(item_id, "reading_status")["reading_status"] == "read"
 
     def test_bad_check_digit_redirects_back_with_the_code_and_saves_nothing(self, editor_client, db):
         item_id = _insert_item(db, title="Edit Bad", isbn="9780000000026")

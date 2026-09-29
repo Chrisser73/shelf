@@ -35,7 +35,7 @@ device last left in one of them opens in **Add**.
 | **Move** | Pick a location first; each scan relocates the item there. To work along a shelf putting things away in order, use [Shelf Fill](shelf-fill.md) instead — it keeps the shelf selected and numbers each scan's position |
 | **Inventory** | Pick a location; scan everything physically present; then **Check for missing** lists items Shelf thinks are there but you didn't scan. Counts *copies*, not records — see [Auditing a shelf with more than one copy](#auditing-a-shelf-with-more-than-one-copy) |
 | **Lookup** | Read-only: tells you whether the item is in your library (and where, and whether it's lent out). Changes nothing |
-| **Quick Rate** | Marks the item as read / finished with today's date |
+| **Quick Rate** | Marks the item finished with today's date — Watched for a disc, Played for a game, Read otherwise |
 
 The Scan tab is for editors and admins; viewers don't see it.
 
