@@ -4,8 +4,28 @@ This file is the central record of customizations in this fork. The upstream
 [`README.md`](README.md) continues to document Shelf itself; this file covers
 only added or changed fork-specific features.
 
-## V1.2.0 — Upgrade V1.2
+## V1.2.0.1 — Upgrade V1.2.1
 
+- Locations can be made the current user's default while creating or editing
+  them; Photo Intake selects that location automatically. Browse list view
+  now starts with Platform, Publisher, Year and Collector state after Title.
+- Photo Intake exposes an **Edit Config** shortcut to its Settings card and
+  displays the last Ollama connection check beside Provider. Settings can run
+  that check with toast and inline success/error feedback. Mac defaults to
+  the bundled Apple Macintosh platform logo.
+- Photo Intake now offers **Cancel** for a running analysis. Replacing a
+  photo, leaving the page, or a client-side analysis error also cancels the
+  active Shelf task, which closes the outstanding Ollama request instead of
+  leaving it to continue in the background. Intake and add failures now also
+  appear as error toasts.
+- Cancelled analyses return a clear confirmation instead of an invalid JSON
+  error. The recognition prompt explicitly preserves titles in Japanese and
+  other non-Latin scripts rather than translating or romanizing them.
+- A single slow Ollama vision request may now run for just over 18 minutes,
+  leaving headroom below the documented 20-minute reverse-proxy setting.
+- Settings can retrieve the models installed on the configured Ollama server
+  and presents them in a selectable list, marking models which report vision
+  capability. The refresh control re-reads the server after a model is pulled.
 - The global **Features** controls now consistently govern the matching UI.
   When Lending is off, Scan no longer offers Lend or Return, the Home "Lent
   out" tile and its personal Appearance option are hidden, and the Lending
@@ -18,14 +38,27 @@ only added or changed fork-specific features.
 - Browse now supplies platform labels consistently to both first-page and
   asynchronously refreshed list views, including the optional Platform
   column.
+- The current default location is marked with a blue **Default** badge in
+  Settings and with `(default)` in both Photo Intake location selectors.
+- In Collection list view, data columns can be sorted directly from their
+  headers. The active direction is shown with an arrow and uses the same
+  single server-side sort as the standard Sort by control.
+- The Photo Intake Settings card owns its stable `#photo-intake-vision` link
+  and connection test; the Discogs integration card now keeps the same visual
+  spacing as the other integrations. The bundled platform list also adds Mac
+  on startup without altering user-created platforms.
+- Photo Intake offers provider-specific model and reasoning selectors for
+  Anthropic and OpenAI. The defaults prioritize efficient image recognition:
+  Claude Haiku 4.5 with no forced thinking, or GPT-6 Luna at low reasoning.
+  API-key expiry is explicitly marked as unavailable where the providers do
+  not expose it through the ordinary key.
 
 ## V1.0.0 — Upgrade V1
 
 This first fork release bundles the platform-aware game catalogue, Lucide UI
 icons, enhanced photo intake and metadata retrieval, collector states, cover
 recovery, configurable Home tiles, and ARM64 container publishing described
-below. Use the Git tag `v1.0.0`; its human-readable release title is
-**Upgrade V1**.
+below. Use the Git tag `v1.0.0`; its human-readable release title is **Upgrade V1**.
 
 ## Game Platforms on the Home Page
 
@@ -63,6 +96,10 @@ The monochrome platform logos come from
 [HVR88/Monochrome-Gaming-Logos](https://github.com/HVR88/Monochrome-Gaming-Logos).
 Please observe that project's license and notices when distributing or changing
 logos.
+
+The Shelf favicon and installable web-app icon are based on
+[Papirus icon theme](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)
+by [PapirusDevelopmentTeam](https://github.com/PapirusDevelopmentTeam).
 
 ## Personal Collection Appearance
 
@@ -111,8 +148,8 @@ logos.
 
 ## Collector States and Cover Recovery
 
-- Non-book physical collection items can be marked as **CIB**, **Boxed**, or
-  **Loose** during manual add, photo intake, or editing. Browse can filter by
+- Non-book physical collection items can be marked as **CIB**, **Boxed**, or **Loose** during manual add, photo intake,
+  or editing. Browse can filter by
   the saved state.
 - The Home "Missing covers" number opens the matching filtered collection.
   Administrators can retry it directly from the card; book items use the book
@@ -129,8 +166,7 @@ logos.
 
 ## Home and Cover Editing
 
-- Each user can choose which default Home summary tiles are visible under
-  **Settings → Library → Appearance → Home**.
+- Each user can choose which default Home summary tiles are visible under **Settings → Library → Appearance → Home**.
 - Collection cards can optionally show their saved collector state below the
   title.
 - Cover controls use the consistent name **Edit cover**. The item edit page

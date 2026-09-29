@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from app.auth import require_role
@@ -20,18 +20,23 @@ def _parent_id(value: int | None) -> int | None:
 
 @router.post("")
 async def create_location(
+    request: Request,
     name: str = Form(...),
     sort_order: int = Form(0),
     parent_id: int | None = Form(None),
+    set_as_default: str = Form(""),
 ):
     try:
         with get_db() as db:
-            location_svc.create_location(
+            location_id = location_svc.create_location(
                 db,
                 name,
                 parent_id=_parent_id(parent_id),
                 sort_order=sort_order,
             )
+            if set_as_default == "on":
+                from app.services.user_preferences import set_preference
+                set_preference(db, request.state.user["id"], "default_location_id", str(location_id))
     except location_svc.DuplicateLocation:
         return _settings_error("duplicate")
     except location_svc.LocationNotFound:
@@ -44,10 +49,12 @@ async def create_location(
 
 @router.post("/{location_id}/update")
 async def update_location(
+    request: Request,
     location_id: int,
     name: str = Form(...),
     sort_order: int = Form(0),
     parent_id: int | None = Form(None),
+    set_as_default: str = Form(""),
 ):
     try:
         with get_db() as db:
@@ -58,6 +65,12 @@ async def update_location(
                 parent_id=_parent_id(parent_id),
                 sort_order=sort_order,
             )
+            from app.services.user_preferences import get_preference, set_preference
+            current_default = get_preference(db, request.state.user["id"], "default_location_id")
+            if set_as_default == "on":
+                set_preference(db, request.state.user["id"], "default_location_id", str(location_id))
+            elif current_default == str(location_id):
+                set_preference(db, request.state.user["id"], "default_location_id", "")
     except location_svc.DuplicateLocation:
         return _settings_error("duplicate")
     except location_svc.InvalidLocationParent:

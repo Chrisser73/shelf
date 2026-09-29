@@ -41,6 +41,7 @@ function intakePage() {
         // on photo B and analyze() crops and sends A's pixels under B's name,
         // or A's rows land under B's preview.
         photoGeneration: 0,
+        activeAnalysisJob: '',
 
         // media_type -> creator-noun map ("Artist", "Developer", …), read once
         // from the root's dataset below. Falls back to {} so creatorLabelFor()
@@ -66,17 +67,21 @@ function intakePage() {
             this.cameraAvailable = this.supportsCapture ||
                 !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
             var saved = localStorage.getItem('shelf.intake.locationId');
-            if (saved) {
+            var defaultLocationId = (pageEl && pageEl.dataset.defaultLocationId) || '';
+            if (defaultLocationId || saved) {
                 // Only restore if the location still exists — the select's
                 // options are the source of truth for valid ids.
                 this.$nextTick(() => {
                     var sel = this.$refs.locationSelect;
-                    if (sel && Array.from(sel.options).some(o => o.value === saved)) {
-                        this.locationId = saved;
+                    var wanted = defaultLocationId || saved;
+                    if (sel && Array.from(sel.options).some(o => o.value === wanted)) {
+                        this.locationId = wanted;
                     }
                 });
             }
             this.$watch('locationId', v => localStorage.setItem('shelf.intake.locationId', v || ''));
+            var self = this;
+            window.addEventListener('pagehide', function() { self.cancelAnalysis(); });
         },
 
         onFileChosen(e) {
@@ -88,6 +93,7 @@ function intakePage() {
         // The one funnel every photo enters by, whether it came from the
         // library input, the camera-app input, or a viewfinder grab.
         async setPhoto(file) {
+            this.cancelAnalysis();
             this.file = file;
             this.error = false;
             this.books = [];
@@ -322,6 +328,10 @@ function intakePage() {
             if (gen !== this.photoGeneration) return;
             try {
                 var form = new FormData();
+                this.activeAnalysisJob = (window.crypto && window.crypto.randomUUID)
+                    ? window.crypto.randomUUID()
+                    : '00000000-0000-4000-8000-' + Date.now().toString(16).padStart(12, '0').slice(-12);
+                form.append('job_id', this.activeAnalysisJob);
                 if (tiled && this.plan.tiles.length && this.imageEl) {
                     var blobs = await this.makeTileBlobs();
                     if (gen !== this.photoGeneration) return;
@@ -362,14 +372,31 @@ function intakePage() {
                         collector_condition: b.collector_condition || '', existing: b.existing || null,
                         include: !b.existing,
                     }));
+                } else if (data.cancelled) {
+                    this.error = false;
+                    showToast(data.message || 'Analysis cancelled — the AI request was stopped.', 'info');
                 } else {
                     this.error = data.message || 'Analysis failed';
+                    showToast(this.error, 'error');
                 }
             } catch (e) {
                 if (gen !== this.photoGeneration) return;
-                this.error = 'Analysis failed: ' + e.message;
+                this.cancelAnalysis();
+                this.error = 'Analysis connection was interrupted. The AI request is being cancelled.';
+                showToast(this.error, 'warning');
             }
+            this.activeAnalysisJob = '';
             this.analyzing = false;
+        },
+
+        cancelAnalysis() {
+            var jobId = this.activeAnalysisJob;
+            if (!jobId) return;
+            this.activeAnalysisJob = '';
+            fetch('/api/intake/analyze/cancel?job_id=' + encodeURIComponent(jobId), {
+                method: 'POST', keepalive: true,
+                headers: { 'X-CSRF-Token': window.csrfToken() }
+            });
         },
 
         selectedCount() {
@@ -465,14 +492,17 @@ function intakePage() {
                     showToast('Added ' + data.added.length + ' items');
                 } else {
                     this.error = data.message || 'Add failed';
+                    showToast(this.error, 'error');
                 }
             } catch (e) {
                 this.error = 'Add failed: ' + e.message;
+                showToast(this.error, 'error');
             }
             this.confirming = false;
         },
 
         async reset() {
+            this.cancelAnalysis();
             this.file = false;
             if (this.preview) URL.revokeObjectURL(this.preview);
             this.preview = false;

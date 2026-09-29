@@ -1,7 +1,9 @@
 import json
+import re
 import sqlite3
 from datetime import datetime
 
+import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, FileResponse
 
@@ -10,7 +12,7 @@ from app.config import DATABASE_PATH, DATA_DIR
 from app.crypto import SENSITIVE_KEYS, encrypt_value, get_encryption_key
 from app.currency import CURRENCIES, invalidate_cache as invalidate_currency_cache
 from app import features
-from app.database import get_db, get_setting, set_setting
+from app.database import get_all_settings, get_db, get_setting, set_setting
 from app.nav import HIDEABLE_KEYS, invalidate_cache as invalidate_nav_cache
 from app.services import audiobookshelf
 from app.services.national import SEARCH_LANGS
@@ -30,6 +32,92 @@ _INTEGRATION_KEYS = (
     "igdb_client_secret",
     "discogs_token",
 )
+
+
+@router.get("/vision/ollama-models")
+async def ollama_models(url: str = ""):
+    """Return models installed on the configured Ollama server for Settings."""
+    url = url.strip().rstrip("/")
+    if not re.match(r"^https?://[^/]+(?:/.*)?$", url):
+        return {"ok": False, "message": "Enter a valid Ollama URL first"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(f"{url}/api/tags")
+    except httpx.HTTPError:
+        return {"ok": False, "message": "Could not reach Ollama"}
+    if response.status_code != 200:
+        return {"ok": False, "message": f"Ollama error (HTTP {response.status_code})"}
+    try:
+        raw_models = response.json().get("models", [])
+    except (ValueError, AttributeError):
+        return {"ok": False, "message": "Ollama returned an invalid model list"}
+    models = []
+    for model in raw_models:
+        if not isinstance(model, dict) or not isinstance(model.get("name"), str):
+            continue
+        models.append({"name": model["name"], "vision": "vision" in (model.get("capabilities") or [])})
+    return {"ok": True, "models": models}
+
+
+@router.post("/vision/test")
+async def test_vision_connection(request: Request):
+    """Test the provider and credentials currently visible in the form.
+
+    A Settings form can be changed before Save, so reading only persisted
+    settings would test a different provider.  Unsaved credentials are used
+    for this one request only and are never stored by this endpoint.
+    """
+    try:
+        submitted = await request.json()
+    except ValueError:
+        submitted = {}
+    if not isinstance(submitted, dict):
+        return {"ok": False, "message": "Invalid connection-test request"}
+    with get_db() as db:
+        settings = get_all_settings(db)
+        provider = (submitted.get("provider") or settings.get("vision_provider") or "").strip()
+        if provider not in ("anthropic", "openai", "ollama"):
+            return {"ok": False, "message": "Choose a vision provider first."}
+        submitted_key = submitted.get(f"{provider}_api_key")
+        key = submitted_key.strip() if isinstance(submitted_key, str) and submitted_key.strip() else settings.get(f"{provider}_api_key")
+        # The OpenAI-compatible form calls its URL field `openai_base_url`;
+        # the other providers use `<provider>_url`.
+        url_key = "openai_base_url" if provider == "openai" else f"{provider}_url"
+        submitted_url = submitted.get(url_key)
+        if provider == "ollama":
+            url = (submitted_url.strip() if isinstance(submitted_url, str) and submitted_url.strip() else settings.get("ollama_url") or "http://localhost:11434").rstrip("/")
+        elif provider == "openai":
+            url = (submitted_url.strip() if isinstance(submitted_url, str) and submitted_url.strip() else settings.get("openai_base_url") or "https://api.openai.com/v1").rstrip("/")
+        else:
+            url = "https://api.anthropic.com"
+        if provider != "ollama" and not key:
+            return {"ok": False, "message": f"Enter an {provider.title()} API key first."}
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                if provider == "ollama":
+                    response = await client.get(f"{url}/api/tags")
+                elif provider == "anthropic":
+                    response = await client.get(
+                        f"{url}/v1/models?limit=1",
+                        headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+                    )
+                else:
+                    headers = {"Authorization": f"Bearer {key}"} if key else {}
+                    response = await client.get(f"{url}/models", headers=headers)
+            ok = response.status_code == 200
+        except httpx.HTTPError:
+            ok = False
+        # Persist only a test of the saved provider/configuration. A successful
+        # test of unsaved fields must not make Photo Intake display a stale dot.
+        saved_provider = settings.get("vision_provider") or ""
+        uses_unsaved = bool(submitted_key) or (
+            isinstance(submitted_url, str) and submitted_url.strip()
+            and submitted_url.strip().rstrip("/") != (settings.get(url_key) or "").rstrip("/")
+        )
+        if provider == saved_provider and not uses_unsaved:
+            set_setting(db, "vision_connection_status", "ok" if ok else "error")
+    provider_label = {"anthropic": "Anthropic", "openai": "OpenAI", "ollama": "Ollama"}[provider]
+    return {"ok": ok, "message": f"Connected to {provider_label}" if ok else f"Could not reach {provider_label} at {url}"}
 
 
 def _upsert_setting(db, key: str, value: str, cleared: bool = False):
@@ -104,9 +192,11 @@ async def update_vision_settings(
     vision_provider: str = Form(""),
     anthropic_api_key: str = Form(""),
     anthropic_vision_model: str = Form(""),
+    anthropic_vision_reasoning: str = Form(""),
     openai_base_url: str = Form(""),
     openai_api_key: str = Form(""),
     openai_vision_model: str = Form(""),
+    openai_vision_reasoning: str = Form("low"),
     openai_ingest_long_edge: str = Form(""),
     ollama_url: str = Form(""),
     ollama_model: str = Form(""),
@@ -121,6 +211,10 @@ async def update_vision_settings(
     """
     if vision_provider not in ("", "anthropic", "openai", "ollama"):
         return {"ok": False, "message": "Unknown vision provider"}
+    if anthropic_vision_reasoning not in ("", "low", "medium", "high"):
+        return {"ok": False, "message": "Unknown Anthropic reasoning level"}
+    if openai_vision_reasoning not in ("", "low", "medium", "high", "xhigh", "max"):
+        return {"ok": False, "message": "Unknown OpenAI reasoning level"}
     ollama_long_edge = ollama_ingest_long_edge.strip()
     if ollama_long_edge and not ollama_long_edge.isdigit():
         return {"ok": False, "message": "Ollama image size must be a whole number of pixels"}
@@ -135,15 +229,20 @@ async def update_vision_settings(
             ("vision_provider", vision_provider),
             ("anthropic_api_key", anthropic_api_key.strip()),
             ("anthropic_vision_model", anthropic_vision_model.strip()),
+            ("anthropic_vision_reasoning", anthropic_vision_reasoning),
             ("openai_base_url", openai_base_url.strip().rstrip("/")),
             ("openai_api_key", openai_api_key.strip()),
             ("openai_vision_model", openai_vision_model.strip()),
+            ("openai_vision_reasoning", openai_vision_reasoning),
             ("openai_ingest_long_edge", openai_long_edge),
             ("ollama_url", ollama_url.strip().rstrip("/")),
             ("ollama_model", ollama_model.strip()),
             ("ollama_ingest_long_edge", ollama_long_edge),
         ]:
             _upsert_setting(db, key, value, cleared=clears.get(key, False))
+        # A saved endpoint/model may no longer be the one that was tested.
+        # Keep the result persistent, but never show a stale green indicator.
+        set_setting(db, "vision_connection_status", "")
     invalidate_nav_cache()  # the vision provider and its key gate the Intake tab
     return RedirectResponse(url="/settings", status_code=303)
 

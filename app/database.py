@@ -761,10 +761,7 @@ def _run_migrations(db: sqlite3.Connection) -> list[str]:
 
 
 def _seed_game_platforms(db: sqlite3.Connection) -> None:
-    """Seed game_platforms table from config defaults if empty."""
-    count = db.execute("SELECT COUNT(*) as c FROM game_platforms").fetchone()["c"]
-    if count > 0:
-        return
+    """Add config defaults without changing a user's existing platform list."""
     from app.config import GAME_PLATFORMS
     for i, (slug, name) in enumerate(GAME_PLATFORMS.items()):
         db.execute(
