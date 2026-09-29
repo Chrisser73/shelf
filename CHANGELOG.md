@@ -6,6 +6,29 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-09-29
+
+0.55.0 let you turn off the parts of Shelf you do not use, but a new install
+still started with everything on. Someone who only wanted to catalogue books
+had to find Settings → Features and switch off a dozen things one at a time.
+Now the setup wizard asks how much of Shelf to start with, and Settings can
+move an install to a different starting set in one step.
+
+### Added
+
+- **The setup wizard asks how much of Shelf to start with.** Choose Minimal
+  (scan, catalogue and browse), Standard (adds Lending, Series, Statistics,
+  Store Mode, Music, Periodicals and Shelf Fill) or Everything. Standard is
+  preselected. An upgraded install is unaffected and keeps everything on.
+- **Settings → Features has a Profiles row.** It applies Minimal, Standard or
+  Everything in one step and shows which one the install matches, or
+  **Custom** when it matches none. Each profile lists what applying it would
+  turn on and turn off from the current settings. It asks first when the
+  change would turn off Sharing or Lending while they are in use.
+  It does not ask before turning off an integration you have set up, such as
+  Hardcover or Audiobookshelf sync: its settings are kept, and its **Turns
+  off** line names it before you apply.
+
 ## [0.57.0] - 2026-09-28
 
 0.55.0 let you turn off the parts of Shelf you do not use, but only their tabs
@@ -4584,6 +4607,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.58.0]: https://github.com/dgahagan/shelf/releases/tag/v0.58.0
 [0.57.0]: https://github.com/dgahagan/shelf/releases/tag/v0.57.0
 [0.56.0]: https://github.com/dgahagan/shelf/releases/tag/v0.56.0
 [0.55.0]: https://github.com/dgahagan/shelf/releases/tag/v0.55.0

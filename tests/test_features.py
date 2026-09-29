@@ -6,7 +6,13 @@ import app.features as features
 from app.features import (
     CORE_NAV_TABS,
     FEATURES,
+    PROFILES,
+    Feature,
+    apply_profile,
+    current_profile,
     feature_enabled,
+    profile_choices,
+    profile_keys,
     set_feature_enabled,
 )
 from tests.test_features_gate import off
@@ -164,6 +170,114 @@ def test_registry_has_the_fourteen_designed_features():
         "lending", "series", "stats", "store", "share", "valuation", "music",
         "periodicals", "shelf_fill", "intake", "hardcover", "abs_sync", "komga", "romm",
     ]
+
+
+# --- Profiles ----------------------------------------------------------------
+
+_STANDARD_KEYS = frozenset({
+    "lending", "series", "stats", "store", "music", "periodicals", "shelf_fill",
+})
+
+
+def test_every_feature_profile_is_standard_or_everything():
+    for key, f in FEATURES.items():
+        assert f.profile in ("standard", "everything"), f"FEATURES[{key!r}].profile is {f.profile!r}"
+
+
+def test_profile_keys_minimal_is_empty():
+    assert profile_keys("minimal") == frozenset()
+
+
+def test_profile_keys_standard_is_a_strict_subset_of_everything():
+    assert profile_keys("standard") < profile_keys("everything")
+
+
+def test_profile_keys_everything_is_every_feature():
+    assert profile_keys("everything") == set(FEATURES)
+
+
+def test_profile_keys_standard_is_the_designed_seven():
+    assert profile_keys("standard") == _STANDARD_KEYS
+
+
+def test_profile_keys_unknown_name_raises():
+    with pytest.raises(KeyError):
+        profile_keys("nope")
+
+
+def test_feature_profile_has_no_default():
+    with pytest.raises(TypeError):
+        Feature(label="x", description="y")
+
+
+def _profile_rows(db):
+    rows = db.execute("SELECT key, value FROM settings WHERE key LIKE 'feature.%'").fetchall()
+    return {row["key"]: row["value"] for row in rows}
+
+
+@pytest.mark.parametrize("name", ["minimal", "standard", "everything"])
+def test_apply_profile_writes_all_fourteen_rows(db, name):
+    apply_profile(db, name)
+    db.commit()
+    rows = _profile_rows(db)
+    keys = profile_keys(name)
+    assert set(rows) == {f"feature.{k}" for k in FEATURES}
+    for key in FEATURES:
+        expected = "1" if key in keys else "0"
+        assert rows[f"feature.{key}"] == expected, key
+
+
+def test_apply_profile_unknown_name_raises_and_writes_nothing(db):
+    with pytest.raises(KeyError):
+        apply_profile(db, "nope")
+    db.commit()
+    assert _profile_rows(db) == {}
+
+
+@pytest.mark.parametrize("name", ["minimal", "standard", "everything"])
+def test_current_profile_after_apply(db, name):
+    apply_profile(db, name)
+    db.commit()
+    assert current_profile() == name
+
+
+def test_current_profile_is_none_after_a_manual_toggle(db):
+    apply_profile(db, "standard")
+    db.commit()
+    set_feature_enabled(db, "series", False)
+    db.commit()
+    assert current_profile() is None
+
+
+def test_current_profile_is_everything_on_a_fresh_db():
+    assert current_profile() == "everything"
+
+
+def test_apply_profile_refill_before_commit_is_dropped_at_commit():
+    """G124 pin, modelled on test_refill_before_commit_is_dropped_at_commit:
+    another connection refilling between the write and its commit caches the
+    pre-commit state; the after-commit invalidation drops it."""
+    from app.database import get_db
+    with get_db() as writer:
+        apply_profile(writer, "minimal")
+        # Another request reads now: it cannot see the uncommitted rows.
+        assert feature_enabled("series") is True
+        assert features._cached_flags is not None
+    assert features._cached_flags is None
+    assert feature_enabled("series") is False
+
+
+def test_profile_choices_order_and_minimal_adds_nothing():
+    choices = profile_choices()
+    assert [c["name"] for c in choices] == ["minimal", "standard", "everything"]
+    assert choices[0]["adds"] == []
+
+
+def test_profile_choices_adds_cover_every_feature_label_exactly_once():
+    choices = profile_choices()
+    all_adds = [label for c in choices for label in c["adds"]]
+    assert sorted(all_adds) == sorted(f.label for f in FEATURES.values())
+    assert len(all_adds) == len(set(all_adds))
 
 
 # --- feature_on template global, disabled_scan_modes, client names --------

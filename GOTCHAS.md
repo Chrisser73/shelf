@@ -1229,6 +1229,18 @@ python -c "from app.services.openlibrary import USER_AGENT as U; assert 'http' i
     judgement call left to get wrong. In the same session the *committed* case
     (T2's guard file) and the *uncommitted* case (T3's template) sat one task
     apart, which is exactly the discrimination not worth making under pressure.
+    **Third time, `feat/feature-profiles-wizard` T2 (2026-09-29)** — the
+    orchestrator had made the `cp` backup and still reached for `git checkout`
+    to restore, wiping the uncommitted handler; the backup is what saved it.
+    Restore with the same tool you backed up with.
+  - **A scripted mutation that anchors on a non-unique line mutates the wrong
+    function.** The same run's first two attempts moved `apply_profile` "to
+    just before `token = create_token(`" with a first-match (then last-match)
+    string replace — and `auth_routes.py` has that line in the login route and
+    a later route too. The result looked like a real finding (six pins red, the
+    rows missing) and was a mutation of a different handler. Assert the anchor
+    occurs once (`assert s.count(anchor) == 1`) before replacing, and read the
+    mutated diff before reading the test output.
 
   One more, found while orchestrating `feat/issue-50-blank-scan-toast`
   (2026-08-28) — the "fallback branch absorbs it" bullet again, but the
@@ -5426,6 +5438,11 @@ grep -n 'type="submit" class="sr-only"' app/templates/scan.html app/templates/sh
 - **Evidence:** `feat/tags-scan-defaults` T1 (`f6e03f1`, 2026-09-22). The
   impl plan specified "Unauthenticated gets 401" for `GET /api/tags`; the
   first run of the test read 200.
+- **With zero users the redirect is to `/setup`, not `/login`.** The same
+  middleware sends every request to the wizard until an account exists, and
+  the bare `client` fixture starts with none. An anonymous pin therefore
+  needs a user in the DB — request `admin_user` beside `client` — or it
+  asserts the setup redirect (`feat/feature-profiles-wizard` T3, 2026-09-29).
 - **Verify:** `grep -n "not user" -A3 app/main.py` still shows the
   `RedirectResponse(url="/login", status_code=303)` branch ahead of
   `call_next`.
@@ -5696,6 +5713,25 @@ grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py test
 - **Verify:** `grep -rln "read_text()" tests/ | xargs grep -lE "\.html"`
   lists the tests that read template source.
 - **Status:** documented.
+
+## G129 — When a choice's explanation lives only in a `title` attribute
+
+- **Rule:** if the user must see what an option does before choosing it,
+  render that as visible text. A `title` may supplement it, never be its
+  only surface: a touch screen has no hover, and a `disabled` button may show
+  no tooltip at all.
+- **Why:** a server-rendered test that finds the copy in the HTML passes
+  whether the copy is on the page or in an attribute, and desktop review
+  hovers past the gap. Only a touch context makes it deterministic.
+- **Evidence:** `feat/feature-profiles-wizard` diff review (codex M1,
+  2026-09-29). Setup showed each profile's `Adds:` list; Settings → Features
+  put it only in button titles, so at 390×844 the row read "Minimal
+  Standard Everything". Fixed by rendering the copy as card text; the pins
+  strip tags before asserting and check the block in a touch context.
+- **Verify:** `grep -rn 'title="{{' app/templates/` — each hit should carry
+  copy that is also visible, or copy nobody needs before acting.
+- **Status:** documented. Lint candidate in principle, but "needed before
+  choosing" is a judgement.
 
 ## Graveyard
 

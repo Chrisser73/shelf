@@ -19,7 +19,7 @@ docker run -d \
   dangahagan/shelf:latest
 ```
 
-Open **https://localhost:18888** and create your admin account via the setup wizard. That's it.
+Open **https://localhost:18888** and create your admin account and pick a feature profile via the setup wizard. That's it.
 
 > **Note:** By default Shelf serves HTTPS with a self-signed certificate generated on first run. Your browser will show a certificate warning — this is expected. Click through to proceed. Behind a reverse proxy that terminates TLS, set `SHELF_TLS=off` to serve plain HTTP to the proxy instead.
 
@@ -135,6 +135,7 @@ key material.
 - Video game support with IGDB metadata and 30+ platforms (Atari 2600 to PS5)
 
 ### Collection Management
+- Choose your features — pick Minimal, Standard or Everything in the setup wizard, then turn any optional part (Lending, Sharing, Valuation, the integrations, …) on or off in Settings → Features; data is kept while a feature is off
 - Home overview — totals, what is lent out, missing covers, a media-type breakdown and recent additions, with Browse kept for searching and bulk editing
 - Filter and search by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), custom tags, and author — every author on an item page is a link to everything by that person, co-authors and translators each counted on their own
 - Shelf Fill — keep one shelf selected and scan item after item onto it; Arrange drags the copies on a shelf into the order they really sit in, or sorts them by title, creator, series, release or issue

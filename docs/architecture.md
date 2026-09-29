@@ -63,6 +63,13 @@ be turned off.
   twice — immediately and again after its transaction commits
   (`database.after_commit`), with a generation guard on the refill, so a
   concurrent read cannot re-cache the pre-commit value.
+- **Profiles are not stored.** Each registry entry names the smallest profile
+  it belongs to (`standard` or `everything`; Minimal is core only).
+  `apply_profile` writes every `feature.<key>` row inside the caller's
+  transaction, and the install's profile is derived from the flags on each
+  read, so a hand-flipped switch reads as Custom. `/setup` applies the chosen profile in the same
+  transaction as the first admin's insert: no install holds an admin and half
+  a profile.
 - **The gate is a route dependency, not a middleware.**
   `require_feature(key)` runs after the four middlewares above and is declared
   **after** the route's `require_role`, so a user without the role gets the

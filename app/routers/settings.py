@@ -237,6 +237,21 @@ async def set_feature(key: str, enabled: str = Form(...)):
     return RedirectResponse(url="/settings", status_code=303)
 
 
+@router.post("/profile")
+async def set_profile(profile: str = Form(...)):
+    """Apply Minimal, Standard or Everything from Settings → Features.
+
+    Validates and applies; the page's `data-confirm` decides whether to ask
+    first, as for a single feature. Not under `/features/`, where the dynamic
+    `/features/{key}` above would take it (G119).
+    """
+    if profile not in features.PROFILES:
+        raise HTTPException(status_code=400)
+    with get_db() as db:
+        features.apply_profile(db, profile)
+    return RedirectResponse(url="/settings", status_code=303)
+
+
 @router.post("/features/{key}/enable")
 async def enable_feature(key: str):
     """Turn a feature on from its disabled page.

@@ -42,7 +42,7 @@ New here? Start with **[Installation](installation.md)**, then
 | [RomM](romm.md) | Connecting a self-hosted RomM server for digital games |
 | [Komga](komga.md) | Connecting a self-hosted Komga server for digital comics and manga |
 | [Users & roles](user-guide/users-and-roles.md) | Admin / editor / viewer, adding users, passwords, the log viewer |
-| [Settings](user-guide/settings.md) | The four Settings sections and what lives in each |
+| [Settings](user-guide/settings.md) | The five Settings sections and what lives in each |
 
 ## Help
 

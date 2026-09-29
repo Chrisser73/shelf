@@ -12,7 +12,9 @@ re-reveals everything, including rows written while the feature was off.
 Each flag is one `settings` row, `feature.<key>`. Only the exact value "0"
 disables a feature: an absent row (every upgraded install) or any other value
 means enabled, so an upgrade changes nothing until an admin turns something
-off. Flags are rows only; no env var overrides them.
+off. Flags are rows only; no env var overrides them. A new install writes all
+fourteen rows explicitly, from the profile chosen at setup; an upgraded
+install has none, and reads as Everything.
 
 `nav.py` imports this module, never the reverse at module level.
 """
@@ -32,6 +34,9 @@ Route = tuple[str, str]
 class Feature:
     label: str
     description: str
+    # The smallest profile that turns this feature on: "standard" or
+    # "everything". Minimal turns nothing on, so no feature names it.
+    profile: str
     # NAV_TABS keys this feature owns; a disabled feature hides them.
     nav_tabs: tuple[str, ...] = ()
     # Scan modes (dispatched inside core /api/scan) that refuse while off.
@@ -137,6 +142,7 @@ FEATURES: dict[str, Feature] = {
     "lending": Feature(
         label="Lending",
         description="Lend items to borrowers, track loans and send overdue reminders.",
+        profile="standard",
         scan_modes=("lend", "return"),
         job="loan_reminders",
         probes=(_probe_open_loans,),
@@ -145,6 +151,7 @@ FEATURES: dict[str, Feature] = {
     "series": Feature(
         label="Series",
         description="Track series, find gaps and mark series complete.",
+        profile="standard",
         nav_tabs=("series",),
         entry_path="/series",
         modules=("app.routers.series",),
@@ -152,6 +159,7 @@ FEATURES: dict[str, Feature] = {
     "stats": Feature(
         label="Statistics",
         description="Charts and counts about your collection.",
+        profile="standard",
         nav_tabs=("stats",),
         entry_path="/stats",
         routes=(("GET", "/stats"),),
@@ -159,6 +167,7 @@ FEATURES: dict[str, Feature] = {
     "store": Feature(
         label="Store Mode",
         description="An offline page for checking what you own while out shopping.",
+        profile="standard",
         nav_tabs=("store",),
         entry_path="/store",
         modules=("app.routers.store",),
@@ -169,6 +178,7 @@ FEATURES: dict[str, Feature] = {
     "share": Feature(
         label="Sharing",
         description="Public read-only links to your collection.",
+        profile="everything",
         probes=(_probe_share_links,),
         modules=("app.routers.share",),
         inline={
@@ -178,6 +188,7 @@ FEATURES: dict[str, Feature] = {
     "valuation": Feature(
         label="Valuation",
         description="Price lookups and the insurance valuation report.",
+        profile="everything",
         modules=("app.routers.valuation",),
         ungated={
             ("POST", "/api/valuate/test-key"): _CONFIG,
@@ -187,6 +198,7 @@ FEATURES: dict[str, Feature] = {
     "music": Feature(
         label="Music",
         description="Music releases with Discogs details.",
+        profile="standard",
         nav_tabs=("music",),
         entry_path="/music",
         modules=("app.routers.music",),
@@ -194,6 +206,7 @@ FEATURES: dict[str, Feature] = {
     "periodicals": Feature(
         label="Periodicals",
         description="Magazines and other periodicals, grouped by publication.",
+        profile="standard",
         nav_tabs=("periodicals",),
         entry_path="/periodicals",
         modules=("app.routers.periodicals",),
@@ -206,6 +219,7 @@ FEATURES: dict[str, Feature] = {
     "shelf_fill": Feature(
         label="Shelf Fill",
         description="Place items on shelves and see how full each location is.",
+        profile="standard",
         nav_tabs=("shelf-fill",),
         entry_path="/shelf-fill",
         modules=("app.routers.shelf_fill",),
@@ -213,6 +227,7 @@ FEATURES: dict[str, Feature] = {
     "intake": Feature(
         label="Photo Intake",
         description="Add many books at once from a photo of a shelf.",
+        profile="everything",
         nav_tabs=("intake",),
         entry_path="/intake",
         modules=("app.routers.intake",),
@@ -222,6 +237,7 @@ FEATURES: dict[str, Feature] = {
     "hardcover": Feature(
         label="Hardcover",
         description="Discover, reading-status sync and transfers with Hardcover.",
+        profile="everything",
         nav_tabs=("discover",),
         job="hardcover_sync",
         entry_path="/discover",
@@ -237,6 +253,7 @@ FEATURES: dict[str, Feature] = {
     "abs_sync": Feature(
         label="Audiobookshelf sync",
         description="Import and link items from Audiobookshelf libraries.",
+        profile="everything",
         job="abs_sync",
         modules=("app.routers.sync",),
         configured=_abs_configured,
@@ -250,6 +267,7 @@ FEATURES: dict[str, Feature] = {
     "komga": Feature(
         label="Komga",
         description="Link comics and manga to a Komga server.",
+        profile="everything",
         modules=("app.routers.komga",),
         configured=_komga_configured,
         client=("komga-item.js",),
@@ -264,6 +282,7 @@ FEATURES: dict[str, Feature] = {
     "romm": Feature(
         label="RomM",
         description="Link video games to a RomM server.",
+        profile="everything",
         modules=("app.routers.romm",),
         configured=_romm_configured,
         client=("romm-item.js",),
@@ -274,6 +293,18 @@ FEATURES: dict[str, Feature] = {
             ("GET", "/api/romm/platforms"): _CONFIG,
             ("POST", "/api/romm/platforms"): _CONFIG,
         },
+    ),
+}
+
+# Presets over the registry's `profile` field, smallest first. name -> (label,
+# one-line description). Custom is not a member: it is what "no profile's set
+# matches the enabled set" means (see current_profile).
+PROFILES: dict[str, tuple[str, str]] = {
+    "minimal": ("Minimal", "Scan, catalogue and browse. Nothing optional."),
+    "standard": ("Standard", "The everyday extras for a home library."),
+    "everything": (
+        "Everything",
+        "Every feature, including sharing, valuation, photo intake and the integrations.",
     ),
 }
 
@@ -356,25 +387,125 @@ def set_feature_enabled(db, key: str, enabled: bool) -> None:
     after_commit(db, _invalidate_all)
 
 
+def profile_keys(name: str) -> frozenset[str]:
+    """Keys whose `profile` ranks at or below `name` in PROFILES order.
+
+    KeyError on an unknown name. `profile_keys("minimal")` is empty by
+    construction: no feature names "minimal" as its profile.
+    """
+    order = list(PROFILES)
+    if name not in PROFILES:
+        raise KeyError(name)
+    rank = order.index(name)
+    return frozenset(key for key, f in FEATURES.items() if order.index(f.profile) <= rank)
+
+
+def apply_profile(db, name: str) -> None:
+    """Set every registered feature's flag to match profile `name`.
+
+    Validates `name` first, so an unknown name writes nothing. Runs on the
+    caller's connection — no `get_db()` of its own (G112) — and writes
+    through `set_feature_enabled`, which already handles cache invalidation
+    before and after commit (G124); this adds none of its own. No log line:
+    it runs inside the caller's transaction (G3).
+    """
+    if name not in PROFILES:
+        raise KeyError(name)
+    keys = profile_keys(name)
+    for key in FEATURES:
+        set_feature_enabled(db, key, key in keys)
+
+
+def current_profile() -> str | None:
+    """The profile whose set of enabled features equals the actual enabled
+    set, else None ("Custom"). On a fresh DB with no feature.* rows, every
+    flag reads enabled, so this returns "everything"."""
+    enabled = {k for k, on in _flags().items() if on}
+    for name in PROFILES:
+        if enabled == profile_keys(name):
+            return name
+    return None
+
+
+def profile_choices() -> list[dict]:
+    """One dict per profile, smallest first, for both doors to render from.
+
+    Pure registry — no DB. `adds` is the labels (not keys) of the features
+    this profile turns on that the previous one does not, in registry order.
+    """
+    choices = []
+    previous: frozenset[str] = frozenset()
+    for name, (label, description) in PROFILES.items():
+        keys = profile_keys(name)
+        added = keys - previous
+        adds = [f.label for key, f in FEATURES.items() if key in added]
+        choices.append({"name": name, "label": label, "description": description, "adds": adds})
+        previous = keys
+    return choices
+
+
 def confirm_message(key: str) -> str:
     """The warning shown before turning `key` off, or "" when nothing is lost
     for anyone but the admin (every probe reads zero)."""
-    phrases = [phrase for count, phrase in (probe() for probe in FEATURES[key].probes) if count]
-    return " ".join(phrases + ["Turn it off anyway?"]) if phrases else ""
+    return _confirm_text(_probe_phrases(key), "Turn it off anyway?")
+
+
+def _probe_phrases(key: str) -> list[str]:
+    """The phrases of `key`'s probes that count something, in probe order.
+    Each probe opens its own connection (G112)."""
+    return [phrase for count, phrase in (probe() for probe in FEATURES[key].probes) if count]
+
+
+def _confirm_text(phrases: list[str], question: str) -> str:
+    return " ".join(phrases + [question]) if phrases else ""
 
 
 def feature_rows() -> list[dict]:
     """One row per feature for Settings → Features. Runs every probe, so
-    call it outside any open write transaction (G112)."""
+    call it outside any open write transaction (G112).
+
+    `phrases` carries the probe results for an enabled row, so
+    `profile_rows` can build its warnings from this one probe pass."""
     flags = _flags()
-    return [{
-        "key": key,
-        "label": f.label,
-        "description": f.description,
-        "enabled": flags[key],
-        "configured": f.configured() if f.configured else None,
-        "confirm": confirm_message(key) if flags[key] else "",
-    } for key, f in FEATURES.items()]
+    rows = []
+    for key, f in FEATURES.items():
+        phrases = _probe_phrases(key) if flags[key] else []
+        rows.append({
+            "key": key,
+            "label": f.label,
+            "description": f.description,
+            "enabled": flags[key],
+            "configured": f.configured() if f.configured else None,
+            "confirm": _confirm_text(phrases, "Turn it off anyway?"),
+            "phrases": phrases,
+        })
+    return rows
+
+
+def profile_rows(rows: list[dict]) -> list[dict]:
+    """The Profiles row's buttons, built from `feature_rows()`'s output.
+
+    Pure: no probe and no DB read, so the marker, the warnings and the
+    per-feature list below them all come from one render's snapshot.
+    `confirm` names what every feature this profile would turn off stops
+    for other people; turning features on never asks. `turns_on` and
+    `turns_off` are the labels applying it would change from the current
+    flags — `adds` is relative to the next-smaller profile, which reads
+    wrong on an install that already has more on.
+    """
+    enabled = {r["key"] for r in rows if r["enabled"]}
+    out = []
+    for choice in profile_choices():
+        keys = profile_keys(choice["name"])
+        phrases = [p for r in rows if r["enabled"] and r["key"] not in keys for p in r["phrases"]]
+        out.append({
+            **choice,
+            "current": enabled == keys,
+            "turns_on": [r["label"] for r in rows if not r["enabled"] and r["key"] in keys],
+            "turns_off": [r["label"] for r in rows if r["enabled"] and r["key"] not in keys],
+            "confirm": _confirm_text(phrases, f"Apply {choice['label']} anyway?"),
+        })
+    return out
 
 
 def disabled_message(key: str) -> str:

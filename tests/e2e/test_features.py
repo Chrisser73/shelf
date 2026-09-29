@@ -25,6 +25,8 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import expect
 
+from tests.e2e.conftest import _run_setup_wizard, assert_page_clean, attach_page_guard
+
 pytestmark = pytest.mark.e2e
 
 
@@ -163,3 +165,92 @@ def test_turning_off_share_with_a_link_confirms_first(live_server, authed_page, 
     with authed_page.expect_navigation():
         authed_page.click('[data-testid="feature-toggle-share"]')
     assert _feature_state(authed_page, "share") == "on"
+
+
+def test_minimal_install_then_apply_standard_from_settings(server_factory, browser):
+    """A Minimal install hides Series and Stats everywhere; applying Standard
+    from Settings → Features turns them back on with no restart and no
+    confirm — turning features on never asks (G28, G50, G83)."""
+    server = server_factory()
+    base_url = server["url"]
+    credentials = _run_setup_wizard(browser, base_url, profile="minimal")
+
+    ctx = browser.new_context()
+    page = attach_page_guard(ctx.new_page())
+    try:
+        dialogs: list[str] = []
+
+        def _record(dialog):
+            dialogs.append(dialog.message)
+            dialog.dismiss()
+
+        page.on("dialog", _record)
+
+        page.goto(f"{base_url}/login")
+        page.fill("input[name=username]", credentials["username"])
+        page.fill("input[name=password]", credentials["password"])
+        page.click("button[type=submit]")
+        page.wait_for_url(f"{base_url}/", timeout=10_000)
+
+        # Minimal: Series and Stats are gone from both nav surfaces, and
+        # /series is gated.
+        expect(
+            page.locator('[data-nav-tab="series"], [data-nav-menu-tab="series"]')
+        ).to_have_count(0)
+        expect(
+            page.locator('[data-nav-tab="stats"], [data-nav-menu-tab="stats"]')
+        ).to_have_count(0)
+
+        page.goto(f"{base_url}/series")
+        expect(page.locator('[data-testid="feature-disabled"]')).to_be_visible()
+
+        _open_features_tab(page, base_url)
+        profiles = page.locator('[data-testid="feature-profiles"]')
+        expect(profiles).to_have_attribute("data-profile-current", "minimal")
+
+        with page.expect_navigation():
+            page.click('[data-testid="profile-apply-standard"]')
+
+        # Re-open the tab: the redirect lands on /settings, and the tab
+        # choice is Alpine's own localStorage state, not something this
+        # click guarantees.
+        _open_features_tab(page, base_url)
+        profiles = page.locator('[data-testid="feature-profiles"]')
+        expect(profiles).to_have_attribute("data-profile-current", "standard")
+
+        # Standard, live, no restart: the Series nav tab and /series both
+        # come back.
+        expect(page.locator('[data-nav-tab="series"]')).to_be_visible()
+        page.goto(f"{base_url}/series")
+        expect(page.locator('[data-testid="feature-disabled"]')).to_have_count(0)
+
+        assert dialogs == []
+        assert_page_clean(page)
+    finally:
+        ctx.close()
+
+
+def test_profiles_show_what_they_turn_on_without_hover(live_server, browser, setup_admin):
+    """A touch screen has no hover, so what each profile changes must be
+    visible text in Settings, not only a title tooltip (diff review M1)."""
+    base_url = live_server["url"]
+    ctx = browser.new_context(viewport={"width": 390, "height": 844},
+                              is_mobile=True, has_touch=True)
+    page = attach_page_guard(ctx.new_page())
+    try:
+        page.goto(f"{base_url}/login")
+        page.fill("input[name=username]", setup_admin["username"])
+        page.fill("input[name=password]", setup_admin["password"])
+        page.click("button[type=submit]")
+        page.wait_for_url(f"{base_url}/", timeout=10_000)
+
+        _open_features_tab(page, base_url)
+        profiles = page.locator('[data-testid="feature-profiles"]')
+        expect(profiles).to_be_visible()
+        text = profiles.inner_text()
+        assert "Turns off: Lending" in text
+        assert "Turns off: Sharing" in text
+        assert "Nothing optional." in text
+        assert_page_clean(page)
+    finally:
+        ctx.close()

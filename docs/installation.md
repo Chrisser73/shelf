@@ -47,8 +47,8 @@ docker compose up -d
 Open **https://localhost:18888** (or `https://<server-ip>:18888`). Your browser
 will warn about the self-signed certificate — that is expected on first run;
 see [HTTPS & reverse proxy](https-and-reverse-proxy.md) for how to make the
-warning go away. The setup wizard asks you to create the first admin account,
-and you're in.
+warning go away. The setup wizard asks you to create the first admin account
+and pick a feature profile, and you're in.
 
 > The `:z` on the volume is an SELinux relabel flag. It is harmless on systems
 > without SELinux and required on Fedora/RHEL-family hosts.

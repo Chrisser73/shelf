@@ -11,6 +11,7 @@ from app.auth import (
     set_auth_cookie, clear_auth_cookie, get_user_count,
     require_role,
 )
+from app import features
 from app.config import get_client_ip
 from app.database import get_db
 
@@ -80,12 +81,23 @@ async def logout():
 # --- Setup wizard (only works when no users exist) ---
 
 
+def _setup_page(request: Request, error: str | None, profile: str = "standard"):
+    """Render the setup form, keeping the submitted profile selected.
+
+    The profile list comes from the route context, not a Jinja global (G92).
+    """
+    return request.app.state.templates.TemplateResponse(request, "setup.html", {
+        "error": error,
+        "profiles": features.profile_choices(),
+        "selected_profile": profile if profile in features.PROFILES else "standard",
+    })
+
+
 @router.get("/setup")
 async def setup_page(request: Request):
     if get_user_count() > 0:
         return RedirectResponse(url="/login", status_code=303)
-    templates = request.app.state.templates
-    return templates.TemplateResponse(request, "setup.html", {"error": None})
+    return _setup_page(request, None)
 
 
 @router.post("/setup")
@@ -95,30 +107,24 @@ async def setup(
     display_name: str = Form(""),
     password: str = Form(...),
     password_confirm: str = Form(...),
+    # Absent means Standard: an old cached form or a script posting the four
+    # account fields gets the default, not a refusal.
+    profile: str = Form("standard"),
 ):
     if get_user_count() > 0:
         return RedirectResponse(url="/login", status_code=303)
-
-    templates = request.app.state.templates
 
     username = username.strip()
     display_name = display_name.strip() or username
 
     if len(password) < 8:
-        return templates.TemplateResponse(
-            request, "setup.html",
-            {"error": "Password must be at least 8 characters"},
-        )
+        return _setup_page(request, "Password must be at least 8 characters", profile)
     if password != password_confirm:
-        return templates.TemplateResponse(
-            request, "setup.html",
-            {"error": "Passwords do not match"},
-        )
+        return _setup_page(request, "Passwords do not match", profile)
     if not username or len(username) < 2:
-        return templates.TemplateResponse(
-            request, "setup.html",
-            {"error": "Username must be at least 2 characters"},
-        )
+        return _setup_page(request, "Username must be at least 2 characters", profile)
+    if profile not in features.PROFILES:
+        return _setup_page(request, "Choose how much of Shelf to start with")
 
     # bcrypt never runs while a write transaction is open.
     hashed = await run_in_threadpool(hash_password, password)
@@ -133,6 +139,9 @@ async def setup(
             "INSERT INTO users (username, password, display_name, role) VALUES (?, ?, ?, 'admin')",
             (username, hashed, display_name),
         )
+        # Same transaction as the admin row: no install holds an admin and
+        # half a profile (G118). No logging in here (G3).
+        features.apply_profile(db, profile)
         user = db.execute("SELECT id, username, role, display_name, token_version FROM users WHERE username = ?", (username,)).fetchone()
 
     token = create_token(user["id"], user["username"], user["role"], user["display_name"], user["token_version"])

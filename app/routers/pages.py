@@ -672,6 +672,9 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
     # Outside the `with` above: the probes open their own connections (G112).
     from app.features import feature_rows
     features_rows = feature_rows()
+    # From the same rows, so the marker and the list below it agree.
+    profile_rows = features.profile_rows(features_rows)
+    current_profile = next((p["name"] for p in profile_rows if p["current"]), None)
     # Never hand decrypted credentials to the template — it only needs to know
     # whether one is saved. Fields are write-only; blank submit keeps the value.
     from app.crypto import SENSITIVE_KEYS
@@ -704,6 +707,8 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
          "game_platforms_list": game_platforms_list,
          "hideable_nav_tab_states": hideable_nav_tab_states,
          "feature_rows": features_rows,
+         "profile_rows": profile_rows,
+         "current_profile": current_profile,
          "borrower_error_message": borrower_error_message,
          "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats,
          "tags": tags, "media_types": MEDIA_TYPES},

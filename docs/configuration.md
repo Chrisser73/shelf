@@ -114,9 +114,28 @@ Add users, set roles, reset passwords. See [Users & roles](user-guide/users-and-
 
 Turn optional parts of Shelf on or off: Lending, Series, Statistics, Store
 Mode, Sharing, Valuation, Music, Periodicals, Shelf Fill, Photo Intake,
-Hardcover, Audiobookshelf sync, Komga and RomM. Everything is on after an
-install or an upgrade. Scanning, Browse, items, locations, tags, Trash,
-settings, users, backups and logs are core and cannot be turned off.
+Hardcover, Audiobookshelf sync, Komga and RomM. An upgrade leaves everything
+on. A new install starts with the profile chosen in the setup wizard.
+Scanning, Browse, items, locations, tags, Trash, settings, users, backups and
+logs are core and cannot be turned off.
+
+**Profiles.** A profile is a starting set of features:
+
+| Profile | Features on |
+|---|---|
+| **Minimal** | None — only the core above |
+| **Standard** | Lending, Series, Statistics, Store Mode, Music, Periodicals, Shelf Fill |
+| **Everything** | Standard, plus Sharing, Valuation, Photo Intake, Hardcover, Audiobookshelf sync, Komga and RomM |
+
+The **Profiles** row at the top of Features applies one in a single step and
+shows which one the install matches. After you turn one feature on or off by
+hand, it may match none and reads **Custom**. A profile is not stored: it is
+only a way to set the switches below it. Each profile lists what applying it
+would turn on and turn off from where the install is now. Applying one asks
+first when it would turn off Sharing or Lending while they have something to
+lose, as the individual switches do. It does not ask before turning off an
+integration you have set up, such as Hardcover or Audiobookshelf sync — check
+its **Turns off** line first.
 
 A feature that is off:
 

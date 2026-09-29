@@ -21,8 +21,8 @@ building it. *Exploring* means the idea is accepted but the shape is not.
 A setup step and a settings page to turn whole feature areas on and off, so an
 install that only catalogues books does not carry lending, valuation, store mode
 and the rest in its navigation. The settings page shipped in 0.55.0 as
-Settings → **Features**. Still to come: the setup step, which picks a set of
-features at install.
+Settings → **Features**, and the setup wizard now asks for a profile —
+Minimal, Standard or Everything — which Features can change later.
 
 Most of the groups below arrive switched off behind this, which is why it comes
 early.
@@ -124,11 +124,11 @@ or not, is in the [changelog](../CHANGELOG.md).
 
 | Version | What landed |
 |---|---|
+| [0.58.0](https://github.com/dgahagan/shelf/releases/tag/v0.58.0) | Start with only the parts of Shelf you want. The setup wizard asks for Minimal, Standard or Everything, and Settings → **Features** applies a different profile in one step, listing what it would turn on and off first. An upgraded install keeps everything on. |
 | [0.57.0](https://github.com/dgahagan/shelf/releases/tag/v0.57.0) | A feature you turn off is gone from the pages you keep, too. With Lending off there is no loan panel, Loaned badge or Lend scan mode; with Series off the series name stays as plain text. Its Settings card says it is off and keeps only its setup controls. |
 | [0.56.0](https://github.com/dgahagan/shelf/releases/tag/v0.56.0) | Every author is their own link. On an item page, each name links to everything by that person, and a translator or other credit shows its role beside the name. Browse filters to one author and combines it with any other filter, and different spellings of the same name, such as `J.R.R.` and `J. R. R. Tolkien`, count as one author. Asked for in [#117](https://github.com/dgahagan/shelf/issues/117). |
 | [0.55.0](https://github.com/dgahagan/shelf/releases/tag/v0.55.0) | Turn off the parts of Shelf you do not use. Settings → **Features** has a switch for lending, series, statistics, store mode, sharing, valuation, music, periodicals, shelf fill, photo intake and each integration. A feature that is off leaves the navigation and its pages, and its data is kept for when you turn it back on. Turning off sharing or lending first says how many links or loans it affects. |
 | [0.54.0](https://github.com/dgahagan/shelf/releases/tag/v0.54.0) | Put Shelf behind your own HTTPS proxy without a second certificate. Set `SHELF_TLS=off` and Shelf serves plain HTTP to the proxy, which supplies the real certificate. Sign-in works over plain HTTP too, and the camera's "requires HTTPS" message now says how to fix it. HTTPS stays the default. Asked for in [#124](https://github.com/dgahagan/shelf/issues/124). |
-| [0.53.0](https://github.com/dgahagan/shelf/releases/tag/v0.53.0) | A button shows it heard you. While a lookup, cover search or scan is running, the button that started it shows a spinner and cannot be pressed twice, and search-as-you-type boxes show a small spinner without locking. Asked for in [#118](https://github.com/dgahagan/shelf/issues/118). |
 
 ---
 

@@ -11,11 +11,25 @@ password. Shelf has no default credentials and no account-recovery email;
 if you lose the admin password, another admin resets it under Settings →
 Users (or see [Troubleshooting](../troubleshooting.md#locked-out)).
 
+The same page asks how much of Shelf to start with — a feature profile. The
+form lists what each choice turns on:
+
+- **Minimal** — scan, catalogue and browse, with nothing optional.
+- **Standard** (preselected) — adds Lending, Series, Statistics, Store Mode,
+  Music, Periodicals and Shelf Fill.
+- **Everything** — adds Sharing, Valuation, Photo Intake and the Hardcover,
+  Audiobookshelf, Komga and RomM integrations as well.
+
+This is only a starting point. Settings → **Features** turns any one of them
+on or off later, or applies a different profile in one step. See
+[Configuration → Features](../configuration.md#features).
+
 ## 2. The screens
 
 The nav bar adapts to what you've configured — tabs for integrations you
-haven't set up stay hidden (Settings → Library → Navigation controls this).
-Out of the box:
+haven't set up stay hidden (Settings → Library → Navigation controls this) —
+and to the features you have on. A tab below whose feature is off does not
+appear until you turn it on under Settings → Features. With everything on:
 
 Shelf opens on **Home** — a read-only overview of your collection. Click
 **Shelf** in the menu bar to come back to it from anywhere.
@@ -67,9 +81,12 @@ inventory audit and the valuation report's grouping.
 ## 5. Optional next steps
 
 - **Photo Intake** — set a vision provider under Settings → Integrations and
-  add whole shelves from one photo. [Photo Intake](photo-intake.md)
+  add whole shelves from one photo. On a Minimal or Standard install, turn
+  Photo Intake on under Settings → Features too. [Photo Intake](photo-intake.md)
 - **Integrations** — Hardcover for reading sync and series checks, IGDB for
-  games, TMDb for discs. All free. [Integrations](integrations.md)
+  games, TMDb for discs. All free. Hardcover, Audiobookshelf, Komga and RomM
+  are also features: on a Minimal or Standard install, turn them on under
+  Settings → Features. [Integrations](integrations.md)
 - **Household accounts** — add editors and viewers under Settings → Users.
   [Users & roles](users-and-roles.md)
 - **Migrate from Goodreads / StoryGraph** — upload your export under

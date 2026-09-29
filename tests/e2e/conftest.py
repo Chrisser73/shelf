@@ -663,11 +663,15 @@ def assert_page_clean(pg):
     raise AssertionError(message)
 
 
-def _run_setup_wizard(browser, base_url: str) -> dict:
+def _run_setup_wizard(browser, base_url: str, profile: str = "everything") -> dict:
     """Run the setup wizard against `base_url`; return the credentials dict.
 
     The body `setup_admin` used to inline, so a test driving a throwaway
     `server_factory` server can reach it without a session fixture.
+
+    `profile` defaults to Everything, not the form's Standard, so the session
+    server and every `server_factory` caller keep the all-on baseline the
+    suite was written against. A test that means a smaller install passes it.
 
     G44: `attach_page_guard(ctx.new_page())` on one line — the lint requires
     both calls on the same line, and this is a Page construction site like any
@@ -681,6 +685,7 @@ def _run_setup_wizard(browser, base_url: str) -> dict:
     page.fill("input[name=display_name]", ADMIN_DISPLAY)
     page.fill("input[name=password]", ADMIN_PASSWORD)
     page.fill("input[name=password_confirm]", ADMIN_PASSWORD)
+    page.check(f'input[name=profile][value="{profile}"]')
     page.click("button[type=submit]")
     page.wait_for_url(f"{base_url}/", timeout=10_000)
     assert_page_clean(page)
