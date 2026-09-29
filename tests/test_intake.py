@@ -111,6 +111,10 @@ class TestPromptAndSchema:
         items = vision.BOOKS_SCHEMA["properties"]["books"]["items"]
         assert items["required"] == ["title", "authors", "isbn", "media_type", "source"]
         assert items["properties"]["isbn"]["type"] == ["string", "null"]
+        assert items["properties"]["collector_condition"] == {
+            "type": "string", "enum": ["cib", "boxed", "loose"]
+        }
+        assert "collector_condition" not in items["required"]
         assert "video_game" in items["properties"]["media_type"]["enum"]
         assert items["properties"]["source"]["enum"] == ["read", "recognized"]
         assert items["additionalProperties"] is False
@@ -128,6 +132,7 @@ class TestPromptAndSchema:
     def test_json_only_suffix_gives_a_rule_not_placeholder_literals(self):
         assert 'must be exactly "read" or "recognized"' in vision.JSON_ONLY_SUFFIX
         assert "null" in vision.JSON_ONLY_SUFFIX
+        assert '"collector_condition": null' not in vision.JSON_ONLY_SUFFIX
         assert "read or recognized" not in vision.JSON_ONLY_SUFFIX
         assert "... or null" not in vision.JSON_ONLY_SUFFIX
 
