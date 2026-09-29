@@ -14,7 +14,7 @@
 // (scripts/stamp_sw_version.py) and verified by `make checks-fast`. Changing a
 // precached file therefore renames the cache on its own, which is what makes
 // activate() purge the stale one.
-const SW_VERSION = 'v4422dab0';
+const SW_VERSION = 'va26c2c4f';
 const CACHE = `shelf-store-${SW_VERSION}`;
 
 const PRECACHE = [
@@ -24,8 +24,9 @@ const PRECACHE = [
     '/static/vendor/html5-qrcode-2.3.8.min.js',
     '/static/vendor/zxing-browser-0.1.5.min.js',
     '/static/manifest.webmanifest',
-    '/static/icons/icon-192.png',
-    '/static/icons/icon-512.png',
+    '/static/icons/favicon.svg',
+    '/static/icons/android-chrome-192x192.png',
+    '/static/icons/android-chrome-512x512.png',
 ];
 
 self.addEventListener('install', function (event) {

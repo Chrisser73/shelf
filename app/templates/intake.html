@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Photo Intake — Shelf{% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto" x-data="intakePage" id="intake-page" data-creator-labels='{{ creator_labels | tojson }}'>
+<div class="max-w-3xl mx-auto" x-data="intakePage" id="intake-page" data-creator-labels='{{ creator_labels | tojson }}' data-default-location-id="{{ default_location_id }}">
     <h1 class="text-2xl font-bold mb-1">Photo Intake</h1>
     <p class="text-sm text-shelf-muted mb-6">Photograph items on a shelf, in a stack, or face-up &mdash; covers are fine. The vision model reads spines and recognizes covers; a readable barcode gives more precise metadata. Review the list, choose each media type, then confirm.</p>
 
@@ -49,13 +49,13 @@
                         class="px-4 py-2 bg-shelf-hover text-shelf-text rounded-lg text-sm hover:bg-shelf-border transition-colors whitespace-nowrap">Cancel</button>
             </div>
         </div>
-        <p class="text-xs text-shelf-muted mt-2">Provider: <span class="text-shelf-text">{{ {'anthropic': 'Anthropic API', 'openai': 'OpenAI-compatible', 'ollama': 'Ollama (local)'}.get(vision_provider, vision_provider) }}{% if vision_model %} · {{ vision_model }}{% endif %}</span> &middot; photos are analyzed in memory and not stored.</p>
+        <p class="text-xs text-shelf-muted mt-2 flex flex-wrap items-center gap-1.5">Provider: <span class="text-shelf-text">{% if vision_connection_status %}<span class="inline-block w-2 h-2 rounded-full {{ 'bg-shelf-success' if vision_connection_status == 'ok' else 'bg-shelf-error' }}" title="{{ 'Connected' if vision_connection_status == 'ok' else 'Not reachable' }}"></span>{% endif %} {{ {'anthropic': 'Anthropic API', 'openai': 'OpenAI-compatible', 'ollama': 'Ollama (local)'}.get(vision_provider, vision_provider) }}{% if vision_model %} · {{ vision_model }}{% endif %}</span><span>&middot; photos are analyzed in memory and not stored.</span><a href="/settings?tab=integrations#photo-intake-vision" class="inline-flex items-center gap-1 text-shelf-accent2 hover:text-shelf-accent ml-1"><i data-lucide="pencil" class="w-3 h-3"></i>Edit Config</a></p>
         <div class="flex flex-col sm:flex-row sm:items-center gap-3 mt-4 pt-3 border-t border-shelf-border">
             <label class="text-sm text-shelf-muted whitespace-nowrap" for="intake-location">Add items to</label>
             <select id="intake-location" x-model="locationId" x-ref="locationSelect" class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                 <option value="">No location</option>
                 {% for loc in locations %}
-                <option value="{{ loc.id }}">{{ loc.name }}</option>
+                <option value="{{ loc.id }}">{{ loc.name }}{% if default_location_id == loc.id|string %} (default){% endif %}</option>
                 {% endfor %}
             </select>
             <label class="flex items-center gap-2 text-sm text-shelf-muted cursor-pointer">
@@ -136,6 +136,7 @@
             <p class="text-sm font-medium">Reading your photo&hellip;</p>
             <p class="text-xs text-shelf-muted">The vision model is analyzing your photo &mdash; large shelves can take a minute.</p>
         </div>
+        <button type="button" @click="cancelAnalysis()" class="ml-auto px-3 py-1.5 rounded-lg text-xs bg-shelf-hover text-shelf-text hover:bg-shelf-border transition-colors">Cancel</button>
     </div>
     <div x-show="confirming" x-cloak
          class="bg-shelf-card rounded-xl border border-shelf-accent/40 p-5 mb-6 flex items-center gap-4">
@@ -232,7 +233,7 @@
             <select x-model="locationId" aria-label="Location" class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                 <option value="">No location</option>
                 {% for loc in locations %}
-                <option value="{{ loc.id }}">{{ loc.name }}</option>
+                <option value="{{ loc.id }}">{{ loc.name }}{% if default_location_id == loc.id|string %} (default){% endif %}</option>
                 {% endfor %}
             </select>
             <select x-model="collectorCondition" aria-label="Collector state"

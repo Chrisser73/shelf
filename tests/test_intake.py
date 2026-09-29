@@ -121,6 +121,10 @@ class TestPromptAndSchema:
         # The ISBN-from-knowledge ban is the one rule with no other defence.
         assert "from memory" in vision.PROMPT
 
+    def test_prompt_preserves_non_latin_titles(self):
+        assert "Japanese kana" in vision.PROMPT
+        assert "do not translate" in vision.PROMPT
+
     def test_json_only_suffix_gives_a_rule_not_placeholder_literals(self):
         assert 'must be exactly "read" or "recognized"' in vision.JSON_ONLY_SUFFIX
         assert "null" in vision.JSON_ONLY_SUFFIX

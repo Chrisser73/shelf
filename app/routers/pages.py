@@ -265,6 +265,8 @@ async def intake(request: Request, _=Depends(require_role("editor")),
         ).fetchall()
         app_settings = get_all_settings(db)
         game_platforms = get_game_platforms(db)
+        from app.services.user_preferences import get_preference
+        default_location_id = get_preference(db, request.state.user["id"], "default_location_id")
     provider = app_settings.get("vision_provider") or ""
     from app.services import vision
     vision_model = app_settings.get({
@@ -278,6 +280,8 @@ async def intake(request: Request, _=Depends(require_role("editor")),
         request,
         "intake.html",
         {"locations": locations, "vision_provider": provider, "vision_model": vision_model,
+         "default_location_id": default_location_id,
+         "vision_connection_status": app_settings.get("vision_connection_status", ""),
          "media_types": MEDIA_TYPES, "game_platforms": game_platforms},
     )
 
@@ -692,6 +696,9 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
         )
         settings["show_collector_condition_in_collection"] = get_preference(
             db, request.state.user["id"], "show_collector_condition_in_collection"
+        )
+        settings["default_location_id"] = get_preference(
+            db, request.state.user["id"], "default_location_id"
         )
         for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "media_types"):
             settings[f"home_tile:{key}"] = get_preference(db, request.state.user["id"], f"home_tile:{key}", "1")
