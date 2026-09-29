@@ -129,6 +129,10 @@ class TestPromptAndSchema:
         assert "Japanese kana" in vision.PROMPT
         assert "do not translate" in vision.PROMPT
 
+    def test_prompt_requests_confident_catalogue_metadata(self):
+        assert "supplement publisher and original release/publication year" in vision.PROMPT
+        assert "omit them rather than guess" in vision.PROMPT
+
     def test_json_only_suffix_gives_a_rule_not_placeholder_literals(self):
         assert 'must be exactly "read" or "recognized"' in vision.JSON_ONLY_SUFFIX
         assert "null" in vision.JSON_ONLY_SUFFIX
