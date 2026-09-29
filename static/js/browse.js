@@ -23,6 +23,9 @@ function browsePage() {
         // from sending "q=typed&q=" — Starlette's QueryParams.get() returns the
         // LAST duplicate, so an empty second input used to wipe the search.
         searchQuery: '',
+        // The list view has one active sort at a time. Table-header clicks use
+        // the same query parameter and server-side ordering as the Sort by menu.
+        listSort: new URLSearchParams(window.location.search).get('sort') || 'newest',
 
         init() {
             // Must run before anything else touches the DOM. visibleCols needs
@@ -62,8 +65,10 @@ function browsePage() {
                 this.updateUrl();
             });
             // Persist sort preference on change
+            var browse = this;
             document.querySelector('[name="sort"]')?.addEventListener('change', function(e) {
                 localStorage.setItem('shelf-sort', e.target.value);
+                browse.listSort = e.target.value;
             });
             try {
                 var flash = sessionStorage.getItem('shelf-bulk-flash');
@@ -255,6 +260,14 @@ function browsePage() {
             });
         },
 
+        ensureSortOption(value) {
+            document.querySelectorAll('[name="sort"]').forEach(function(select) {
+                if (select.querySelector('option[value="' + value + '"]')) return;
+                var label = value.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+                select.add(new Option(label, value));
+            });
+        },
+
         // Issue #13: the sort-only fallback set the select's value but fired the
         // request with htmx.trigger, which restoreFilters() had already learned
         // is unreliable at init time (see its comment below) -- so the dropdown
@@ -266,8 +279,10 @@ function browsePage() {
             var saved = localStorage.getItem('shelf-sort');
             if (!saved || saved === 'newest') return;
             var sortEl = document.querySelector('[name="sort"]');
-            if (!sortEl || !sortEl.querySelector('option[value="' + saved + '"]')) return;
+            if (!sortEl) return;
+            this.ensureSortOption(saved);
             this.setControlValue('sort', saved);
+            this.listSort = saved;
             this.runSearch(new URLSearchParams({sort: saved}));
         },
 
@@ -278,6 +293,34 @@ function browsePage() {
             params.set('view', this.viewMode);
             htmx.ajax('GET', '/api/search?' + params.toString(),
                       {target: '#item-grid', swap: 'innerHTML'});
+        },
+
+        sortListColumn(column) {
+            var sorts = {
+                title: ['title_asc', 'title_desc'], author: ['author', 'author_desc'],
+                platform: ['platform', 'platform_desc'], publisher: ['publisher', 'publisher_desc'],
+                year: ['year_asc', 'year_desc'], collector_condition: ['collector_condition', 'collector_condition_desc'],
+                media_type: ['media_type', 'media_type_desc'], location: ['location', 'location_desc'],
+                status: ['status', 'status_desc'], value: ['value', 'value_desc'],
+                series: ['series', 'series_desc'], pages: ['pages', 'pages_desc'],
+                language: ['language', 'language_desc'], added: ['oldest', 'newest'],
+                identifier: ['identifier', 'identifier_desc']
+            };
+            var pair = sorts[column];
+            if (!pair) return;
+            var next = this.listSort === pair[0] ? pair[1] : pair[0];
+            this.listSort = next;
+            this.ensureSortOption(next);
+            this.setControlValue('sort', next);
+            localStorage.setItem('shelf-sort', next);
+            var params = new URLSearchParams();
+            var self = this;
+            this.urlFilterNames().forEach(function(name) {
+                var el = document.querySelector('[name="' + name + '"]');
+                if (el && el.value) params.set(name, el.value);
+            });
+            params.set('sort', next);
+            self.runSearch(params);
         },
 
         // Issue #8: filters lived only in DOM controls + history.replaceState,

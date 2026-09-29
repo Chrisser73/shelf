@@ -150,7 +150,7 @@
             {% for loc in locations %}
             <div class="bg-shelf-bg rounded-lg px-4 py-2" data-testid="location-row-{{ loc.id }}">
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span>{{ loc.name }}</span>
+                    <span class="flex items-center gap-2">{{ loc.name }}{% if settings.get('default_location_id') == loc.id|string %}<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-accent/80 text-white shadow">Default</span>{% endif %}</span>
                     <a href="/locations/{{ loc.id }}/arrange" class="text-shelf-accent2 hover:underline text-sm">Arrange</a>
                     <form action="/api/locations/{{ loc.id }}/delete" method="post" class="inline"
                           data-confirm="Delete location '{{ loc.name }}'?">
@@ -179,6 +179,11 @@
                                 {% endfor %}
                             </select>
                         </div>
+                        <label class="flex items-center gap-2 text-sm text-shelf-muted cursor-pointer">
+                            <input type="checkbox" name="set_as_default" {% if settings.get('default_location_id') == loc.id|string %}checked{% endif %}
+                                   class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                            Set as default location
+                        </label>
                         <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
                             Save location
                         </button>
@@ -199,6 +204,10 @@
                 <option value="{{ loc.id }}">Inside {{ loc.name }}</option>
                 {% endfor %}
             </select>
+            <label class="flex items-center gap-2 text-sm text-shelf-muted cursor-pointer">
+                <input type="checkbox" name="set_as_default" class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                Set as default location
+            </label>
             <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
                 Add
             </button>
