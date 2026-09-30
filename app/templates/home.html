@@ -155,11 +155,17 @@
         {% if recent_items %}
         <div class="cover-grid" data-testid="home-recent-items">
             {% for item in recent_items %}
-            <a href="/item/{{ item.id }}" class="group relative">
+            <a href="/item/{{ item.id }}" class="group relative block">
+                {% if collection_appearance.show_platform_logo and item.platform_logo_path %}
+                <div class="absolute top-2 left-2 z-10 w-12 h-12 rounded bg-shelf-border/80 flex items-center justify-center shadow">
+                    <img src="/static/{{ item.platform_logo_path }}" alt="" class="p-2 w-12 h-12 object-contain">
+                </div>
+                {% endif %}
                 <div class="cover-card bg-shelf-card rounded-lg overflow-hidden border border-shelf-border group-hover:border-shelf-accent/50 transition-colors shadow-lg" data-cover-shape="{{ cover_shape(item.media_type) }}">
                     {% if item.wishlisted %}
                     <div class="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-warning/90 text-black shadow">Wishlist</div>
                     {% endif %}
+                    <div class="absolute top-2 {% if item.wishlisted %}right-2 top-8{% else %}right-2{% endif %} z-10 px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-accent/80 text-white shadow">New</div>
                     {% if item.cover_path %}
                     <img src="/{{ item.cover_path }}" alt="{{ item.title }}" loading="lazy">
                     {% else %}
@@ -169,9 +175,17 @@
                     </div>
                     {% endif %}
                 </div>
-                <div class="mt-2">
-                    <p class="text-sm font-medium truncate">{{ item.title }}</p>
-                    <p class="text-xs text-shelf-muted truncate">{% if item.authors %}{{ item.authors }} · {% endif %}{{ media_type_labels.get(item.media_type, item.media_type) }}</p>
+                <div class="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent rounded-lg transition-opacity flex items-end p-3 group-hover:ring-2 group-hover:ring-inset group-hover:ring-shelf-accent {% if not collection_appearance.always_show_game_title %}opacity-0 group-hover:opacity-100{% endif %}">
+                    <div class="min-w-0">
+                        <p class="text-white text-sm font-medium truncate">{{ item.title }}</p>
+                        {% if item.authors %}<p class="text-gray-300 text-xs truncate">{{ item.authors }}</p>{% endif %}
+                        {% if (collection_appearance.show_collector_condition and item.collector_condition) or (collection_appearance.show_region and item.region) %}
+                        <div class="mt-2 flex items-center justify-between gap-2">
+                            {% if collection_appearance.show_collector_condition and item.collector_condition %}<span class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-card/80 text-white shadow">{{ item.collector_condition|upper }}</span>{% else %}<span></span>{% endif %}
+                            {% if collection_appearance.show_region and item.region %}<span class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-card/80 text-white shadow">{{ item.region|upper }}</span>{% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
             </a>
             {% endfor %}

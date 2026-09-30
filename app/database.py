@@ -294,6 +294,16 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
         )"""),
     (43, "Add collector packaging state",
      "ALTER TABLE items ADD COLUMN collector_condition TEXT DEFAULT NULL"),
+    (44, "Add alternate title", "ALTER TABLE items ADD COLUMN alternate_title TEXT DEFAULT NULL"),
+    (45, "Add release region", "ALTER TABLE items ADD COLUMN region TEXT DEFAULT NULL"),
+    (46, "Repair malformed Unicode in alternate titles",
+     "UPDATE items SET alternate_title = REPLACE(alternate_title, 'u00e9', 'é') "
+     "WHERE alternate_title LIKE '%u00e9%'"),
+    # A vision response may have been saved after migration 46 had already
+    # run. Apply the same repair again for those later values.
+    (47, "Repair later malformed Unicode in alternate titles",
+     "UPDATE items SET alternate_title = REPLACE(alternate_title, 'u00e9', 'é') "
+     "WHERE alternate_title LIKE '%u00e9%'"),
 )
 
 MIGRATION_TABLES = """

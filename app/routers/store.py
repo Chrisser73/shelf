@@ -39,9 +39,12 @@ _RAW_CODE_MAX = 32
 
 @router.get("/store")
 async def store_page(request: Request, _=Depends(require_role("viewer")),
-                     __=Depends(require_feature("store"))):
+                     __=Depends(require_feature("store", redirect_page_to_home=True))):
     templates = request.app.state.templates
-    return templates.TemplateResponse(request, "store.html", {})
+    response = templates.TemplateResponse(request, "store.html", {})
+    # The service worker only caches a real Store page, never a disabled page.
+    response.headers["X-Shelf-Store-Mode"] = "enabled"
+    return response
 
 
 @router.get("/sw.js")

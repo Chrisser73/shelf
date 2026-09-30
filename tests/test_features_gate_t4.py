@@ -41,6 +41,13 @@ def test_store_page_disabled(admin_client):
     assert_disabled_page(admin_client.get("/store"), "Store Mode", enable_form=True)
 
 
+def test_store_navigation_redirects_home_when_disabled(admin_client):
+    off("store")
+    response = admin_client.get("/store", headers={"Sec-Fetch-Mode": "navigate"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+
+
 def test_store_api_gets_json(admin_client):
     off("store")
     assert_json_403(admin_client.get("/api/store/data"), "store", "Store Mode")

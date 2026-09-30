@@ -32,6 +32,8 @@ import httpx
 
 from app.config import MAX_TILES_PER_REQUEST, MEDIA_TYPES, canonical_media_type
 from app.services import isbn as isbn_svc
+from app.services import item_write
+from app.services.national import SEARCH_LANGS
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,9 @@ PROMPT = (
     "stylized or partial text — give its canonical title and creator and set "
     '"source" to "recognized". Prefer "read" whenever the full title is legible, '
     "and never replace a legible title with a different item's. "
+    "A clear front cover is enough to identify a specific game or release: use its "
+    "cover art, title logo, platform branding, age rating, and publisher marks together; "
+    "do not reduce it to partial OCR when that visual evidence identifies the item. "
     "Titles and metadata may use any writing system, including Japanese kana "
     "or kanji. When readable, preserve the printed original script exactly; "
     "do not translate, romanize, or invent a Latin title. "
@@ -80,9 +85,12 @@ PROMPT = (
     "digits exactly. Never supply an ISBN from memory or from what you know "
     "about the item — use null whenever the digits are not visible. "
     f"(4) Set media_type to one of: {', '.join(MEDIA_TYPES)}. Once an item is confidently identified, "
-    "also supplement publisher and original release/publication year from reliable knowledge when you are reasonably certain; "
+    "also supplement publisher and original release/publication year from reliable knowledge when you are reasonably certain; for a recognized game, use reliable knowledge for developer, publisher, and year even when they are not printed on the cover; "
     "omit them rather than guess when uncertain or when they could be specific to a regional edition. "
-    "For video games, provide the console or platform name in platform; for films use publisher for the studio or distributor, "
+    "For video games, provide the console or platform name in platform, the language printed on the item in language, "
+    "the release region in region (PAL, NTSC, NTSC-J, PAL-M, or unknown), and an English or locally searchable alternate_title when the printed title uses another script. "
+    "For a game, put its developer in authors and its publisher in publisher when confidently identified. Preserve every visible part of a cover title, including Japanese and Latin logo text such as DX; never shorten a title merely because its artwork is familiar. The alternate_title must be the official international/searchable name of this exact pictured edition only — never merge paired releases or add a related game after a slash. For example, a cover for Pokémon Shining Pearl must return alternate_title exactly Pokémon Shining Pearl, never Pokémon Brilliant Diamond / Pokémon Shining Pearl; the paired release is not the title of that individual item. "
+    "For films use publisher for the studio or distributor, "
     "for music use the label, and for books use the publisher. Use authors for the appropriate creator, artist, or director. "
     "and collector_condition as one of cib, boxed or loose when the physical packaging makes it clear; otherwise omit that field. "
     "(5) The response property is named books for backward compatibility, but "
@@ -139,6 +147,9 @@ BOOKS_SCHEMA = {
                     "isbn": {"type": ["string", "null"]},
                     "media_type": {"type": "string", "enum": list(MEDIA_TYPES)},
                     "platform": {"type": ["string", "null"]},
+                    "language": {"type": ["string", "null"]},
+                    "region": {"type": ["string", "null"]},
+                    "alternate_title": {"type": ["string", "null"]},
                     # Anthropic structured output rejects mixed null/string
                     # enums. The property is optional, so absence cleanly
                     # represents an unknown condition for every provider.
@@ -212,7 +223,8 @@ def _clean(raw: object) -> list[dict]:
         for entry in raw.get("books") or []:
             if not isinstance(entry, dict):
                 continue
-            title = (entry.get("title") or "").strip()
+            title = item_write.repair_malformed_unicode((entry.get("title") or "").strip())
+            title = re.sub(r"\bPokken Tournament\b", "Pokkén Tournament", title, flags=re.IGNORECASE)
             # Vision/OCR frequently returns an otherwise correct title in
             # all caps. Preserve normal mixed case verbatim, but make the
             # all-caps transcription readable before it reaches review.
@@ -239,6 +251,25 @@ def _clean(raw: object) -> list[dict]:
             platform = entry.get("platform")
             if isinstance(platform, str) and platform.strip():
                 cleaned["platform"] = platform.strip()
+            for key in ("language", "alternate_title"):
+                value = entry.get(key)
+                if isinstance(value, str) and value.strip():
+                    value = value.strip()
+                    if key == "language":
+                        # Models commonly say "Japanese" while Shelf stores
+                        # ISO codes for filtering. Keep an unknown value rather
+                        # than discard it, but normalize every known label.
+                        labels = {label.casefold(): code for code, label in SEARCH_LANGS.items()}
+                        value = labels.get(value.casefold(), value.casefold() if value.casefold() in SEARCH_LANGS else value)
+                    else:
+                        value = item_write.repair_malformed_unicode(value)
+                        # The official searchable spelling includes the
+                        # accent, even where OCR gives plain "Pokken".
+                        value = re.sub(r"\\bPokken Tournament\\b", "Pokkén Tournament", value, flags=re.IGNORECASE)
+                    cleaned[key] = value
+            region = entry.get("region")
+            if isinstance(region, str) and region.strip():
+                cleaned["region"] = region.strip()
             year = entry.get("publish_year")
             if isinstance(year, int) and 1900 <= year <= 2100:
                 cleaned["publish_year"] = year

@@ -26,11 +26,26 @@
         <thead>
             <tr class="border-b border-shelf-border text-shelf-muted text-xs uppercase tracking-wider">
                 {% for col in browse_columns %}
-                <th {% if col.name == 'select' %}x-show="selectMode"{% elif not col.locked %}x-show="visibleCols.{{ col.name }}"{% endif %}
+                <th {% if col.name == 'select' %}x-show="selectMode" :colspan="selectMode ? 2 : 1"{% elif col.name == 'cover' %}x-show="!selectMode"{% elif not col.locked %}x-show="visibleCols.{{ col.name }}"{% endif %}
                     data-col="{{ col.name }}"
                     {% if col.name not in ('select', 'cover', 'tags') %}@click.stop="sortListColumn('{{ col.name }}')"{% endif %}
-                    class="px-3 py-2{% if col.name == 'select' %} w-8{% elif col.name == 'cover' %} w-10{% elif col.name not in ('tags',) %} cursor-pointer select-none hover:text-shelf-text{% endif %}">
+                    class="px-3 py-2{% if col.name == 'select' %} w-20{% elif col.name == 'cover' %} w-20{% elif col.name not in ('tags',) %} cursor-pointer select-none hover:text-shelf-text{% endif %}">
+                    {% if col.name == 'select' %}
+                    <div class="flex flex-col items-start gap-1 normal-case tracking-normal">
+                        <button type="button" @click.stop="toggleSelectMode()"
+                                :class="selectMode ? 'bg-shelf-accent/20 text-shelf-accent2' : 'bg-shelf-card text-shelf-muted'"
+                                class="px-2 py-1 rounded-md text-[10px] border border-shelf-border hover:border-shelf-accent/50 transition-colors">
+                            <span x-text="selectMode ? 'Done' : 'Select'"></span>
+                        </button>
+                        <button type="button" x-show="selectMode" @click.stop="selectAll()"
+                                class="px-2 py-1 rounded-md text-[10px] text-shelf-muted hover:text-shelf-accent2 transition-colors">Select all</button>
+                    </div>
+                    {% elif col.name == 'cover' %}
+                    <button type="button" @click.stop="toggleSelectMode()"
+                            class="px-2 py-1 rounded-md text-[10px] border border-shelf-border bg-shelf-card text-shelf-muted hover:border-shelf-accent/50 transition-colors normal-case tracking-normal">Select</button>
+                    {% else %}
                     <span class="inline-flex items-center gap-1">{{ browse_creator_label(active_type) if col.name == 'author' else col.label }}{% if col.name not in ('select', 'cover', 'tags') %}<span class="text-shelf-muted" x-text="listSort === '{{ col.name }}' || listSort === '{{ col.name }}_asc' || (('{{ col.name }}' === 'title') && listSort === 'title_asc') ? '↑' : (listSort === '{{ col.name }}_desc' || (('{{ col.name }}' === 'title') && listSort === 'title_desc') ? '↓' : '↕')"></span>{% endif %}</span>
+                    {% endif %}
                 </th>
                 {% endfor %}
             </tr>

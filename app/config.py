@@ -187,6 +187,7 @@ GAME_PLATFORMS = {
     "wii": "Wii",
     "wiiu": "Wii U",
     "switch": "Nintendo Switch",
+    "switch2": "Nintendo Switch 2",
     "gameboy": "Game Boy",
     "gba": "Game Boy Advance",
     "nds": "Nintendo DS",

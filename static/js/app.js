@@ -162,6 +162,40 @@ document.body.addEventListener('showToast', function(e) {
     showToast(d.message || 'Done', d.type || 'success');
 });
 
+// The alternate-name mini editor uses an HTMX request but deliberately keeps
+// its form in place on errors. On success, replay its own Cancel action so
+// Alpine returns to the read-only line exactly as if the user had cancelled.
+document.body.addEventListener('alternateNameSaved', function(e) {
+    var id = e.detail && e.detail.item_id;
+    var form = id && document.querySelector('[data-alternate-name-form="' + id + '"]');
+    var display = id && document.querySelector('[data-alternate-name-display="' + id + '"]');
+    var input = form && form.elements && form.elements.alternate_title;
+    // Do not route this value through Alpine/x-text: Alpine's CSP evaluator
+    // can turn a JSON-style \u00e9 escape into literal text. The input has the
+    // browser-decoded value, so it is the authoritative UI value here.
+    if (display) display.textContent = (input && input.value.trim()) || '—';
+    var cancel = id && document.querySelector('[data-alternate-name-cancel="' + id + '"]');
+    if (cancel) cancel.click();
+});
+document.body.addEventListener('htmx:beforeRequest', function(e) {
+    var form = e.detail.elt;
+    if (!form || !form.matches || !form.matches('[data-alternate-name-form]')) return;
+    var id = form.getAttribute('data-alternate-name-form');
+    var icon = document.querySelector('[data-alternate-name-icon="' + id + '"]');
+    var spinner = document.querySelector('[data-alternate-name-spinner="' + id + '"]');
+    if (icon) icon.classList.add('hidden');
+    if (spinner) spinner.classList.remove('hidden');
+});
+document.body.addEventListener('htmx:afterRequest', function(e) {
+    var form = e.detail.elt;
+    if (!form || !form.matches || !form.matches('[data-alternate-name-form]')) return;
+    var id = form.getAttribute('data-alternate-name-form');
+    var icon = document.querySelector('[data-alternate-name-icon="' + id + '"]');
+    var spinner = document.querySelector('[data-alternate-name-spinner="' + id + '"]');
+    if (icon) icon.classList.remove('hidden');
+    if (spinner) spinner.classList.add('hidden');
+});
+
 // --- Loading bar ---
 (function() {
     var bar = document.getElementById('htmx-indicator');

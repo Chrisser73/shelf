@@ -70,6 +70,7 @@ COLUMNS: tuple[BrowseColumn, ...] = (
     BrowseColumn("series", "Series", default_on=False),
     BrowseColumn("pages", "Pages", default_on=False),
     BrowseColumn("language", "Language", default_on=False),
+    BrowseColumn("region", "Region", default_on=False),
     BrowseColumn("added", "Added", default_on=False),
     BrowseColumn("identifier", "ISBN/UPC", default_on=False),
     BrowseColumn("tags", "Tags", default_on=False),

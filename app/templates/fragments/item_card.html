@@ -45,9 +45,14 @@
     <!-- Hover overlay with title -->
     <div class="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent rounded-lg transition-opacity flex items-end p-3 group-hover:ring-2 group-hover:ring-inset group-hover:ring-shelf-accent {% if not always_show_game_title %} opacity-0 group-hover:opacity-100{% endif %}">
         <div class="min-w-0">
-            <p class="text-white text-sm font-medium truncate">{{ item.title }}</p>
+            <p class="text-white text-sm font-medium truncate">{{ item.title|highlight_search(search_query) }}</p>
             {% if item.authors %}<p class="text-gray-300 text-xs truncate">{{ item.authors }}</p>{% endif %}
-            {% if show_collector_condition_in_collection and item.collector_condition %}<p class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] mt-2 font-medium bg-shelf-card/80 text-white shadow inline-block">{{ item.collector_condition|upper }}</p>{% endif %}
+            {% if (show_collector_condition_in_collection and item.collector_condition) or (show_region_in_collection and item.region) %}
+            <div class="mt-2 flex items-center justify-between gap-2">
+                {% if show_collector_condition_in_collection and item.collector_condition %}<span class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-card/80 text-white shadow">{{ item.collector_condition|upper }}</span>{% else %}<span></span>{% endif %}
+                {% if show_region_in_collection and item.region %}<span class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-card/80 text-white shadow">{{ item.region|upper }}</span>{% endif %}
+            </div>
+            {% endif %}
         </div>
     </div>
 </a>

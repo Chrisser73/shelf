@@ -47,7 +47,7 @@
     <td data-col="title" class="px-3 py-2">
         <div class="flex items-center gap-2">
             <a href="/item/{{ item.id }}" @click.prevent
-               class="text-shelf-text text-sm font-medium truncate max-w-xs hover:underline">{{ item.title }}</a>
+               class="text-shelf-text text-sm font-medium truncate max-w-xs hover:underline">{{ item.title|highlight_search(search_query) }}</a>
             {% if item.wishlisted %}
             <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-warning/90 text-black shrink-0">Wishlist</span>
             {% endif %}
@@ -91,7 +91,8 @@
         {%- elif col.name == 'publisher' %}{{ item.publisher or '—' }}
         {%- elif col.name == 'year' %}{{ item.publish_year or '—' }}
         {%- elif col.name == 'pages' %}{{ item.page_count or '—' }}
-        {%- elif col.name == 'language' %}{{ item.language or '—' }}
+        {%- elif col.name == 'language' %}{{ search_langs.get(item.language, item.language) if item.language else '—' }}
+        {%- elif col.name == 'region' %}{{ item.region or '—' }}
         {%- elif col.name == 'added' %}{{ item.created_at[:10] if item.created_at else '—' }}
         {%- elif col.name == 'platform' %}{{ game_platforms.get(item.platform, item.platform) if item.platform else '—' }}
         {%- elif col.name == 'collector_condition' %}{% if item.collector_condition %}<span class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] mt-2 font-medium bg-shelf-card/80 text-white shadow inline-block">{{ item.collector_condition|upper }}</span>{% else %}—{% endif %}

@@ -11,20 +11,31 @@
 {% set search_swap   = search_swap   | default('innerHTML', true) %}
 {% set show_url_form = show_url_form if show_url_form is defined else true %}
 <div class="mt-3" id="cover-picker-{{ item_id }}">
-    <input type="text" id="cover-query-{{ item_id }}" name="query" value="{{ query or '' }}"
-           placeholder="Search covers…"
-           class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1.5 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50 mb-2"
-           hx-get="{{ action_prefix }}/cover-search"
-           hx-target="{{ search_target }}" hx-swap="{{ search_swap }}"
-           hx-trigger="keyup changed delay:400ms"
-           {# A counted host carries its position through the SEARCH too. The
-              response re-renders every candidate's hx-vals and the upload
-              form's hidden inputs, so a search that dropped pos/total would
-              hand the route its defaults and the counter would read "N of 0"
-              after the next pick. #}
-           {% if pos is defined and pos %}hx-vals='{"pos":"{{ pos }}","total":"{{ total }}"}'{% endif %}
-           hx-include="#cover-query-{{ item_id }}">
+    <div class="flex flex-col gap-2 mb-2">
+        <input type="text" id="cover-query-{{ item_id }}" name="query" value="{{ query or '' }}"
+               placeholder="Search covers…"
+                class="min-w-0 w-full bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1.5 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50">
+        <button type="button" hx-get="{{ action_prefix }}/cover-search"
+                hx-target="{{ search_target }}" hx-swap="{{ search_swap }}"
+                hx-include="#cover-query-{{ item_id }}"
+                {# A counted host carries its position through the SEARCH too. #}
+                {% if pos is defined and pos %}hx-vals='{"pos":"{{ pos }}","total":"{{ total }}"}'{% endif %}
+                class="inline-flex w-full items-center justify-center gap-1.5 px-3 py-1.5 bg-shelf-hover text-shelf-text border border-shelf-border rounded-lg text-sm hover:border-shelf-accent/50 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 21-4.35-4.35m1.85-5.15a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"/></svg>Search
+        </button>
+    </div>
+    {% if alternate_title %}
+    <button type="button" hx-get="{{ action_prefix }}/cover-search"
+            hx-target="{{ search_target }}" hx-swap="{{ search_swap }}"
+            hx-vals='{"use_alternate":"true"}'
+            class="inline-flex w-full items-center justify-center gap-1.5 px-3 py-1.5 mb-2 bg-shelf-hover text-shelf-text border border-shelf-border rounded-lg text-sm hover:border-shelf-accent/50 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 21-4.35-4.35m1.85-5.15a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"/></svg>Search alt. name
+    </button>
+    {% endif %}
 
+    {% if not candidates and not search_note and not search_status %}
+    <p class="mb-2 rounded border border-shelf-error/40 bg-shelf-error/10 px-2 py-1.5 text-xs text-shelf-error">No covers found for this title.</p>
+    {% endif %}
     {% if candidates %}
     <p class="text-sm text-shelf-muted mb-2">Select a cover:</p>
     {% endif %}
@@ -73,7 +84,6 @@
     {% elif search_status %}
     {% include "fragments/search_status_notice.html" %}
     {% else %}
-    <p class="text-sm text-shelf-muted">No covers found for this title.</p>
     {% endif %}
     {% endif %}
 

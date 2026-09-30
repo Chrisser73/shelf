@@ -172,6 +172,14 @@ class TestLogin:
         assert resp.headers["location"] == "/"
         assert "access_token" in resp.cookies
 
+    def test_login_remember_me_uses_long_lived_cookie(self, client, admin_user):
+        resp = client.post("/login", data={
+            "username": "admin",
+            "password": "password123",
+            "remember_me": "true",
+        }, follow_redirects=False)
+        assert "Max-Age=2592000" in resp.headers["set-cookie"]
+
     def test_login_invalid_password(self, client, admin_user):
         resp = client.post("/login", data={
             "username": "admin",

@@ -66,12 +66,17 @@ def dashboard_summary(db, *, recent_limit: int = 8, user_id: int | None = None) 
         recent = [
             dict(row)
             for row in db.execute(
-                "SELECT i.id, i.title, i.authors, i.media_type, i.cover_path, i.owned, "
+                "SELECT i.id, i.title, i.authors, i.media_type, i.cover_path, i.owned, i.platform, "
+                "i.collector_condition, i.reading_status, l.svg_path, "
                 f"i.created_at, {lists.WISHLISTED_SQL} AS wishlisted "
-                "FROM items_live i ORDER BY i.created_at DESC, i.id DESC LIMIT ?",
-                (limit,),
+                "FROM items_live i "
+                "LEFT JOIN user_platform_logos l ON l.platform_slug = i.platform AND l.user_id = ? "
+                "ORDER BY i.created_at DESC, i.id DESC LIMIT ?",
+                (user_id, limit),
             ).fetchall()
         ]
+        for item in recent:
+            item["platform_logo_path"] = logo_path(item["platform"], item.pop("svg_path")) if item["platform"] else None
 
     return {
         "total_count": total,

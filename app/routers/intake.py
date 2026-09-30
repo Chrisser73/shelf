@@ -198,6 +198,9 @@ class IntakeBook(BaseModel):
     media_type: str = "book"
     platform: str | None = None
     collector_condition: str | None = None
+    language: str | None = None
+    region: str | None = None
+    alternate_title: str | None = None
     existing_id: int | None = None
     replace_existing: bool = False
 
@@ -502,6 +505,9 @@ async def _confirm_one(
                 "description": meta.get("description"),
                 "series_name": meta.get("series_name"),
                 "collector_condition": book.collector_condition,
+                "language": book.language,
+                "region": book.region,
+                "alternate_title": book.alternate_title,
             }
             update_item_fields(db, replace_id, {k: v for k, v in updates.items() if v is not None})
             return "added", {"title": title, "id": replace_id, "matched": bool(meta), "replaced": True}, replace_id
@@ -556,13 +562,15 @@ async def _confirm_one(
                 # display-only platform names.
                 platform=platform,
                 collector_condition=(book.collector_condition if media_type != "book" else None),
+                region=book.region,
+                alternate_title=book.alternate_title,
                 description=meta.get("description"),
                 series_name=meta.get("series_name"),
                 location_id=location_id,
                 owned=int(owned),
                 wishlisted=not owned,
                 source="photo_intake",
-                language=language,
+                language=book.language or language,
             )
         except sqlite3.IntegrityError:
             if isbn13:
