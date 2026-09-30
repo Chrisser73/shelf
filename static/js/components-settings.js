@@ -475,6 +475,23 @@ document.addEventListener('alpine:init', function () {
             retryCurrent: 0, retryTotal: 0, retryLastTitle: '', retryLog: [], showRetryLog: false,
             synFetching: false, synResult: false,
             synCurrent: 0, synTotal: 0, synLastTitle: '', synLog: [], showSynLog: false,
+            metaPlanning: false, metaApplying: false, metaConfirming: false, metaSyncIds: null,
+            metaEstimate: '', metaError: '', metaPlan: [], metaResult: [],
+            metaFields: [
+                {key: 'title', label: 'Title'}, {key: 'alternate_title', label: 'Alternate name'},
+                {key: 'authors', label: 'Developer'}, {key: 'publisher', label: 'Publisher'},
+                {key: 'platform', label: 'Platform'}, {key: 'region', label: 'Region'},
+                {key: 'language', label: 'Language'}, {key: 'publish_year', label: 'Year'}
+            ],
+            init() {
+                var self = this;
+                fetch('/api/game-metadata/estimate')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.ok) self.metaEstimate = data.count + ' game' + (data.count === 1 ? '' : 's') + ' need metadata · ' + data.cost_hint;
+                    })
+                    .catch(function() {});
+            },
             get retryPct() { return Math.round(this.retryCurrent / this.retryTotal * 100) + '%'; },
             get synPct() { return Math.round(this.synCurrent / this.synTotal * 100) + '%'; },
             startRetry() {
@@ -514,6 +531,60 @@ document.addEventListener('alpine:init', function () {
                     }
                 };
                 es.onerror = function () { self.synResult = {error: 'Connection lost'}; self.synFetching = false; es.close(); notifySettingsResult(self.synResult, ''); };
+            },
+            displayMeta(value) { return value === null || value === undefined || value === '' ? '—' : value; },
+            currentMeta(row, field) { return row.current[field]; },
+            toggleMeta(i) { this.metaPlan[i].include = !this.metaPlan[i].include; },
+            setMeta(i, field, value) { this.metaPlan[i].proposed[field] = value; },
+            metaSelectedCount() { return this.metaPlan.filter(function(row) { return row.include; }).length; },
+            metaSyncCount() { return this.metaSyncIds ? this.metaSyncIds.length : this.metaSelectedCount(); },
+            isSingleConfirming(id) { return this.metaConfirming && this.metaSyncIds && this.metaSyncIds.indexOf(id) !== -1; },
+            isSingleSyncing(id) { return this.metaApplying && this.metaSyncIds && this.metaSyncIds.indexOf(id) !== -1; },
+            isBatchConfirming() { return this.metaConfirming && !this.metaSyncIds; },
+            isBatchSyncing() { return this.metaApplying && !this.metaSyncIds; },
+            cancelMetaSync() { this.metaConfirming = false; this.metaSyncIds = null; },
+            metaChanged(row, field) {
+                var current = row.current[field]; var proposed = row.proposed[field];
+                return String(current === null || current === undefined ? '' : current).trim() !== String(proposed === null || proposed === undefined ? '' : proposed).trim();
+            },
+            metaInputClass(row, field) {
+                return 'w-full bg-shelf-bg border rounded-lg px-3 py-1.5 ' + (this.metaChanged(row, field) ? 'border-shelf-warning' : 'border-shelf-border');
+            },
+            planGameMetadata() {
+                this.metaPlanning = true; this.metaError = ''; this.metaPlan = []; this.metaResult = []; this.metaConfirming = false; this.metaSyncIds = null;
+                var self = this;
+                fetch('/api/game-metadata/plan', {method: 'POST', headers: {'X-CSRF-Token': window.csrfToken()}})
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        self.metaPlanning = false;
+                        if (!data.ok) { self.metaError = data.message || 'Metadata planning failed'; showToast(self.metaError, 'error'); return; }
+                        self.metaEstimate = data.cost_hint || '';
+                        self.metaPlan = (data.items || []).map(function(row) { return Object.assign({include: true}, row); });
+                        if (!self.metaPlan.length) showToast('No missing game metadata could be matched.', 'info');
+                    })
+                    .catch(function() { self.metaPlanning = false; self.metaError = 'Metadata planning failed'; showToast(self.metaError, 'error'); });
+            },
+            requestMetaSync() { if (this.metaSelectedCount()) { this.metaSyncIds = null; this.metaConfirming = true; } },
+            requestSingleMetaSync(i) { if (this.metaPlan[i].include) { this.metaSyncIds = [this.metaPlan[i].id]; this.metaConfirming = true; } },
+            applyGameMetadata() {
+                this.metaApplying = true; this.metaConfirming = false; this.metaError = '';
+                var self = this;
+                fetch('/api/game-metadata/apply', {
+                    method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken()},
+                    body: JSON.stringify({items: this.metaPlan.map(function(row) {
+                        var chosen = row.include && (!self.metaSyncIds || self.metaSyncIds.indexOf(row.id) !== -1);
+                        return Object.assign({id: row.id, include: chosen}, row.proposed);
+                    })})
+                }).then(function(r) { return r.json(); }).then(function(data) {
+                    self.metaApplying = false;
+                    if (!data.ok) { self.metaError = data.message || 'Metadata sync failed'; showToast(self.metaError, 'error'); return; }
+                    var updated = data.updated || [];
+                    var updatedIds = updated.map(function(item) { return item.id; });
+                    self.metaResult = self.metaResult.concat(updated);
+                    self.metaPlan = self.metaPlan.filter(function(row) { return updatedIds.indexOf(row.id) === -1; });
+                    self.metaSyncIds = null;
+                    showToast('Metadata updated for ' + updated.length + ' items', 'success');
+                }).catch(function() { self.metaApplying = false; self.metaError = 'Metadata sync failed'; showToast(self.metaError, 'error'); });
             }
         };
     });

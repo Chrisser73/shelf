@@ -138,6 +138,62 @@
                     </div>
                 </div>
             </div>
+
+            <div class="border-t border-shelf-border pt-5" data-testid="game-metadata-maintenance">
+                <h3 class="font-medium">Metadata maintenance</h3>
+                <p class="text-sm font-medium mt-3">Video Games</p>
+                <p class="text-xs text-shelf-muted mt-1">Finds missing game metadata with your configured AI and IGDB. Covers are never fetched, changed, or replaced.</p>
+                <div class="flex flex-wrap items-center gap-2 mt-3">
+                    <button @click="planGameMetadata()" :disabled="metaPlanning || metaApplying"
+                            class="px-4 py-2 bg-shelf-hover text-shelf-text rounded-lg text-sm hover:bg-shelf-border transition-colors disabled:opacity-50">
+                        <span x-show="!metaPlanning">Fetch All Metadata</span>
+                        <span x-show="metaPlanning"><i data-lucide="refresh-cw" class="w-4 h-4 animate-spin inline" aria-hidden="true"></i> Checking games...</span>
+                    </button>
+                    <span x-show="metaEstimate" class="text-xs text-shelf-muted" x-text="metaEstimate"></span>
+                </div>
+                <p x-show="metaError" class="text-sm text-shelf-error mt-2" x-text="metaError"></p>
+
+                <div x-show="metaPlan.length > 0" class="mt-5 space-y-4">
+                    <p class="text-sm text-shelf-muted">Review every proposed value before syncing. Yellow fields are the values that will be saved.</p>
+                    <template x-for="(row, i) in metaPlan" :key="row.id">
+                        <div class="border border-shelf-border rounded-lg p-4 grid gap-3" :class="row.include ? '' : 'opacity-60'">
+                            <div class="flex items-center justify-between gap-3">
+                            <label class="flex items-center gap-2 text-sm font-medium">
+                                <input type="checkbox" :checked="row.include" @change="toggleMeta(i)" class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                                <span x-text="row.current.title"></span>
+                            </label>
+                            <div>
+                                <button x-show="!isSingleConfirming(row.id) && !isSingleSyncing(row.id)" @click="requestSingleMetaSync(i)" :disabled="!row.include" class="px-3 py-1 bg-shelf-accent text-white rounded text-xs hover:bg-shelf-accent2 disabled:opacity-50">Sync item</button>
+                                <span x-show="isSingleConfirming(row.id)" class="inline-flex items-center gap-1"><button @click="applyGameMetadata()" class="px-3 py-1 bg-shelf-accent text-white rounded text-xs">Yes</button><button @click="cancelMetaSync()" class="px-3 py-1 bg-shelf-hover rounded text-xs">No</button></span>
+                                <span x-show="isSingleSyncing(row.id)" class="px-3 py-1 bg-shelf-accent text-white rounded text-xs"><i data-lucide="refresh-cw" class="w-3 h-3 animate-spin inline" aria-hidden="true"></i></span>
+                            </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                                <p class="text-xs text-shelf-muted">Current</p><p class="text-xs text-shelf-warning">Will be</p>
+                                <p :class="metaChanged(row, 'title') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Title: <span x-text="displayMeta(currentMeta(row, 'title'))"></span></p><label>Title<input type="text" :value="row.proposed.title" @input="setMeta(i, 'title', $event.target.value)" :class="metaInputClass(row, 'title')"></label>
+                                <p :class="metaChanged(row, 'alternate_title') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Alternate name: <span x-text="displayMeta(currentMeta(row, 'alternate_title'))"></span></p><label>Alternate name<input type="text" :value="row.proposed.alternate_title" @input="setMeta(i, 'alternate_title', $event.target.value)" :class="metaInputClass(row, 'alternate_title')"></label>
+                                <p :class="metaChanged(row, 'authors') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Developer: <span x-text="displayMeta(currentMeta(row, 'authors'))"></span></p><label>Developer<input type="text" :value="row.proposed.authors" @input="setMeta(i, 'authors', $event.target.value)" :class="metaInputClass(row, 'authors')"></label>
+                                <p :class="metaChanged(row, 'publisher') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Publisher: <span x-text="displayMeta(currentMeta(row, 'publisher'))"></span></p><label>Publisher<input type="text" :value="row.proposed.publisher" @input="setMeta(i, 'publisher', $event.target.value)" :class="metaInputClass(row, 'publisher')"></label>
+                                <p :class="metaChanged(row, 'platform') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Platform: <span x-text="displayMeta(currentMeta(row, 'platform'))"></span></p><label>Platform<select :value="row.proposed.platform" @change="setMeta(i, 'platform', $event.target.value)" :class="metaInputClass(row, 'platform')"><option value="">Platform</option>{% for slug, name in game_platforms.items() %}<option value="{{ slug }}">{{ name }}</option>{% endfor %}</select></label>
+                                <p :class="metaChanged(row, 'region') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Region: <span x-text="displayMeta(currentMeta(row, 'region'))"></span></p><label>Region<select :value="row.proposed.region" @change="setMeta(i, 'region', $event.target.value)" :class="metaInputClass(row, 'region')"><option value="">Region</option><option value="unknown">Unknown</option><option value="PAL">PAL</option><option value="NTSC">NTSC</option><option value="NTSC-J">NTSC-J</option><option value="PAL-M">PAL-M</option></select></label>
+                                <p :class="metaChanged(row, 'language') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Language: <span x-text="displayMeta(currentMeta(row, 'language'))"></span></p><label>Language<select :value="row.proposed.language" @change="setMeta(i, 'language', $event.target.value)" :class="metaInputClass(row, 'language')"><option value="">Language</option>{% for code, label in search_langs.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select></label>
+                                <p :class="metaChanged(row, 'publish_year') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Year: <span x-text="displayMeta(currentMeta(row, 'publish_year'))"></span></p><label>Year<input type="number" :value="row.proposed.publish_year" @input="setMeta(i, 'publish_year', $event.target.value ? Number($event.target.value) : null)" :class="metaInputClass(row, 'publish_year')"></label>
+                                <p x-show="!currentMeta(row, 'location_id')" :class="metaChanged(row, 'location_id') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Location: <span x-text="displayMeta(currentMeta(row, 'location_id'))"></span></p><label x-show="!currentMeta(row, 'location_id')">Location<select :value="row.proposed.location_id || ''" @change="setMeta(i, 'location_id', $event.target.value ? Number($event.target.value) : null)" :class="metaInputClass(row, 'location_id')"><option value="">No location</option>{% for loc in locations %}<option value="{{ loc.id }}">{{ loc.name }}{% if default_location_id == loc.id|string %} (default){% endif %}</option>{% endfor %}</select></label>
+                            </div>
+                        </div>
+                    </template>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button x-show="!isBatchConfirming() && !isBatchSyncing()" @click="requestMetaSync()" :disabled="metaSelectedCount() === 0" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors disabled:opacity-50" x-text="'Sync ' + metaSelectedCount() + ' items'"></button>
+                        <span x-show="isBatchConfirming()" class="inline-flex items-center gap-1"><button @click="applyGameMetadata()" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm">Yes</button><button @click="cancelMetaSync()" class="px-4 py-2 bg-shelf-hover rounded-lg text-sm">No</button></span>
+                        <span x-show="isBatchSyncing()" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm"><i data-lucide="refresh-cw" class="w-4 h-4 animate-spin inline" aria-hidden="true"></i></span>
+                        <p class="text-xs text-shelf-error">This will override currently saved metadata. Are you sure?</p>
+                    </div>
+                </div>
+                <div x-show="metaResult.length > 0" class="mt-4 text-sm">
+                    <p class="text-shelf-success">Metadata updated for <span x-text="metaResult.length"></span> items.</p>
+                    <ul class="mt-1 space-y-1"><template x-for="item in metaResult" :key="item.id"><li><a :href="'/item/' + item.id" class="text-shelf-accent2 hover:text-shelf-accent" x-text="item.title"></a></li></template></ul>
+                </div>
+            </div>
         </div>
     </div>
 

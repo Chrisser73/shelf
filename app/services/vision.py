@@ -87,7 +87,7 @@ PROMPT = (
     f"(4) Set media_type to one of: {', '.join(MEDIA_TYPES)}. Once an item is confidently identified, "
     "also supplement publisher and original release/publication year from reliable knowledge when you are reasonably certain; for a recognized game, use reliable knowledge for developer, publisher, and year even when they are not printed on the cover; "
     "omit them rather than guess when uncertain or when they could be specific to a regional edition. "
-    "For video games, provide the console or platform name in platform, the language printed on the item in language, "
+    "For video games, provide the console or platform name in platform, the language printed on the item in language (or multi for multiple languages), "
     "the release region in region (PAL, NTSC, NTSC-J, PAL-M, or unknown), and an English or locally searchable alternate_title when the printed title uses another script. "
     "For a game, put its developer in authors and its publisher in publisher when confidently identified. Preserve every visible part of a cover title, including Japanese and Latin logo text such as DX; never shorten a title merely because its artwork is familiar. The alternate_title must be the official international/searchable name of this exact pictured edition only — never merge paired releases or add a related game after a slash. For example, a cover for Pokémon Shining Pearl must return alternate_title exactly Pokémon Shining Pearl, never Pokémon Brilliant Diamond / Pokémon Shining Pearl; the paired release is not the title of that individual item. "
     "For films use publisher for the studio or distributor, "

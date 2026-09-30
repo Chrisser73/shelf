@@ -201,7 +201,7 @@ async def search_games(
     parts = [
         f'search "{_escape(title)}"',
         "fields name, platforms.name, first_release_date, involved_companies.company.name, "
-        "involved_companies.publisher, cover.image_id, summary, franchises.name",
+        "involved_companies.publisher, involved_companies.developer, cover.image_id, summary, franchises.name",
     ]
     if platform and platform in PLATFORM_IDS:
         parts.append(f"where platforms = ({PLATFORM_IDS[platform]})")
@@ -393,14 +393,18 @@ async def test_credentials(client_id: str, client_secret: str, client: httpx.Asy
 def _parse_game(game: dict) -> dict:
     """Parse an IGDB game response into our standard metadata format."""
     # Extract publisher from involved_companies
-    publisher = None
-    developer = None
+    publishers: list[str] = []
+    developers: list[str] = []
     for ic in game.get("involved_companies", []):
         company_name = ic.get("company", {}).get("name")
-        if ic.get("publisher") and not publisher:
-            publisher = company_name
-        if ic.get("developer") and not developer:
-            developer = company_name
+        if not company_name:
+            continue
+        if ic.get("publisher") and company_name not in publishers:
+            publishers.append(company_name)
+        if ic.get("developer") and company_name not in developers:
+            developers.append(company_name)
+    publisher = ", ".join(publishers) or None
+    developer = ", ".join(developers) or None
 
     # Extract year from Unix timestamp
     publish_year = None
