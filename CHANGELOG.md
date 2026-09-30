@@ -6,6 +6,63 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-09-30
+
+Leaving LibraryThing or Libib for Shelf meant reshaping the export by hand
+into Shelf's own CSV columns first. LibraryThing's classic export is not
+even comma-separated, and a re-imported Libib film failed as a duplicate
+instead of being skipped. Now both exports import as they come, and every
+import tells you which of your file's columns it did not bring across.
+
+### Added
+
+- **LibraryThing exports import as-is**, from the tab-separated export or the
+  spreadsheet (CSV) export — pick the file and Shelf recognises it. Titles,
+  authors, ISBN, year, pages, series with position (`Dune (3)`), media
+  (books, e-books, audiobooks, DVD/Blu-ray, CD, vinyl) and tags are mapped.
+  LibraryThing's `Last, First` author names become `First Last`. Built-in
+  collections decide state: *Wishlist* is not owned and on your wishlist,
+  *Read but unowned* is read and not owned, *Currently reading* and *To read*
+  set the status, and anything else is owned. Your own collections become
+  tags.
+- **LibraryThing's acquisition details land on the new item's copy.**
+  *Acquired*, *From where*, *Purchase price* and *Condition* become the
+  copy's acquired date, source, price and condition. A price or date Shelf
+  cannot read is left out, and the row still imports. This happens only for
+  items the import creates: an item already in Shelf may have several
+  copies, and a flat row cannot say which one it means, so those details are
+  reported instead of guessed.
+- **Libib exports import as-is.** Books, movies (as DVD/Blu-ray), music (as
+  CD) and video games are mapped, with Libib's *group* as the series and
+  *Completed* / *In progress* as the status. Every Libib item is owned, since
+  Libib catalogues what you have. An item type Shelf does not know is a row
+  error naming it — it is never filed as a book. A game's *creators* cell
+  holds its platform, not an author, so it is reported rather than imported.
+- **Re-importing discs and games no longer duplicates them.** An import row
+  with a UPC or EAN and no ISBN is now matched against the items you already
+  have by that code, so a Libib film is skipped (or updated) even when its
+  title differs from yours.
+- **Every import says what it did not bring across.** A muted "Not imported"
+  line under the result names each column that held data but has nowhere to
+  go in Shelf — ratings, reviews, notes, prices on existing items — for
+  every format, including Goodreads, StoryGraph and Shelf's own CSV.
+- **LibraryThing and Libib are marked *Beta*** on the import result. They
+  are built from each app's documented export format; if a row imports
+  wrongly, the result links to a new GitHub issue — include your file's
+  header row.
+
+### Changed
+
+- **The import picker accepts `.tsv` and `.txt` files** as well as `.csv`.
+- **A file that is not UTF-8 is refused whole**, with a message saying how to
+  re-export it (in a spreadsheet app: *Save As → CSV UTF-8*). Before, such a
+  file failed with a server error. Shelf does not guess an encoding, because
+  a wrong guess imports garbled titles without telling you.
+- **An item with one copy shows that copy's details on its page.** Condition,
+  acquired date, source and price used to appear only once an item had two or
+  more copies. They now follow the single location line, or "No location"
+  when the copy has no shelf yet, with the copy's Edit button beside them.
+
 ## [0.59.0] - 2026-09-29
 
 A film or a video game could already be marked finished by Quick Rate, but
@@ -4655,6 +4712,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.60.0]: https://github.com/dgahagan/shelf/releases/tag/v0.60.0
 [0.59.0]: https://github.com/dgahagan/shelf/releases/tag/v0.59.0
 [0.58.0]: https://github.com/dgahagan/shelf/releases/tag/v0.58.0
 [0.57.0]: https://github.com/dgahagan/shelf/releases/tag/v0.57.0

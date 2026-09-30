@@ -61,9 +61,10 @@ Yes: admin / editor / viewer roles on one shared library. Per-user reading
 tracking and per-household libraries are planned.
 
 **Can I import from Goodreads / StoryGraph / LibraryThing / Libib?**
-Goodreads and StoryGraph today (upload the export as-is). LibraryThing and
-Libib are on the [roadmap](roadmap.md). Anything else: CSV with at least a
-`title` column.
+Yes — all four: upload the export as-is and the format is detected. The
+LibraryThing and Libib importers are labelled beta. See
+[Import & export](user-guide/import-and-export.md#reading-trackers-and-catalogue-apps).
+Anything else: CSV with at least a `title` column.
 
 **How do I move Shelf to another machine?**
 Copy the `data/` directory — or export a portable archive and import it on

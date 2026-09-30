@@ -50,7 +50,7 @@ def test_csv_import(live_server, authed_page):
     authed_page.locator("button:has-text('Data')").click()
 
     # CSV import file input
-    file_input = authed_page.locator("input[type=file][accept='.csv']")
+    file_input = authed_page.locator("input[type=file][accept*='.csv']")
     expect(file_input).to_be_visible()
 
     file_input.set_input_files({
@@ -106,7 +106,7 @@ def test_goodreads_import_via_ui(live_server, authed_page):
     authed_page.wait_for_load_state("networkidle")
     authed_page.locator("button:has-text('Data')").click()
 
-    file_input = authed_page.locator("input[type=file][accept='.csv']")
+    file_input = authed_page.locator("input[type=file][accept*='.csv']")
     expect(file_input).to_be_visible()
     file_input.set_input_files({
         "name": "goodreads_library_export.csv",
@@ -151,3 +151,58 @@ def test_goodreads_import_via_ui(live_server, authed_page):
     authed_page.goto(f"{live_server['url']}/browse?owned=1&q=GR+Read+Book")
     authed_page.wait_for_load_state("networkidle")
     expect(authed_page.locator("#item-grid")).not_to_contain_text("GR Read Book")
+
+
+def test_librarything_import_shows_beta_and_unimported(live_server, authed_page):
+    """A LibraryThing TSV export uploads through the settings UI, is detected
+    as `librarything`, and the result card shows the literal "LibraryThing"
+    name, the "Beta" label, and a "Not imported" line naming the unmapped
+    Rating column.
+
+    Synthetic fixture, built from the documented LibraryThing column list
+    (design plan §"LibraryThing mapping"), not a real export.
+    """
+    header = [
+        "Book Id", "Title", "Primary Author", "Author (First, Last)",
+        "Secondary Author", "Other Authors", "ISBN", "ISBNs",
+        "Publication Date", "Date", "Page Count", "Series", "Media",
+        "Collections", "Date Read", "Date Ended", "Tags", "Your Tags",
+        "Acquired", "Date Acquired", "From Where", "Purchase Price",
+        "Condition", "Rating",
+    ]
+    rows = [
+        ["1", "LT Test Book One", "Author One", "", "", "", "", "", "", "",
+         "", "", "", "Your Library", "", "", "", "", "", "", "", "", "", "5"],
+        ["2", "LT Test Book Two", "Author Two", "", "", "", "", "", "", "",
+         "", "", "", "Your Library", "", "", "", "", "", "", "", "", "", "4"],
+    ]
+    tsv_content = "\n".join("\t".join(r) for r in [header] + rows) + "\n"
+
+    authed_page.goto(f"{live_server['url']}/settings")
+    authed_page.wait_for_load_state("networkidle")
+    authed_page.locator("button:has-text('Data')").click()
+
+    file_input = authed_page.locator("input[type=file][accept*='.csv']")
+    expect(file_input).to_be_visible()
+    file_input.set_input_files({
+        "name": "librarything_export.tsv",
+        "mimeType": "text/tab-separated-values",
+        "buffer": tsv_content.encode(),
+    })
+
+    form = file_input.locator("xpath=ancestor::form")
+    with authed_page.expect_response("**/api/import/csv") as resp_info:
+        form.locator("button[type=submit]").first.click()
+    result = resp_info.value.json()
+    assert result["format"] == "librarything", result
+    assert result["imported"] == 2, result
+
+    # Scoped to the result card so these never match a hidden x-show twin
+    # elsewhere on the Settings page (G51, G70).
+    result_block = authed_page.locator("[data-testid='csv-import-result']")
+    expect(result_block).to_be_visible()
+    expect(result_block.get_by_text("LibraryThing", exact=True)).to_be_visible()
+    expect(result_block.get_by_text("Beta", exact=True)).to_be_visible()
+
+    dropped = result_block.locator("[data-testid='csv-import-dropped']")
+    expect(dropped).to_contain_text("rating")

@@ -654,6 +654,55 @@ class TestCopiesBlock:
         assert ">Copies<" not in html
         assert "None" not in html
 
+    def test_a_lone_unlocated_copy_shows_its_details_and_edit(self, admin_client, db):
+        """An import can give an item one copy with a condition and a price
+        but no location (LibraryThing). Nothing on the page showed that data
+        or opened the copy's editor (test-drive imports-lt-libib, Obs 2)."""
+        decoy = _insert_item(db, title="Decoy", isbn="9789000020300")
+        insert_copy(db, {"item_id": decoy, "copy_number": 1, "is_primary": 1})
+        item_id = _insert_item(db, title="Imported", isbn="9789000020317")
+        db.execute("DELETE FROM item_copies WHERE item_id = ?", (item_id,))
+        only = insert_copy(db, {"item_id": item_id, "copy_number": 1, "is_primary": 1,
+                                "condition": "Fair", "acquired_date": "2019-11-02",
+                                "acquisition_source": "Library sale",
+                                "acquisition_price": 2.5})
+        db.commit()
+
+        html = admin_client.get(f"/item/{item_id}").text
+
+        assert "No location</span> · Fair · 2019-11-02 · Library sale · " in html
+        assert f'data-testid="edit-copy-{only}"' in html
+        assert "Location:" not in html
+        assert ">Copies<" not in html
+
+    def test_a_lone_unlocated_copy_with_details_is_shown_to_a_viewer(
+        self, viewer_client, db
+    ):
+        item_id = _insert_item(db, title="Imported", isbn="9789000020324")
+        db.execute("DELETE FROM item_copies WHERE item_id = ?", (item_id,))
+        insert_copy(db, {"item_id": item_id, "copy_number": 1, "is_primary": 1,
+                         "condition": "Good"})
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert 'id="item-copies" class="hidden"' not in html
+        assert "No location</span> · Good" in html
+        assert "edit-copy-" not in html
+
+    def test_a_lone_placed_copy_shows_its_details(self, viewer_client, db):
+        office = _insert_location(db, "Office")
+        item_id = _insert_item(db, title="Placed", isbn="9789000020331",
+                               location_id=office)
+        db.execute("DELETE FROM item_copies WHERE item_id = ?", (item_id,))
+        insert_copy(db, {"item_id": item_id, "copy_number": 1, "is_primary": 1,
+                         "location_id": office, "condition": "Very good"})
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert "Office</a> · Very good" in html
+
     def test_a_viewer_sees_the_block_and_it_carries_no_controls(
         self, viewer_client, db
     ):

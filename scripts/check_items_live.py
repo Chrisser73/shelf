@@ -255,6 +255,10 @@ ALLOWLIST: dict[str, dict[str, int]] = {
         "SELECT id, deleted_at FROM items WHERE TRIM(title) = TRIM(?) COLLATE NOCASE AND "
         "TRIM(COALESCE(authors, '')) = TRIM(?) COLLATE NOCASE AND media_type = ? AND "
         "(isbn IS NULL OR isbn = '') ORDER BY deleted_at IS NOT NULL, id LIMIT 1": 1,
+        # CSV dedup on UPC — predicts UNIQUE(upc, media_type)
+        # (idx_items_upc_type), which a trashed row still holds (G107).
+        "SELECT id, deleted_at FROM items WHERE upc = ? AND media_type = ? "
+        "ORDER BY deleted_at IS NOT NULL, id LIMIT 1": 1,
         # export_csv's editor/admin branch — the CSV export carries Trash for
         # editor/admin (design plan-soft-delete-export). The viewer branch
         # stays on items_live, so this text spans only the physical-table

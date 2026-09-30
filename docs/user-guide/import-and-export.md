@@ -5,7 +5,7 @@ All under Settings → Data. Four mechanisms, each for a different job.
 | | Best for | Covers included? | Credentials/users? |
 |---|---|---|---|
 | **CSV** | Spreadsheets, other apps, quick bulk entry | No (re-fetched) | No |
-| **Goodreads / StoryGraph import** | Migrating a reading history | No (re-fetched) | No |
+| **Reading tracker & catalogue app import** (Goodreads, StoryGraph, LibraryThing, Libib) | Migrating a reading history or another catalogue | No (re-fetched) | No |
 | **Portable archive** | Moving Shelf to a new server, giving someone your library | **Yes** | No |
 | **Database backup** | Disaster recovery of *this* instance | No | Yes (hashed/encrypted) |
 
@@ -39,9 +39,12 @@ the file at all.
 
 ## CSV import
 
-Upload a CSV. Headers are matched case-insensitively (spaces → underscores),
-so Shelf's own export round-trips, and any file with at least a `title`
-column imports. Rows that already exist are skipped, or refreshed — see
+Upload a CSV — or a tab-separated file (`.tsv`, `.txt`); Shelf tells the two
+apart from the header row. Headers are matched case-insensitively (spaces →
+underscores), so Shelf's own export round-trips, and any file with at least a
+`title` column imports. The file must be UTF-8: a file in another encoding is
+refused whole, with a message saying how to re-save it, rather than imported
+with garbled titles. Rows that already exist are skipped, or refreshed — see
 **Duplicate mode** below — and either way reported.
 
 A row is matched against your library by `isbn` + `media_type` when it has an
@@ -116,11 +119,21 @@ Errors are reported per row (missing title, over-long fields, an ISBN whose
 check digit doesn't add up, a media type Shelf doesn't know); the rest of
 the file still imports. An ISBN-10 in the file stores both forms.
 
-## Goodreads & StoryGraph
+**Not imported.** Under the counts, the summary lists every column that held
+data in at least one row and that Shelf did not import — a rating, a review,
+a price column Shelf has no place for. A column that was blank in every row
+is not listed. Re-importing Shelf's own export lists `estimated_value`,
+`location`, `manual_value`, `platform` and `source`: those are written for
+your spreadsheet, and the import does not read them back.
 
-Export from Goodreads (My Books → Import and export) or StoryGraph (Manage
-account → Export) and upload the file **as-is** to the same import card. The
-format is auto-detected from the headers. Shelf maps:
+## Reading trackers and catalogue apps
+
+Export from Goodreads (My Books → Import and export), StoryGraph (Manage
+account → Export), LibraryThing or Libib, and upload the file **as-is** to
+the same import card. The format is auto-detected from the headers, and the
+summary names the format it detected.
+
+**Goodreads and StoryGraph.** Shelf maps:
 
 - shelves / statuses → want-to-read, reading, read (+ dates)
 - owned copies (Goodreads) / "Owned?" (StoryGraph) → owned or not owned
@@ -130,8 +143,53 @@ format is auto-detected from the headers. Shelf maps:
   Wishlist filters, and isn't valued
 - ISBN / title / author → lookup and covers
 
-In **Update** mode a Goodreads or StoryGraph file always sets owned and
-wishlist state on the items it matches.
+**LibraryThing** — the tab-separated export or the spreadsheet (CSV) export:
+
+- title, authors (primary, then secondary and other authors — LibraryThing's
+  `Last, First` form is turned round to `First Last`), ISBN, year,
+  page count, series and position (`Discworld (3)`), and media (books,
+  e-books, audiobooks, DVD/Blu-ray, CD, vinyl)
+- collections decide state:
+
+  | LibraryThing collection | In Shelf |
+  |---|---|
+  | Your library, or no built-in collection | owned |
+  | Wishlist | not owned, on the wishlist |
+  | Read but unowned | not owned, read |
+  | Currently reading | owned, reading |
+  | To read | owned, want to read |
+
+  A date read with no status collection means read. **Every other
+  collection becomes a tag**, alongside the row's own tags.
+- **Date acquired, From where, Purchase price and Condition** land on the
+  new item's physical copy — only when the import **creates** the item, and
+  only for an owned one. A price or date Shelf cannot read is left off the
+  copy, and the rest of the row still imports. An item you already have keeps
+  its copies untouched: it may have several, and a row cannot say which one it
+  means, so these columns are listed under **Not imported** instead.
+- the copy count and LibraryThing barcodes are not imported.
+
+**Libib:**
+
+- books, films (as DVD), music (as CD) and video games. **An item type Shelf
+  does not recognise is a row error** naming the type, never filed as a book.
+- books match on ISBN; films, music and games match on their UPC or EAN, so
+  re-importing the file skips or updates them rather than adding them twice.
+  A 12-digit UPC in the file matches a disc you scanned as a 13-digit EAN.
+- creators → authors, group → series, plus publisher, year, pages (books
+  only), status (Completed → read, In progress → reading) and tags.
+- every row is owned — Libib catalogues what you have.
+- a game's platform is not imported; it is listed under **Not imported**.
+
+**LibraryThing and Libib are labelled beta** on the import card. Both were
+built from each app's documented export format, not from real exports. If a
+row imports wrongly, the card links to
+[open an issue](https://github.com/dgahagan/shelf/issues/new/choose) —
+include your file's header row.
+
+In **Update** mode a reading-tracker or catalogue-app file — Goodreads,
+StoryGraph, LibraryThing or Libib — always sets owned and wishlist state on
+the items it matches.
 
 ### Cleaning up a wishlist after a Goodreads import
 
@@ -150,9 +208,8 @@ their reading history, now neither owned nor wishlisted. Nothing does this
 automatically: a book you read and then want to buy belongs on the wishlist,
 so the choice is yours.
 
-Ratings are **not** imported yet (Shelf has no ratings; that's on the
-roadmap) and the import summary says so. LibraryThing and Libib importers
-are planned.
+Ratings and reviews are **not** imported yet (Shelf has no ratings; that's
+on the roadmap) and the summary lists them under **Not imported**.
 
 ## Portable archive
 

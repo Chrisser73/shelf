@@ -1362,6 +1362,15 @@ python -c "from app.services.openlibrary import USER_AGENT as U; assert 'http' i
     stayed green. The pin that reddens it posts `owned` alone (`85fec05`).
     When a mutation restores a derived value, ask whether anything later in
     the request writes the same field.
+  - **A fallback key catches what the new key was meant to.** The CSV importer
+    has a title+authors+media fallback for rows with no ISBN. A UPC dedup key
+    added in front of it (`e53ba56`, 2026-09-29) was pinned by "re-import the
+    same file, expect every row skipped" — which stays green with the UPC arm
+    deleted, because the identical titles fall through to the fallback and
+    match anyway. The pins that red are the ones where the title differs: a
+    disc scanned under another name, a trashed twin, an in-file duplicate with
+    an edited title. When you add a key ahead of a fallback, seed a row the
+    fallback cannot match.
 
 - **Evidence:** `ce1003c`, `8ba5853`, `10caf32` (2026-08-21, issue #27). The
   queue's requeue-filter and head-of-line pins were mutation-checked the same
@@ -5751,6 +5760,34 @@ grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py test
   test that never scans or dedupes on that code.
 - **Status:** documented. Not a lint candidate: a raw seed is legitimate where
   nothing matches on it.
+
+
+## G131 — When parsing a foreign export's free-text cell into a structured value
+
+- **Rule:** decide by a rule the file's own **content** cannot satisfy by
+  accident, and when normalizing a messy value, **strip an allowlist** of
+  known decorations and refuse whatever is left — never strip everything that
+  is not the target shape. Test the rule against the export's *real* column
+  names and cell text, not tidy fixtures.
+- **Why:** two instances in one importer, both built exactly as specified and
+  both green on the fixtures the spec implied:
+  - **Delimiter from the header.** "Tab when the header has a tab and no comma
+    outside quotes" reads LibraryThing's classic TSV as CSV, because one of its
+    column *names* is `Author (First, Last)`, unquoted. Every row then parses
+    into one garbage column. Now: tab when unquoted tabs outnumber unquoted
+    commas (`dd9eae5`).
+  - **Price from a cell.** `re.sub(r"[^0-9,.\-]", "", value)` turns
+    `£5 (2 for 1)` into `521` and `1e400` into `1400` — a convincing wrong
+    number, written to the user's copy with no error. Now: remove currency
+    symbols (Unicode `Sc`), whitespace and a three-letter code, then require
+    a plain number (`1f210ee`).
+- **Evidence:** `feat/imports-lt-libib`, 2026-09-29. The delimiter case was
+  found by the T2 subagent writing a TSV fixture with the real header; the
+  price case by the T6 pin sweeping values the `CHECK` would refuse.
+- **Verify:** `python -m pytest tests/test_catalogue_imports.py -q -k
+  "delimiter or price"` — both halves have parametrised pins.
+- **Status:** documented. Not a lint candidate — whether a stripped character
+  was decoration is a judgement about the source format.
 
 ## Graveyard
 

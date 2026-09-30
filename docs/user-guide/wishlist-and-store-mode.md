@@ -18,7 +18,8 @@ Put an item on the wishlist by:
 - Ticking **On my wishlist** on an item's edit page.
 - **Browse → select items → Wishlist: Add to wishlist**.
 - Importing from Goodreads / StoryGraph with "Import 'to read' books as
-  wishlist" on, or re-importing Shelf's own CSV export.
+  wishlist" on, importing a LibraryThing export (its Wishlist collection), or
+  re-importing Shelf's own CSV export.
 
 Take one off with the same controls: untick **On my wishlist**, or **Browse →
 select → Wishlist: Remove from wishlist**. Removing an item from the wishlist

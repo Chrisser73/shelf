@@ -124,11 +124,11 @@ or not, is in the [changelog](../CHANGELOG.md).
 
 | Version | What landed |
 |---|---|
+| [0.59.0](https://github.com/dgahagan/shelf/releases/tag/v0.59.0) | Films are watched and games are played. A DVD or video game has its own status control on its item page, and Quick Rate, Browse's Status filter and Stats use its words. Stats splits this year's finishes into read, watched and played. |
 | [0.58.0](https://github.com/dgahagan/shelf/releases/tag/v0.58.0) | Start with only the parts of Shelf you want. The setup wizard asks for Minimal, Standard or Everything, and Settings → **Features** applies a different profile in one step, listing what it would turn on and off first. An upgraded install keeps everything on. |
 | [0.57.0](https://github.com/dgahagan/shelf/releases/tag/v0.57.0) | A feature you turn off is gone from the pages you keep, too. With Lending off there is no loan panel, Loaned badge or Lend scan mode; with Series off the series name stays as plain text. Its Settings card says it is off and keeps only its setup controls. |
 | [0.56.0](https://github.com/dgahagan/shelf/releases/tag/v0.56.0) | Every author is their own link. On an item page, each name links to everything by that person, and a translator or other credit shows its role beside the name. Browse filters to one author and combines it with any other filter, and different spellings of the same name, such as `J.R.R.` and `J. R. R. Tolkien`, count as one author. Asked for in [#117](https://github.com/dgahagan/shelf/issues/117). |
 | [0.55.0](https://github.com/dgahagan/shelf/releases/tag/v0.55.0) | Turn off the parts of Shelf you do not use. Settings → **Features** has a switch for lending, series, statistics, store mode, sharing, valuation, music, periodicals, shelf fill, photo intake and each integration. A feature that is off leaves the navigation and its pages, and its data is kept for when you turn it back on. Turning off sharing or lending first says how many links or loans it affects. |
-| [0.54.0](https://github.com/dgahagan/shelf/releases/tag/v0.54.0) | Put Shelf behind your own HTTPS proxy without a second certificate. Set `SHELF_TLS=off` and Shelf serves plain HTTP to the proxy, which supplies the real certificate. Sign-in works over plain HTTP too, and the camera's "requires HTTPS" message now says how to fix it. HTTPS stays the default. Asked for in [#124](https://github.com/dgahagan/shelf/issues/124). |
 
 ---
 

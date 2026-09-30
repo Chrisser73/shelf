@@ -19,7 +19,7 @@ from app.database import get_db
 from app.routers import items_common
 from app.services import cover_queue
 from app.services import isbn as isbn_svc
-from app.services import item_write
+from app.services import item_copies, item_write
 from app.services import lists
 from app.services import tags as tags_svc
 from app.services.item_write import ItemValueError, insert_item, update_item_fields
@@ -116,8 +116,23 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
     raw = await csv_file.read(MAX_CSV_UPLOAD_SIZE + 1)
     if len(raw) > MAX_CSV_UPLOAD_SIZE:  # 50 MB cap
         return {"error": "File too large (max 50 MB)", "imported": 0, "skipped": 0, "errors": []}
-    content = raw.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(content))
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        # A whole-file error, in the same shape as "No file uploaded" above.
+        # Guessing the encoding instead would import mojibake titles
+        # silently, which is worse than refusing (design plan-imports-lt-libib
+        # §"Reading the file").
+        return {
+            "error": "The file is not UTF-8 text. Re-export it as UTF-8 "
+                      "(in a spreadsheet app: Save As → CSV UTF-8) and "
+                      "upload it again.",
+            "imported": 0,
+            "skipped": 0,
+            "errors": [],
+        }
+    delimiter = reading_imports.choose_delimiter(content.split("\n", 1)[0])
+    reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
 
     # Normalize headers (lowercase, strip)
     if reader.fieldnames:
@@ -133,16 +148,31 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
     trashed = 0
     errors = []
     new_item_ids: list[int] = []
-    # Keyed ('isbn', isbn, media) or ('title', title, authors, media) — the
-    # tag keeps the two key spaces from colliding.
+    # Keyed ('isbn', isbn, media), ('upc', upc, media) or ('title', title,
+    # authors, media) — the tag keeps the key spaces from colliding.
     seen_in_file: set[tuple] = set()
+    # For the `dropped` report: every column that held data in some row, and
+    # the (column, reason) pairs rows reported themselves.
+    nonblank: set[str] = set()
+    row_drops: set[tuple[str, str]] = set()
 
     _CSV_MAX_TEXT = 1000
 
     with get_db() as db:
         for i, row in enumerate(reader, start=2):
             try:
+                # DictReader files overflow fields under the key None.
+                nonblank.update(
+                    k for k, v in row.items()
+                    if k is not None and isinstance(v, str) and v.strip()
+                )
                 norm = normalize(row)
+                row_drops.update(norm.get("dropped") or [])
+                # LibraryThing acquisition columns that held data on this row
+                # — they land only on a newly created item's copy.
+                acq_given = [
+                    c for c in _LT_ACQUISITION_COLUMNS if (row.get(c) or "").strip()
+                ] if fmt == reading_imports.LIBRARYTHING else []
 
                 title = norm["title"]
                 if not title:
@@ -160,14 +190,22 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 if norm["series_name"] and len(norm["series_name"]) > _CSV_MAX_TEXT:
                     errors.append(f"Row {i}: series_name too long (max {_CSV_MAX_TEXT} chars)")
                     continue
-                # Only the generic format reads a `tags` column. StoryGraph's
-                # own export already has a `Tags` column, and the header
-                # lowercasing above means row["tags"] exists for StoryGraph
-                # rows too — length-checking it unconditionally would start
-                # failing rows a StoryGraph file used to import fine, for a
-                # cell normalize_storygraph never reads.
-                if fmt == reading_imports.GENERIC:
-                    raw_tags = row.get("tags")
+                # Gate on the normalizer *emitting* a `tags` key, not on the
+                # format. StoryGraph's export has its own `Tags` column that
+                # normalize_storygraph never reads and never emits, and the
+                # header lowercasing above means row["tags"] exists for a
+                # StoryGraph row too — length-checking it unconditionally
+                # would start failing rows a StoryGraph file used to import
+                # fine, for a cell its normalizer never reads. Checking the
+                # emitted key instead of the format also covers LibraryThing
+                # and Libib, whose normalizers do read and emit tags.
+                if "tags" in norm:
+                    # Check the raw cell the normalizer actually read: the
+                    # generic and Libib formats read `tags`, LibraryThing
+                    # reads `tags` or `your_tags` — check whichever is
+                    # present rather than tracking which alias each format
+                    # used.
+                    raw_tags = row.get("tags") or row.get("your_tags")
                     if raw_tags and len(raw_tags) > _CSV_MAX_TEXT:
                         errors.append(f"Row {i}: tags too long (max {_CSV_MAX_TEXT} chars)")
                         continue
@@ -230,6 +268,21 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     # duplicate that check here.
                     file_key = None
                     existing = None
+                elif norm.get("upc"):
+                    # A disc or game with no ISBN (Libib's films, music and
+                    # games). Keyed on the EAN-13 storage form, which the
+                    # normalizer already produced (G130), so a 12-digit UPC-A
+                    # in the file matches the 13-digit value a scan stored.
+                    # Physical table for the same reason as the ISBN read: it
+                    # predicts idx_items_upc_type, UNIQUE(upc, media_type),
+                    # whose slot a trashed row still holds (G107).
+                    upc = norm["upc"]
+                    file_key = ("upc", upc, media)
+                    existing = db.execute(
+                        "SELECT id, deleted_at FROM items WHERE upc = ? AND media_type = ? "
+                        "ORDER BY deleted_at IS NOT NULL, id LIMIT 1",
+                        (upc, media),
+                    ).fetchone()
                 else:
                     file_key = ("title", title.strip().lower(), authors_val.strip().lower(), media)
                     existing = db.execute(
@@ -253,6 +306,10 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 incoming_deleted = bool(norm.get("deleted"))
 
                 if existing:
+                    # Update mode never touches copies: an existing item may
+                    # have several, and a flat row cannot say which one it
+                    # means. Its acquisition data is reported instead.
+                    row_drops.update((c, "existing_item") for c in acq_given)
                     # A trashed hit is restored before anything else about
                     # this row is decided — it must be the row's first write
                     # (G85): the per-row except below carries on to the next
@@ -330,6 +387,7 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     title=title,
                     authors=norm["authors"],
                     isbn=isbn_val,
+                    upc=norm.get("upc"),
                     media_type=media,
                     publisher=norm["publisher"],
                     publish_year=int(pub_year) if pub_year and str(pub_year).isdigit() else None,
@@ -358,6 +416,22 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     item_write.trash_item(db, new_id)
                     trashed += 1
                 else:
+                    if item_write.was_restored(new_id):
+                        # insert_item restored a trashed twin, which may
+                        # already have copies — same rule as a matched row.
+                        row_drops.update((c, "existing_item") for c in acq_given)
+                    elif norm.get("copy") and owned:
+                        # The new item's first copy, so it is the primary;
+                        # no location_id, so add_copy never writes back
+                        # through the location seam (G96). No BEGIN
+                        # IMMEDIATE (G18): the item was inserted a moment ago
+                        # on this connection, in this still-open write
+                        # transaction, so no other writer can see it, let
+                        # alone add a copy to it. Every value was parsed in
+                        # the normalizer, so nothing here can raise on bad
+                        # file data (G85), and the copy commits with the item
+                        # (G118).
+                        item_copies.add_copy(db, new_id, norm["copy"])
                     if isbn_val:
                         new_item_ids.append(new_id)
                     imported += 1
@@ -365,6 +439,11 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 errors.append(f"Row {i}: {e}")
             except Exception as e:
                 errors.append(f"Row {i}: {e}")
+
+    dropped = sorted(
+        {(c, "unmapped") for c in nonblank - reading_imports.CONSUMED_COLUMNS[fmt]}
+        | row_drops
+    )
 
     covers_queued = 0
     if enrich_covers and new_item_ids and not os.environ.get("SHELF_DISABLE_COVER_ENRICH"):
@@ -396,7 +475,20 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
         "error_count": len(errors),
         "format": fmt,
         "covers_queued": covers_queued,
+        # Columns that held data and were not imported, as codes the import
+        # card turns into words (G58): `unmapped` (this format does not read
+        # the column), `existing_item` (LibraryThing acquisition data on a
+        # row that matched an item already in Shelf), `game_platform` (a
+        # Libib game's `creators`).
+        "dropped": [{"column": c, "reason": r} for c, r in dropped],
     }
+
+# LibraryThing columns that land on a new item's copy (normalize_librarything's
+# `copy`), and are reported as `existing_item` on any other row.
+_LT_ACQUISITION_COLUMNS = (
+    "acquired", "date_acquired", "from_where", "purchase_price", "condition",
+)
+
 
 def _resolve_state(norm: dict, to_read_wishlist: bool,
                    tracker: bool) -> tuple[bool, bool, bool, bool]:

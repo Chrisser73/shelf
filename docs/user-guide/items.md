@@ -85,7 +85,9 @@ its home.
   describing them. An item with more than one copy shows a **Copies** list
   instead of the single Location line: one row per copy with its location, its
   position on that shelf, and whatever condition, acquisition and provenance
-  detail that copy carries. One copy still shows the single line.
+  detail that copy carries. One copy still shows the single line, followed by
+  the same detail — or "No location" and its detail, for a copy that has
+  a condition or price but no shelf yet (a LibraryThing import can make one).
 
   **Add copy** records a second (or third) of the same title — two copies of a
   novel on different shelves, a reading copy and a signed one. Pick a location

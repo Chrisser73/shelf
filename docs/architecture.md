@@ -1485,7 +1485,8 @@ path — never by basename — with its reason at the entry. On the **items** si
 - the four historical backfills inside the append-only `MIGRATIONS` tuple, which
   ran against the table at a past schema version;
 - `_find_item_by_barcode`'s two lookups (`routers/items.py`) and the CSV dedup
-  pair (`routers/items_csv.py`) — the existing-item scan and import paths must
+  reads (`routers/items_csv.py` — ISBN, UPC for an ISBN-less row, then
+  title/author) — the existing-item scan and import paths must
   still *see* a soft-deleted row, so that a restore can match on it rather
   than creating a duplicate. CSV import now restores through it, ordering live
   rows first;
