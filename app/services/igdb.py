@@ -51,6 +51,7 @@ PLATFORM_IDS = {
     "wii": 5,
     "wiiu": 41,
     "switch": 130,
+    "switch2": 508,
     "gameboy": 33,
     "gba": 24,
     "nds": 20,

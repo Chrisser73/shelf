@@ -184,6 +184,7 @@ GAME_PLATFORMS = {
     "wii": "Wii",
     "wiiu": "Wii U",
     "switch": "Nintendo Switch",
+    "switch2": "Nintendo Switch 2",
     "gameboy": "Game Boy",
     "gba": "Game Boy Advance",
     "nds": "Nintendo DS",
@@ -335,6 +336,7 @@ DEFAULT_PAGE_SIZE = 60
 SECRET_KEY = os.environ.get("SECRET_KEY", "")  # auto-generated into DATA_DIR/signing.key if empty
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_SECONDS = 7 * 24 * 3600  # 7 days
+REMEMBER_ME_EXPIRY_SECONDS = 30 * 24 * 3600  # 30 days
 
 # API secret env var overrides (take priority over DB settings when set)
 # Map: settings key -> env var name

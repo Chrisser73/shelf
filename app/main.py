@@ -37,6 +37,7 @@ logging.getLogger("app").addHandler(_db_handler)
 logger = logging.getLogger(__name__)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -447,7 +448,22 @@ def strip_html(value: str) -> str:
     value = re.sub(r"\n{3,}", "\n\n", value)
     return html_mod.unescape(value).strip()
 
+
+def highlight_search(value: str, query: str) -> Markup:
+    """Escape text and mark every case-insensitive literal search match."""
+    text = str(value or "")
+    needle = (query or "").strip()
+    if not needle:
+        return Markup(escape(text))
+    parts = re.split(f"({re.escape(needle)})", text, flags=re.IGNORECASE)
+    return Markup("".join(
+        f'<mark class="bg-shelf-accent/80 text-white rounded px-0.5">{escape(part)}</mark>'
+        if index % 2 else str(escape(part))
+        for index, part in enumerate(parts)
+    ))
+
 templates.env.filters["strip_html"] = strip_html
+templates.env.filters["highlight_search"] = highlight_search
 templates.env.filters["money"] = format_money
 templates.env.globals["currency"] = get_currency
 templates.env.globals["currencies"] = CURRENCIES

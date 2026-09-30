@@ -18,7 +18,7 @@ from app.auth import require_role
 from app.config import COVERS_DIR, HTTP_TIMEOUT
 from app.database import get_db, get_setting
 from app.routers import items_common
-from app.services import covers, cover_queue, manual_cover, openlibrary, scan_outcome
+from app.services import covers, cover_queue, item_write, manual_cover, openlibrary, scan_outcome
 from app.services import isbn as isbn_svc
 
 logger = logging.getLogger(__name__)
@@ -136,12 +136,13 @@ def _cover_search_credentials(db, media_type: str | None) -> dict[str, str]:
 
 
 @router.get("/items/{item_id}/cover-search")
-async def cover_search(request: Request, item_id: int, query: str | None = None, _=Depends(require_role("editor"))):
+async def cover_search(request: Request, item_id: int, query: str | None = None,
+                       use_alternate: bool = False, _=Depends(require_role("editor"))):
     """Search for cover candidates by title/author. Returns HTMX fragment."""
     templates = request.app.state.templates
     with get_db() as db:
         item = db.execute(
-            "SELECT title, authors, cover_path, media_type, publish_year, platform "
+            "SELECT title, alternate_title, authors, cover_path, media_type, publish_year, platform "
             "FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         # Key-by-key through get_setting, never the bulk settings accessor:
@@ -151,14 +152,19 @@ async def cover_search(request: Request, item_id: int, query: str | None = None,
         creds = {} if not item else _cover_search_credentials(db, item["media_type"])
     if not item:
         return HTMLResponse("Not found", status_code=404)
+    item = dict(item)
+    item["alternate_title"] = item_write.repair_malformed_unicode(item.get("alternate_title"))
 
-    search_query = (query or "").strip() or item["title"]
+    search_query = (query or "").strip()
+    if not search_query and use_alternate:
+        search_query = (item["alternate_title"] or "").strip()
+    search_query = search_query or item["title"]
 
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         result = await covers.search_covers(item, search_query, client, creds=creds)
 
     search_status, search_provider = _search_status(result)
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request, "fragments/cover_search.html",
         {
             "candidates": result.payload or [],
@@ -166,11 +172,15 @@ async def cover_search(request: Request, item_id: int, query: str | None = None,
             "cover_path": item["cover_path"],
             "media_type": item["media_type"],
             "query": search_query,
+            "alternate_title": item["alternate_title"],
             "search_note": _search_note(item["media_type"], creds),
             "search_status": search_status,
             "search_provider": search_provider,
         },
     )
+    if not result.payload and not _search_note(item["media_type"], creds) and not search_status:
+        response.headers["HX-Trigger"] = items_common._toast_header("No covers found for this title", "error")
+    return response
 
 @router.post("/items/{item_id}/cover-select")
 async def cover_select(
@@ -195,7 +205,7 @@ async def cover_select(
     templates = request.app.state.templates
     with get_db() as db:
         item = db.execute(
-            "SELECT title, authors, cover_path, media_type, publish_year, platform "
+            "SELECT title, alternate_title, authors, cover_path, media_type, publish_year, platform "
             "FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         # Same key-by-key build as cover_search — this failure path re-renders
@@ -219,6 +229,7 @@ async def cover_select(
             "cover_path": item["cover_path"],
             "media_type": item["media_type"],
             "query": search_query,
+            "alternate_title": item["alternate_title"],
             "search_note": _search_note(item["media_type"], creds),
             "search_status": search_status,
             "search_provider": search_provider,

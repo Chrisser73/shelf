@@ -49,7 +49,7 @@ class TestStorePage:
     def test_manifest_served(self, admin_client):
         resp = admin_client.get("/static/manifest.webmanifest")
         assert resp.status_code == 200
-        assert '"start_url": "/store"' in resp.text
+        assert '"start_url": "/"' in resp.text
 
 
 class TestSwPrecacheDigest:

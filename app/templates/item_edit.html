@@ -97,6 +97,7 @@
             </div>
 
             {{ field("title", "Title", item.title) }}
+            {{ field("alternate_title", "Alternate name", item.alternate_title) }}
             {{ field("subtitle", "Subtitle", item.subtitle) }}
             {{ field("authors", creator_label(item.media_type), item.authors) }}
 
@@ -115,7 +116,7 @@
                 {{ field("publish_year", "Year", item.publish_year, type="number") }}
             </div>
 
-            <div data-media-types="book audiobook ebook comic manga" data-always-visible="{{ 'true' if item.language else 'false' }}">
+            <div data-media-types="book audiobook ebook comic manga video_game dvd cd vinyl cassette" data-always-visible="{{ 'true' if item.language else 'false' }}">
                 <label for="language" class="block text-sm font-medium text-shelf-muted mb-1">Language</label>
                 <select id="language" name="language"
                         class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
@@ -364,6 +365,17 @@
                     {% for key, label in game_platforms.items() %}
                     <option value="{{ key }}" {% if item.platform == key %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
+                </select>
+            </div>
+
+            <div data-media-types="video_game" data-always-visible="{{ 'true' if item.region else 'false' }}">
+                <label for="region" class="block text-sm font-medium text-shelf-muted mb-1">Region</label>
+                <select id="region" name="region" class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                    <option value="unknown" {% if item.region == 'unknown' %}selected{% endif %}>Unknown</option>
+                    <option value="PAL" {% if item.region == 'PAL' %}selected{% endif %}>PAL</option>
+                    <option value="NTSC" {% if item.region == 'NTSC' %}selected{% endif %}>NTSC</option>
+                    <option value="NTSC-J" {% if item.region == 'NTSC-J' %}selected{% endif %}>NTSC-J</option>
+                    <option value="PAL-M" {% if item.region == 'PAL-M' %}selected{% endif %}>PAL-M</option>
                 </select>
             </div>
 

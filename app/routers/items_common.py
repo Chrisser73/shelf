@@ -66,6 +66,8 @@ SORT_OPTIONS = {
     "pages_desc": ("Pages most", "i.page_count DESC, i.title COLLATE NOCASE ASC"),
     "language": ("Language", "i.language COLLATE NOCASE ASC, i.title COLLATE NOCASE ASC"),
     "language_desc": ("Language Z–A", "i.language COLLATE NOCASE DESC, i.title COLLATE NOCASE ASC"),
+    "region": ("Region", "i.region COLLATE NOCASE ASC, i.title COLLATE NOCASE ASC"),
+    "region_desc": ("Region Z–A", "i.region COLLATE NOCASE DESC, i.title COLLATE NOCASE ASC"),
     "identifier": ("ISBN/UPC", "COALESCE(i.isbn, i.upc) COLLATE NOCASE ASC, i.title COLLATE NOCASE ASC"),
     "identifier_desc": ("ISBN/UPC Z–A", "COALESCE(i.isbn, i.upc) COLLATE NOCASE DESC, i.title COLLATE NOCASE ASC"),
     "year_desc": ("Year (Newest)", "(i.publish_year IS NULL), i.publish_year DESC, i.title COLLATE NOCASE ASC"),

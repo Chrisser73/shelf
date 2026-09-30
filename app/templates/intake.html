@@ -196,13 +196,12 @@
                         <span x-show="book.existing" x-cloak class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-warning/90 text-black shrink-0">exists</span>
                     </div>
                     <div class="col-start-2 flex flex-wrap gap-2">
-                    <input x-show="book.media_type !== 'video_game'" type="text" :value="book.authors" @input="setBookAuthors(i, $event.target.value)" placeholder="Author"
+                    <input type="text" :value="book.alternate_title" @input="setBookAlternateTitle(i, $event.target.value)" placeholder="Alternate name"
                            class="flex-1 min-w-0 lg:flex-none lg:w-40 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
-                    <input x-show="book.media_type === 'video_game'" type="text" :value="book.publisher" @input="setBookPublisher(i, $event.target.value)" placeholder="Publisher"
-                           class="flex-1 min-w-0 lg:flex-none lg:w-40 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
-                    <input x-show="book.media_type !== 'video_game'" type="text" :value="book.isbn" @input="setBookIsbn(i, $event.target.value)" placeholder="ISBN"
                     <input type="text" :value="book.authors" @input="setBookAuthors(i, $event.target.value)" :placeholder="creatorLabelFor(book.media_type)"
                            data-testid="intake-authors"
+                           class="flex-1 min-w-0 lg:flex-none lg:w-32 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
+                    <input type="text" :value="book.publisher" @input="setBookPublisher(i, $event.target.value)" placeholder="Publisher"
                            class="flex-1 min-w-0 lg:flex-none lg:w-32 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
                     <input type="text" :value="book.isbn" @input="setBookIsbn(i, $event.target.value)" placeholder="ISBN"
                            inputmode="numeric" data-testid="intake-isbn"
@@ -223,6 +222,15 @@
                     <select x-show="book.media_type === 'video_game'" :value="book.collector_condition" @change="setBookCollectorCondition(i, $event.target.value)"
                             aria-label="Collector state" class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
                         <option value="">State</option><option value="cib">CIB</option><option value="boxed">Boxed</option><option value="loose">Loose</option>
+                    </select>
+                    <select :value="book.language" @change="setBookLanguage(i, $event.target.value)" aria-label="Language"
+                            class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
+                        <option value="">Language</option>
+                        {% for code, label in search_langs.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+                    </select>
+                    <select x-show="book.media_type === 'video_game'" :value="book.region" @change="setBookRegion(i, $event.target.value)" aria-label="Region"
+                            class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-1.5 text-sm text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
+                        <option value="">Region</option><option value="unknown">Unknown</option><option value="PAL">PAL</option><option value="NTSC">NTSC</option><option value="NTSC-J">NTSC-J</option><option value="PAL-M">PAL-M</option>
                     </select>
                     </div>
                     <p x-show="book.existing" class="col-start-2 text-xs text-shelf-warning">Already in collection — unchecked for safety. Select only if you want to replace it.</p>

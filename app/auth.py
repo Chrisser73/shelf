@@ -9,7 +9,10 @@ import jwt
 from fastapi import Request, Response
 from fastapi.responses import RedirectResponse, HTMLResponse
 
-from app.config import SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRY_SECONDS
+from app.config import (
+    SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRY_SECONDS,
+    REMEMBER_ME_EXPIRY_SECONDS,
+)
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -167,7 +170,14 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
-def create_token(user_id: int, username: str, role: str, display_name: str | None = None, token_version: int = 1) -> str:
+def create_token(
+    user_id: int,
+    username: str,
+    role: str,
+    display_name: str | None = None,
+    token_version: int = 1,
+    expiry_seconds: int = JWT_EXPIRY_SECONDS,
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
@@ -176,7 +186,7 @@ def create_token(user_id: int, username: str, role: str, display_name: str | Non
         "display_name": display_name or username,
         "tv": token_version,
         "iat": now,
-        "exp": now + timedelta(seconds=JWT_EXPIRY_SECONDS),
+        "exp": now + timedelta(seconds=expiry_seconds),
     }
     return jwt.encode(payload, get_secret_key(), algorithm=JWT_ALGORITHM)
 
@@ -192,6 +202,16 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
+def _token_lifetime(token: str) -> int:
+    """Return a signed token's own lifetime, falling back to the normal week."""
+    payload = decode_token(token) or {}
+    try:
+        lifetime = int(payload["exp"] - payload["iat"])
+    except (KeyError, TypeError, ValueError):
+        return JWT_EXPIRY_SECONDS
+    return REMEMBER_ME_EXPIRY_SECONDS if lifetime >= REMEMBER_ME_EXPIRY_SECONDS else JWT_EXPIRY_SECONDS
+
+
 def set_auth_cookie(request: Request, response: Response, token: str, csrf_token: str | None = None) -> None:
     # The browser-facing scheme: uvicorn rewrites it from X-Forwarded-Proto only
     # for SHELF_TRUST_PROXY peers, so an untrusted peer cannot claim https.
@@ -202,7 +222,7 @@ def set_auth_cookie(request: Request, response: Response, token: str, csrf_token
         httponly=True,
         secure=secure,
         samesite="strict",
-        max_age=JWT_EXPIRY_SECONDS,
+        max_age=_token_lifetime(token),
         path="/",
     )
     # Set a paired CSRF token cookie (readable by JS for double-submit)
@@ -214,7 +234,7 @@ def set_auth_cookie(request: Request, response: Response, token: str, csrf_token
         httponly=False,
         secure=secure,
         samesite="strict",
-        max_age=JWT_EXPIRY_SECONDS,
+        max_age=_token_lifetime(token),
         path="/",
     )
 
@@ -273,6 +293,7 @@ def should_refresh_token(request: Request, user: dict) -> str | None:
     if now > iat + half_life:
         return create_token(
             user["id"], user["username"], user["role"], user["display_name"], user["token_version"],
+            expiry_seconds=REMEMBER_ME_EXPIRY_SECONDS if (exp - iat) >= REMEMBER_ME_EXPIRY_SECONDS else JWT_EXPIRY_SECONDS,
         )
     return None
 

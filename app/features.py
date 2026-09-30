@@ -555,7 +555,7 @@ def _refusal(request, key: str):
     return disabled_page(request, key)
 
 
-def require_feature(key: str):
+def require_feature(key: str, *, redirect_page_to_home: bool = False):
     """A route dependency refusing the request while `key` is turned off.
 
     Declare it after the route's `require_role`: the role answer comes first,
@@ -570,6 +570,9 @@ def require_feature(key: str):
         if feature_enabled(key):
             return
         from app.auth import _ResponseException
+        if redirect_page_to_home and request.headers.get("sec-fetch-mode") == "navigate":
+            from fastapi.responses import RedirectResponse
+            raise _ResponseException(RedirectResponse(url="/", status_code=303))
         raise _ResponseException(_refusal(request, key))
 
     _dependency.feature_key = key

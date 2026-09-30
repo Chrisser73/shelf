@@ -771,8 +771,6 @@
                     <input type="password" id="anthropic_api_key" name="anthropic_api_key" x-ref="anthropicApiKey" autocomplete="new-password"
                            placeholder="{% if secrets_saved['anthropic_api_key'] %}Saved — leave blank to keep{% else %}sk-ant-...{% endif %}"
                            class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
-                    <p class="text-xs text-shelf-muted mt-1">Get one at console.anthropic.com. Stored encrypted; only used server-side.</p>
-                    <p class="text-xs text-shelf-muted mt-1">Expiry: Anthropic does not expose an expiry date for an API key. Rotate or revoke it in the Anthropic Console when needed.</p>
                     {% if secrets_saved['anthropic_api_key'] %}
                     <label class="flex items-center gap-2 text-xs text-shelf-muted mt-1">
                         <input type="checkbox" name="clear_anthropic_api_key" class="rounded border-shelf-border"> Remove saved key
@@ -813,7 +811,6 @@
                            placeholder="{% if secrets_saved['openai_api_key'] %}Saved — leave blank to keep{% else %}sk-...{% endif %}"
                            class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                     <p class="text-xs text-shelf-muted mt-1">Stored encrypted; only used server-side. Local servers that need no key can leave this blank.</p>
-                    <p class="text-xs text-shelf-muted mt-1">Expiry: the normal OpenAI API key cannot report an expiry date. Manage rotation or revocation in the OpenAI Platform.</p>
                     {% if secrets_saved['openai_api_key'] %}
                     <label class="flex items-center gap-2 text-xs text-shelf-muted mt-1">
                         <input type="checkbox" name="clear_openai_api_key" class="rounded border-shelf-border"> Remove saved key

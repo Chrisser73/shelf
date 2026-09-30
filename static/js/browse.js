@@ -6,6 +6,8 @@ function browsePage() {
         bulkLocationVal: '',
         bulkTypeVal: '',
         bulkStatusVal: '',
+        bulkLanguageVal: '',
+        bulkRegionVal: '',
         bulkWishlistVal: '',
         bulkSeriesVal: '',
         bulkTagVal: '',
@@ -304,6 +306,7 @@ function browsePage() {
                 status: ['status', 'status_desc'], value: ['value', 'value_desc'],
                 series: ['series', 'series_desc'], pages: ['pages', 'pages_desc'],
                 language: ['language', 'language_desc'], added: ['oldest', 'newest'],
+                region: ['region', 'region_desc'],
                 identifier: ['identifier', 'identifier_desc']
             };
             var pair = sorts[column];
@@ -478,6 +481,11 @@ function browsePage() {
         // anchor markup, which never reaches this handler).
         openOrToggle(id, url, event) {
             if (this.selectMode) { this.toggleItem(id); return; }
+            // Carry a normalized Browse query to the detail page. This makes
+            // “Back to collection” return to the exact filtered result set,
+            // rather than relying on tab-scoped session storage.
+            var query = window.location.search.slice(1);
+            if (query) url += '?browse=' + encodeURIComponent(query);
             if (event && (event.ctrlKey || event.metaKey)) window.open(url, '_blank');
             else window.location = url;
         },
