@@ -732,6 +732,9 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
         settings["show_collector_condition_in_collection"] = get_preference(
             db, request.state.user["id"], "show_collector_condition_in_collection"
         )
+        settings["show_region_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_region_in_collection"
+        )
         settings["default_location_id"] = get_preference(
             db, request.state.user["id"], "default_location_id"
         )

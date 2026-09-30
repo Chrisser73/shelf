@@ -14,7 +14,7 @@
 // (scripts/stamp_sw_version.py) and verified by `make checks-fast`. Changing a
 // precached file therefore renames the cache on its own, which is what makes
 // activate() purge the stale one.
-const SW_VERSION = 'v9ead3aa4';
+const SW_VERSION = 'v22f9ac36';
 const CACHE = `shelf-store-${SW_VERSION}`;
 
 const PRECACHE = [
