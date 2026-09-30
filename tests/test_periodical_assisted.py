@@ -251,6 +251,80 @@ def test_assisted_confirm_preserves_0451_trash_restore(admin_client, db):
     ).fetchone()[0] == 1
 
 
+def test_same_title_different_issn_stay_separate_publications(admin_client, db):
+    """Two same-titled magazines (Wired US/UK) must not merge ISSNs (issue #138)."""
+    first = admin_client.post(
+        "/api/periodicals/confirm",
+        data={
+            "raw_barcode": BARCODE,
+            "publication_title": "Wired",
+            "issue_number": "1",
+            "issue_date": "2026-01-01",
+            "mode": "add",
+        },
+        follow_redirects=False,
+    )
+    assert first.status_code == 303
+
+    # Same EAN, different add-on supplement: a different physical issue, so
+    # this must not trip the barcode-identity duplicate check (which is
+    # blind to publication) the way reusing BARCODE outright would.
+    second_barcode = BARCODE[:13] + "07"
+    second = admin_client.post(
+        "/api/periodicals/confirm",
+        data={
+            "raw_barcode": second_barcode,
+            "publication_title": "Wired",
+            "publication_issn": "2049-3630",
+            "issue_number": "2",
+            "issue_date": "2026-02-01",
+            "mode": "add",
+        },
+        follow_redirects=False,
+    )
+    assert second.status_code == 303
+
+    serial = periodicals.parse_barcode(BARCODE)
+    publications = db.execute(
+        "SELECT id, issn FROM periodical_publications WHERE title = 'Wired' ORDER BY id"
+    ).fetchall()
+    assert len(publications) == 2
+    issns = {row["issn"] for row in publications}
+    assert issns == {serial.issn, "2049-3630"}
+
+    second_publication_id = next(row["id"] for row in publications if row["issn"] == "2049-3630")
+    newest_issue = db.execute(
+        "SELECT publication_id FROM periodical_issues ORDER BY item_id DESC LIMIT 1"
+    ).fetchone()
+    assert newest_issue["publication_id"] == second_publication_id
+
+
+def test_reconfirming_an_owned_issue_with_another_issn_writes_no_publication(admin_client, db):
+    """A duplicate re-confirm redirects before any publication write (issue #138)."""
+    data = {
+        "raw_barcode": BARCODE,
+        "publication_title": "Wired",
+        "issue_number": "1",
+        "issue_date": "2026-01-01",
+        "mode": "add",
+    }
+    first = admin_client.post("/api/periodicals/confirm", data=data, follow_redirects=False)
+    assert first.status_code == 303
+    first_item = db.execute("SELECT item_id FROM periodical_issues").fetchone()["item_id"]
+
+    again = admin_client.post(
+        "/api/periodicals/confirm",
+        data={**data, "publication_issn": "2049-3630"},
+        follow_redirects=False,
+    )
+
+    serial = periodicals.parse_barcode(BARCODE)
+    assert again.status_code == 303
+    assert again.headers["location"] == f"/item/{first_item}"
+    publications = db.execute("SELECT issn FROM periodical_publications").fetchall()
+    assert [row["issn"] for row in publications] == [serial.issn]
+
+
 def test_invalid_confirmed_issn_refuses_write(admin_client, db):
     response = admin_client.post(
         "/api/periodicals/confirm",

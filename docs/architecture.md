@@ -354,6 +354,10 @@ not grow a column per family:
   `UNIQUE COLLATE NOCASE` ISSN; `periodical_issues` is 1:1 with `items` and
   points at it. So a run of one magazine is one publication row and many item
   rows, which is the whole reason the family is modelled separately from books.
+  The ISSN is the publication's identity: a stored ISSN is never replaced
+  by a different one, and a title match only lets an ISSN-less publication
+  adopt its first ISSN. So same-titled editions — the US and UK *Wired* —
+  stay separate publications.
   The family is named rather than hardcoded to `magazine` so journals and
   newspapers can join it without every consumer being rewritten.
 

@@ -6,6 +6,38 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.61.1] - 2026-09-30
+
+Two editions of a magazine that share a title — the US and UK *Wired*, say —
+were merged into one publication. Confirming an issue of the second edition
+rewrote the first edition's ISSN and filed the issue under it, and the next
+issue of the first edition swapped the ISSN back. Each edition now stays its
+own publication.
+
+### Fixed
+
+- **Same-titled editions stay separate publications.** A publication is
+  identified by its ISSN. A title match is now used only when a publication has
+  no ISSN yet, so an ISSN already stored is never replaced by a different one,
+  and each issue lands under the publication its ISSN names. Both editions
+  appear on the Periodicals page with their own ISSN beside the title.
+- **Re-confirming an issue you already own no longer rewrites its
+  publication's ISSN.** When the confirmation card carried a different ISSN
+  from the one stored, Shelf opened the existing issue but first overwrote the
+  publication's ISSN with the card's. It now checks for the existing issue
+  first and opens it without writing anything.
+
+### Changed
+
+- **Re-confirming an issue you already own leaves its publication untouched.**
+  Previously the publication's title, publisher and language were updated from
+  the card on the way to opening the existing issue. They now change only when
+  a new issue is added.
+
+Publications that were already merged are not split automatically. An issue's
+barcode cannot tell a merge apart from an ISSN you corrected on purpose, so
+Shelf does not guess.
+
 ## [0.61.0] - 2026-09-30
 
 Shelf knew what you finished and added each month, but the only way to show
@@ -4755,6 +4787,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.61.1]: https://github.com/dgahagan/shelf/releases/tag/v0.61.1
 [0.61.0]: https://github.com/dgahagan/shelf/releases/tag/v0.61.0
 [0.60.0]: https://github.com/dgahagan/shelf/releases/tag/v0.60.0
 [0.59.0]: https://github.com/dgahagan/shelf/releases/tag/v0.59.0

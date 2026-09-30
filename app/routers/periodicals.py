@@ -265,16 +265,15 @@ async def confirm_periodical_issue(
         # 977-derived hint is misleading.
         confirmed_issn = periodicals.normalise_issn(publication_issn) or serial.issn
         with get_db() as db:
-            publication_id = periodical_records.upsert_publication(
-                db,
-                title=publication_title,
-                issn=confirmed_issn,
-                publisher=publisher.strip() or None,
-                language=language.strip() or None,
+            # Look up before writing: a re-confirmed issue redirects without
+            # touching any publication, so an overridden ISSN cannot leave an
+            # empty publication behind.
+            known_publication_id = periodical_records.find_publication(
+                db, title=publication_title, issn=confirmed_issn
             )
             existing_id = periodical_records.find_duplicate_issue(
                 db,
-                publication_id,
+                known_publication_id,
                 volume=volume,
                 issue_number=issue_number,
                 issue_date=issue_date,
@@ -287,6 +286,14 @@ async def confirm_periodical_issue(
                 # Browse cannot, so restore it before redirecting to its item page.
                 item_write.restore_item(db, existing_id)
                 return RedirectResponse(f"/item/{existing_id}", status_code=303)
+
+            publication_id = periodical_records.upsert_publication(
+                db,
+                title=publication_title,
+                issn=confirmed_issn,
+                publisher=publisher.strip() or None,
+                language=language.strip() or None,
+            )
 
             item_id = insert_item(
                 db,

@@ -5828,6 +5828,34 @@ grep -n "iterdir" tests/test_vendor_integrity.py
 - **Status:** documented. The tests are the lint. This entry exists so
   `/impl-plan` names the files.
 
+## G133 — When a test confirms two periodical issues with the same barcode
+
+- **Rule:** give each `POST /api/periodicals/confirm` in one test its own
+  **EAN and supplement pair**. Keeping the EAN and changing the two-digit
+  supplement is enough (`BARCODE[:13] + "07"`). A distinct `issue_number`,
+  `issue_date` or `publication_issn` does **not** make the second POST a new
+  issue.
+- **Why:** `find_duplicate_issue` tries the barcode strategy first
+  (`barcode_ean` + `barcode_supplement`), and that strategy does not filter by
+  `publication_id`. That is deliberate: one printed barcode is one physical
+  issue, even after the user corrects the ISSN. So the second POST returns
+  `303` to the **first** item, writes no publication, and never links a new
+  issue — and a test asserting on the second issue reads state the route
+  never reached.
+- **Evidence:** `feat/issue-138-periodical-issn-identity`, 2026-09-30
+  (`b108bfa`). The impl plan specified distinct issue numbers only, and the
+  builder caught the redirect before writing the assertion. The same path
+  hid a real defect until `b723bea`: the route wrote the publication *before*
+  the duplicate check, so the redirect left an empty publication behind.
+- **Verify:**
+
+```bash
+grep -n "WHERE pi.barcode_ean = ? AND pi.barcode_supplement = ?" app/services/periodical_records.py
+```
+
+- **Status:** documented. Retire it if the barcode strategy becomes scoped
+  to a publication.
+
 ## Graveyard
 
 Retired entries land here with a one-line reason (refactored away, lint

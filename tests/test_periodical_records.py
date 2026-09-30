@@ -107,6 +107,59 @@ def test_full_977_barcode_plus_supplement_identifies_concrete_issue(db):
     ) == item_id
 
 
+def test_same_title_different_issn_keeps_separate_publications(db):
+    """Interleaved scans of two same-titled magazines must not merge (issue #138)."""
+    wired_us = "1059-1028"
+    wired_uk = "1357-0978"
+
+    first_id = periodical_records.upsert_publication(db, title="Wired", issn=wired_us)
+    second_id = periodical_records.upsert_publication(db, title="Wired", issn=wired_uk)
+    third_id = periodical_records.upsert_publication(db, title="Wired", issn=wired_us)
+
+    assert first_id == third_id
+    assert second_id != first_id
+
+    issns = {
+        row["issn"]
+        for row in db.execute(
+            "SELECT issn FROM periodical_publications WHERE title = 'Wired'"
+        ).fetchall()
+    }
+    assert issns == {wired_us, wired_uk}
+
+
+def test_title_match_lets_issn_less_row_adopt_an_issn(db):
+    publication_id = db.execute(
+        "INSERT INTO periodical_publications (title, issn) VALUES ('Wired', NULL)"
+    ).lastrowid
+
+    adopted_id = periodical_records.upsert_publication(db, title="Wired", issn="1059-1028")
+
+    assert adopted_id == publication_id
+    row = db.execute(
+        "SELECT issn FROM periodical_publications WHERE id = ?", (publication_id,)
+    ).fetchone()
+    assert row["issn"] == "1059-1028"
+    assert db.execute(
+        "SELECT COUNT(*) FROM periodical_publications WHERE title = 'Wired'"
+    ).fetchone()[0] == 1
+
+
+def test_blank_issn_scan_reuses_existing_publication_without_clearing_issn(db):
+    publication_id = periodical_records.upsert_publication(db, title="Wired", issn="1059-1028")
+
+    reused_id = periodical_records.upsert_publication(db, title="Wired", issn=None)
+
+    assert reused_id == publication_id
+    row = db.execute(
+        "SELECT issn FROM periodical_publications WHERE id = ?", (publication_id,)
+    ).fetchone()
+    assert row["issn"] == "1059-1028"
+    assert db.execute(
+        "SELECT COUNT(*) FROM periodical_publications WHERE title = 'Wired'"
+    ).fetchone()[0] == 1
+
+
 def test_977_variant_is_not_guessed_as_issue_number(db):
     serial = periodicals.parse_barcode(POPULAR_SCIENCE_EAN)
     assert serial is not None

@@ -21,25 +21,15 @@ def normalise_issn(value: str | None) -> str | None:
     return f"{raw[:4]}-{raw[4:]}"
 
 
-def upsert_publication(
-    db,
-    *,
-    title: str,
-    issn: str | None = None,
-    publisher: str | None = None,
-    language: str | None = None,
-) -> int:
-    """Create or update one continuing publication identity.
+def find_publication(db, *, title: str, issn: str | None = None) -> int | None:
+    """Return the publication an upsert with these values would update, if any.
 
-    ISSN wins when present. Without an ISSN, case-insensitive title matching is
-    the conservative fallback so scanning another issue does not create a new
-    publication every time.
+    ISSN is the publication's identity. A title match is used only when the
+    incoming ISSN is blank, or to let an existing ISSN-less row adopt one; a
+    stored ISSN is never replaced by a different one.
     """
     title = (title or "").strip()
-    if not title:
-        raise ValueError("Periodical title is required")
     issn = normalise_issn(issn)
-
     row = None
     if issn:
         row = db.execute(
@@ -49,12 +39,28 @@ def upsert_publication(
     if row is None:
         row = db.execute(
             "SELECT id FROM periodical_publications WHERE title = ? COLLATE NOCASE "
-            "ORDER BY id LIMIT 1",
-            (title,),
+            "AND (? IS NULL OR issn IS NULL) ORDER BY id LIMIT 1",
+            (title, issn),
         ).fetchone()
+    return row["id"] if row else None
 
-    if row:
-        publication_id = row["id"]
+
+def upsert_publication(
+    db,
+    *,
+    title: str,
+    issn: str | None = None,
+    publisher: str | None = None,
+    language: str | None = None,
+) -> int:
+    """Create or update one continuing publication identity (see `find_publication`)."""
+    title = (title or "").strip()
+    if not title:
+        raise ValueError("Periodical title is required")
+    issn = normalise_issn(issn)
+
+    publication_id = find_publication(db, title=title, issn=issn)
+    if publication_id is not None:
         db.execute(
             "UPDATE periodical_publications SET "
             "title = ?, issn = COALESCE(?, issn), "
@@ -117,7 +123,7 @@ def link_issue(
 
 def find_duplicate_issue(
     db,
-    publication_id: int,
+    publication_id: int | None,
     *,
     volume: str | None = None,
     issue_number: str | None = None,
