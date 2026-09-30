@@ -27,6 +27,10 @@ only added or changed fork-specific features.
 - Platform coverage and metadata tooling were extended with Nintendo Switch 2,
   additional platform-logo mappings, provider connection status, and more
   resilient IGDB cover and game-metadata lookups.
+- Photo Intake now treats releases for different game platforms as distinct
+  physical editions when checking for an existing item. A Nintendo Switch scan
+  therefore cannot offer an identically named Nintendo Switch 2 entry for
+  replacement.
 
 ## V1.2.0.1 — Upgrade V1.2.1
 
