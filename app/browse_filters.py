@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
 
 from app.services import lists
+from app.services.search_text import fold as fold_search_text
 from urllib.parse import quote
 
 from markupsafe import Markup
@@ -82,9 +83,14 @@ def _column(column: str, cast: Callable[[str], object] = str) -> ConditionBuilde
 
 
 def _search(value):
-    like = f"%{value}%"
+    # SQLite LIKE is only accent-insensitive for ASCII.  Fold both sides so a
+    # natural prefix such as "Poke" still finds "Pokémon", while preserving
+    # the non-Latin characters users may search for verbatim.
+    like = f"%{fold_search_text(value)}%"
     return (
-        "(i.title LIKE ? OR i.alternate_title LIKE ? OR i.authors LIKE ? OR i.isbn LIKE ? OR i.narrator LIKE ?)",
+        "(search_fold(i.title) LIKE ? OR search_fold(i.alternate_title) LIKE ? "
+        "OR search_fold(i.authors) LIKE ? OR search_fold(i.isbn) LIKE ? "
+        "OR search_fold(i.narrator) LIKE ?)",
         [like, like, like, like, like],
     )
 

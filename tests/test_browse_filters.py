@@ -166,6 +166,15 @@ class TestBuildWhere:
         assert bf.build_where({"lent_out": "1"})[0] != ""
         assert bf.build_where({"lent_out": "0"}) == ("", [])
 
+    def test_search_folds_accents_without_losing_non_latin_titles(self, db):
+        db.execute(
+            "INSERT INTO items (title, isbn, media_type, source) VALUES (?, ?, ?, ?)",
+            ("Pokémon Shining Pearl", "9780000000026", "video_game", "test"),
+        )
+        where, params = bf.build_where({"q": "Poke"})
+        rows = db.execute(f"SELECT i.title FROM items_live i {where}", params).fetchall()
+        assert [row["title"] for row in rows] == ["Pokémon Shining Pearl"]
+
 
 class TestValuesFrom:
     def test_missing_keys_become_defaults(self):

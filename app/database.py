@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from typing import Sequence
 
 from app.config import DATABASE_PATH, COVERS_DIR
+from app.services.search_text import fold as fold_search_text
 
 logger = logging.getLogger(__name__)
 
@@ -1026,6 +1027,10 @@ def after_commit(conn, callback) -> None:
 def get_db():
     conn = sqlite3.connect(str(DATABASE_PATH), factory=_Connection)
     conn.row_factory = sqlite3.Row
+    # SQLite's built-in NOCASE/LIKE is ASCII-only, so e.g. a Collection search
+    # for "Poke" misses "Pokémon".  Register the shared Unicode fold on every
+    # connection; queries deliberately call it only for an active search.
+    conn.create_function("search_fold", 1, fold_search_text, deterministic=True)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     # The soft-delete read seam. Every read of items in app/ goes through this
