@@ -33,6 +33,18 @@
             </select>
             <button @click="bulkUpdate({reading_status: bulkStatusVal === '__clear__' ? '' : bulkStatusVal})" x-show="bulkStatusVal"
                     class="px-3 py-1 bg-shelf-accent text-white rounded-lg text-xs">Apply</button>
+            <select x-model="bulkLanguageVal" class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">
+                <option value="">Set language...</option>
+                {% for code, label in search_langs.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+                <option value="__clear__">Clear language</option>
+            </select>
+            <button @click="bulkUpdate({language: bulkLanguageVal === '__clear__' ? '' : bulkLanguageVal})" x-show="bulkLanguageVal"
+                    class="px-3 py-1 bg-shelf-accent text-white rounded-lg text-xs">Apply</button>
+            <select x-model="bulkRegionVal" class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">
+                <option value="">Set region...</option><option value="unknown">Unknown</option><option value="PAL">PAL</option><option value="NTSC">NTSC</option><option value="NTSC-J">NTSC-J</option><option value="PAL-M">PAL-M</option><option value="__clear__">Clear region</option>
+            </select>
+            <button @click="bulkUpdate({region: bulkRegionVal === '__clear__' ? '' : bulkRegionVal})" x-show="bulkRegionVal"
+                    class="px-3 py-1 bg-shelf-accent text-white rounded-lg text-xs">Apply</button>
             <select x-model="bulkWishlistVal" class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">
                 <option value="">Wishlist...</option>
                 <option value="add">Add to wishlist</option>
@@ -102,8 +114,9 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                 </button>
             </div>
-            <!-- Select mode -->
-            <div class="relative shrink-0">
+            <!-- Select mode stays here for the grid. In list view it moves to
+                 the Title header where selection is discovered more naturally. -->
+            <div class="relative shrink-0" x-show="viewMode !== 'list'">
                 <button @click="toggleSelectMode()"
                         @mouseenter="maybeShowSelectTip()"
                         @mouseleave="showSelectTip = false"
@@ -117,7 +130,7 @@
                     Tap items to select them for bulk actions such as moving, type/status/series changes, tagging, or deleting.
                 </div>
             </div>
-            <template x-if="selectMode">
+            <template x-if="selectMode && viewMode !== 'list'">
                 <div class="flex items-center gap-1">
                     <button @click="selectAll()" class="px-2 py-1 rounded text-xs text-shelf-muted hover:text-shelf-accent2 transition-colors">Select All</button>
                     <button @click="deselectAll()" x-show="selectedIds.length > 0" class="px-2 py-1 rounded text-xs text-shelf-muted hover:text-shelf-accent2 transition-colors">Deselect All</button>
@@ -130,7 +143,7 @@
                         :class="columnsOpen ? 'bg-shelf-accent/20 text-shelf-accent2' : 'bg-shelf-card text-shelf-muted'"
                         class="px-3 py-1 rounded-lg text-xs border border-shelf-border hover:border-shelf-accent/50 transition-colors"
                         data-testid="column-picker">
-                    Columns
+                    Edit Columns
                 </button>
                 <!-- Column visibility panel -->
                 <div x-show="columnsOpen" x-transition
@@ -184,7 +197,6 @@
             </div>
 
             {% set f = initial_filters or {} %}
-            <input type="hidden" name="cover_missing" value="{{ f.cover_missing or '' }}">
             <div class="basis-full flex flex-col lg:flex-row gap-6">
                 <div class="shrink-0">
                     <span class="mb-2 flex items-center gap-2 text-sm font-medium text-shelf-muted"><i data-lucide="arrow-down-up" class="w-4 h-4" aria-hidden="true"></i>Sort by</span>
@@ -265,6 +277,14 @@
             </select>
             {% endif %}
 
+            <select id="missing-cover-filter" name="cover_missing"
+                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+                    hx-include="{{ filter_includes('cover_missing') }}"
+                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <option value="" {{ 'selected' if not f.cover_missing else '' }}>All covers</option>
+                <option value="1" {{ 'selected' if f.cover_missing == '1' else '' }}>Missing cover</option>
+            </select>
+
             <!-- Reading Status Filter -->
             {% set sl = status_labels(active_type or none) %}
             <select id="reading-status-filter" name="reading_status"
@@ -320,6 +340,19 @@
             </select>
             {% endif %}
 
+            <!-- Region Filter (only when games have a stored region) -->
+            {% if item_regions %}
+            <select id="region-filter" name="region"
+                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+                    hx-include="{{ filter_includes('region') }}"
+                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <option value="" {{ 'selected' if not f.region else '' }}>All Regions</option>
+                {% for region in item_regions %}
+                <option value="{{ region }}" {{ 'selected' if f.region == region else '' }}>{{ region|upper }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
+
             <!-- Source Filter (how the item arrived: a provider, a sync, a scan by hand) -->
             <select id="source-filter" name="source_filter" data-testid="source-filter"
                     hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
@@ -335,20 +368,6 @@
                 {% endif %}
             </select>
 
-            <!-- Sort -->
-            <select name="sort"
-                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
-                    hx-include="{{ filter_includes('sort') }}"
-                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
-                <option value="newest" {{ 'selected' if f.sort == 'newest' or not f.sort else '' }}>Most Recent</option>
-                <option value="oldest" {{ 'selected' if f.sort == 'oldest' else '' }}>Oldest First</option>
-                <option value="title_asc" {{ 'selected' if f.sort == 'title_asc' else '' }}>Title A–Z</option>
-                <option value="title_desc" {{ 'selected' if f.sort == 'title_desc' else '' }}>Title Z–A</option>
-                {# Re-rendered out of band by every page-1 search (filter_counts_oob.html). #}
-                <option id="sort-option-author" value="author" {{ 'selected' if f.sort == 'author' else '' }}>{{ browse_creator_label(f.media_type_filter) }}</option>
-                <option value="year_desc" {{ 'selected' if f.sort == 'year_desc' else '' }}>Year (Newest)</option>
-                <option value="year_asc" {{ 'selected' if f.sort == 'year_asc' else '' }}>Year (Oldest)</option>
-            </select>
                     </div>
                 </div>
             </div>

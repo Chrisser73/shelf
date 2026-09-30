@@ -6,7 +6,9 @@ from pathlib import Path
 
 
 SVG_DIRECTORY = Path(__file__).resolve().parents[2] / "static" / "icons" / "platforms"
+SHELF_SVG_DIRECTORY = Path(__file__).resolve().parents[2] / "static" / "icons" / "platforms-shelf"
 SVG_PREFIX = "icons/platforms/"
+SHELF_SVG_PREFIX = "icons/platforms-shelf/"
 LEGACY_SVG_PREFIX = "icons/svg/"
 
 # First guesses only: a saved Settings mapping always takes precedence.
@@ -21,6 +23,7 @@ DEFAULT_PLATFORM_LOGOS = {
     "wii": "nintendo_wii.svg",
     "wiiu": "nintendo_wiiu.svg",
     "switch": "nintendo_switch.svg",
+    "switch2": "../platforms-shelf/switch2.svg",
     "gameboy": "nintendo_gameboy.svg",
     "gba": "nintendo_gameboy_advance.svg",
     "nds": "nintendo_ds.svg",
@@ -46,9 +49,12 @@ DEFAULT_PLATFORM_LOGOS = {
 
 def available_svg_paths() -> list[str]:
     """Every selectable, repo-bundled SVG as a path below ``/static``."""
-    if not SVG_DIRECTORY.is_dir():
-        return []
-    return [SVG_PREFIX + path.name for path in sorted(SVG_DIRECTORY.glob("*.svg"))]
+    paths = []
+    if SVG_DIRECTORY.is_dir():
+        paths.extend(SVG_PREFIX + path.name for path in sorted(SVG_DIRECTORY.glob("*.svg")))
+    if SHELF_SVG_DIRECTORY.is_dir():
+        paths.extend(SHELF_SVG_PREFIX + path.name for path in sorted(SHELF_SVG_DIRECTORY.glob("*.svg")))
+    return paths
 
 
 def available_svg_choices() -> list[dict[str, str]]:
@@ -76,6 +82,7 @@ def normalise_svg_path(value: str) -> str | None:
 def logo_path(platform_slug: str, saved_path: str | None = None) -> str | None:
     """The configured path, falling back to Shelf's first-guess mapping."""
     return normalise_svg_path(saved_path or "") or (
-        SVG_PREFIX + DEFAULT_PLATFORM_LOGOS[platform_slug]
-        if platform_slug in DEFAULT_PLATFORM_LOGOS else None
+        (SHELF_SVG_PREFIX + "switch2.svg") if platform_slug == "switch2" else
+        (SVG_PREFIX + DEFAULT_PLATFORM_LOGOS[platform_slug]
+         if platform_slug in DEFAULT_PLATFORM_LOGOS else None)
     )

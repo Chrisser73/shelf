@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 from urllib.parse import urlparse
 
 import httpx
@@ -348,11 +349,30 @@ async def _igdb_candidates(
         # the honest value; `_search_note` is what the user actually sees.
         return provider_result.no_credential("igdb")
     try:
-        result = await igdb.search_game_art(
-            query, cid, secret, client,
-            platform=_col(item, "platform"),
-            limit=5,
-        )
+        platform = _col(item, "platform")
+        result = await igdb.search_game_art(query, cid, secret, client, platform=platform, limit=5)
+        # IGDB's title search is inconsistent around accented franchise names
+        # (notably Pokkén). Retry an ASCII-folded spelling, then once without a
+        # platform constraint when the title exists but IGDB omitted a platform
+        # relation. Both are fallbacks only, so the precise first query wins.
+        folded = "".join(
+            char for char in unicodedata.normalize("NFKD", query)
+            if not unicodedata.combining(char)
+        ).replace("™", "").strip()
+        if not result.found and folded and folded.casefold() != query.casefold():
+            result = await igdb.search_game_art(folded, cid, secret, client, platform=platform, limit=5)
+        if not result.found and platform:
+            result = await igdb.search_game_art(folded or query, cid, secret, client, platform=None, limit=5)
+        # A fuzzy search can return a game without cover/artwork. That is a
+        # valid IGDB response but not a usable picker result, so retry the
+        # same full title (including DX) without the platform restriction.
+        if result.found and not any(
+            game.get("cover_image_id") or game.get("artwork_image_ids")
+            for game in (result.payload or [])
+        ) and platform:
+            result = await igdb.search_game_art(
+                folded or query, cid, secret, client, platform=None, limit=5,
+            )
         # Never `if not result:` — `ProviderResult.__bool__` raises, and the
         # `except Exception` below would swallow it into `[]`: green and wrong.
         if not result.found:

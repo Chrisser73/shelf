@@ -84,8 +84,8 @@ def _column(column: str, cast: Callable[[str], object] = str) -> ConditionBuilde
 def _search(value):
     like = f"%{value}%"
     return (
-        "(i.title LIKE ? OR i.authors LIKE ? OR i.isbn LIKE ? OR i.narrator LIKE ?)",
-        [like, like, like, like],
+        "(i.title LIKE ? OR i.alternate_title LIKE ? OR i.authors LIKE ? OR i.isbn LIKE ? OR i.narrator LIKE ?)",
+        [like, like, like, like, like],
     )
 
 
@@ -227,6 +227,7 @@ FILTERS: tuple[BrowseFilter, ...] = (
     # (the control's data-label), never the id.
     BrowseFilter("author_filter", prefix="Author", condition=_author),
     BrowseFilter("language", prefix="Language", condition=_column("i.language")),
+    BrowseFilter("region", prefix="Region", condition=_column("i.region")),
     # `view` is the odd one: client-owned state (localStorage) that is sent to
     # the server so it can pick the grid or list template. It is not a filter
     # the user clears, chips, or reads out of the URL — hence all three opt-outs.

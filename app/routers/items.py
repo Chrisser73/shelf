@@ -971,6 +971,9 @@ async def search_items(
         show_collector_condition_in_collection = get_preference(
             db, request.state.user["id"], "show_collector_condition_in_collection"
         ) == "1"
+        show_region_in_collection = get_preference(
+            db, request.state.user["id"], "show_region_in_collection"
+        ) == "1"
         from app.services.user_preferences import platform_logo_map
         platform_logo_paths = platform_logo_map(db, request.state.user["id"])
         game_platforms = get_game_platforms(db)
@@ -992,6 +995,7 @@ async def search_items(
     from datetime import datetime, timedelta
     ctx = {
         "items": items,
+        "search_query": values["q"],
         "tags_by_item": tags_by_item,
         "media_types": MEDIA_TYPES,
         "has_more": has_more,
@@ -1003,6 +1007,7 @@ async def search_items(
         "always_show_game_title": always_show_game_title,
         "show_platform_logo_in_collection": show_platform_logo_in_collection,
         "show_collector_condition_in_collection": show_collector_condition_in_collection,
+        "show_region_in_collection": show_region_in_collection,
         "platform_logo_paths": platform_logo_paths,
         "game_platforms": game_platforms,
     }
@@ -1028,7 +1033,7 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
     except (ValueError, TypeError):
         return {"ok": False, "message": "Invalid item IDs"}
 
-    allowed = {"media_type", "location_id", "reading_status", "owned", "wishlisted", "series_name"}
+    allowed = {"media_type", "location_id", "reading_status", "owned", "wishlisted", "series_name", "language", "region"}
     filtered = {k: v for k, v in updates.items() if k in allowed}
     if not filtered:
         return {"ok": False, "message": "No valid fields to update"}
@@ -1164,6 +1169,33 @@ async def merge_items(request: Request, _=Depends(require_role("admin"))):
     return {"ok": True, "merged": merged}
 
 
+@router.post("/items/{item_id}/alternate-title")
+async def update_alternate_title(request: Request, item_id: int, _=Depends(require_role("editor"))):
+    """Save the optional alternate name without sending the user to the full edit form."""
+    form = await request.form()
+    alternate_title = (form.get("alternate_title") or "").strip() or None
+    try:
+        with get_db() as db:
+            if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
+                return JSONResponse(
+                    {"ok": False, "message": "Item not found"}, status_code=404,
+                    headers={"HX-Trigger": items_common._toast_header("Item not found", "error")},
+                )
+            update_item_fields(db, item_id, {"alternate_title": alternate_title})
+    except (ItemValueError, ValueError) as exc:
+        return JSONResponse(
+            {"ok": False, "message": str(exc) or "Alternate name could not be saved"}, status_code=400,
+            headers={"HX-Trigger": items_common._toast_header("Alternate name could not be saved", "error")},
+        )
+    return JSONResponse(
+        {"ok": True, "alternate_title": alternate_title or ""},
+        headers={"HX-Trigger": json.dumps({
+            "showToast": {"message": "Alternate name saved", "type": "success"},
+            "alternateNameSaved": {"item_id": item_id},
+        })},
+    )
+
+
 @router.post("/items/{item_id}")
 async def update_item(request: Request, item_id: int, _=Depends(require_role("editor"))):
     form = await request.form()
@@ -1189,7 +1221,7 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
                     "publish_year", "page_count", "description", "series_name",
                     "series_position", "narrator", "duration_mins", "location_id", "notes",
                     "reading_status", "date_started", "date_finished", "owned", "wishlisted",
-                    "platform", "collector_condition", "manual_value", "language"):
+                    "platform", "collector_condition", "manual_value", "language", "region", "alternate_title"):
             val = form.get(key)
             if val is not None:
                 if key == "wishlisted":
@@ -1508,7 +1540,10 @@ async def delete_item(item_id: int, _=Depends(require_role("editor"))):
         row = db.execute("SELECT title FROM items_live WHERE id = ?", (item_id,)).fetchone()
         title = row["title"] if row else "Item"
         item_write.trash_item(db, item_id)
-    resp = HTMLResponse('{"ok": true}', headers={"Content-Type": "application/json"})
+    # This response is swapped into the initiating button just before the
+    # client sends the user back to the collection.  Keep that brief state
+    # human-readable instead of exposing the old JSON API payload.
+    resp = HTMLResponse("Moved to trash")
     resp.headers["HX-Trigger"] = items_common._toast_header(f"Moved to Trash: {title[:50]}")
     return resp
 

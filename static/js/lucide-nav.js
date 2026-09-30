@@ -24,6 +24,7 @@
                 Search: window.lucide.Search,
                 ListFilter: window.lucide.ListFilter,
                 ArrowDownUp: window.lucide.ArrowDownUp,
+                Save: window.lucide.Save,
             },
             attrs: {width: 20, height: 20, 'stroke-width': 2},
         });

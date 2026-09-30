@@ -369,7 +369,7 @@ function intakePage() {
                         title: b.title, authors: b.authors || '', publisher: b.publisher || '', isbn: b.isbn || '',
                         source: b.source || 'read', media_type: b.media_type || 'book',
                         platform: b.platform || '', publish_year: b.publish_year || '',
-                        collector_condition: b.collector_condition || '', existing: b.existing || null,
+                        collector_condition: b.collector_condition || '', language: b.language || '', region: b.region || '', alternate_title: b.alternate_title || '', existing: b.existing || null,
                         include: !b.existing,
                     }));
                 } else if (data.cancelled) {
@@ -428,6 +428,15 @@ function intakePage() {
         setBookCollectorCondition(i, value) {
             this.books[i].collector_condition = value;
         },
+        setBookLanguage(i, value) {
+            this.books[i].language = value;
+        },
+        setBookRegion(i, value) {
+            this.books[i].region = value;
+        },
+        setBookAlternateTitle(i, value) {
+            this.books[i].alternate_title = value;
+        },
 
         setBookIsbn(i, value) {
             this.books[i].isbn = value;
@@ -475,6 +484,7 @@ function intakePage() {
                         books: this.books.filter(b => b.include).map(b => ({
                             title: b.title, authors: b.authors || null, publisher: b.publisher || null,
                             publish_year: b.publish_year || null, isbn: b.isbn || null, media_type: b.media_type,
+                            language: b.language || null, region: b.region || null, alternate_title: b.alternate_title || null,
                             platform: b.media_type === 'video_game' ? b.platform || null : null,
                             collector_condition: b.media_type !== 'book' ? b.collector_condition || this.collectorCondition || null : null,
                             existing_id: b.existing ? b.existing.id : null, replace_existing: !!b.existing,

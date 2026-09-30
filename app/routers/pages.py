@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse
+from starlette.datastructures import QueryParams
 
 from app import browse_filters, features, nav
 from app.auth import require_role
@@ -44,6 +45,12 @@ async def index(
         from app.services.user_preferences import get_preference
         home_tiles = {key: get_preference(db, request.state.user["id"], f"home_tile:{key}", "1") == "1"
                       for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "media_types")}
+        collection_appearance = {
+            "always_show_game_title": get_preference(db, request.state.user["id"], "always_show_game_title") == "1",
+            "show_platform_logo": get_preference(db, request.state.user["id"], "show_platform_logo_in_collection") == "1",
+            "show_collector_condition": get_preference(db, request.state.user["id"], "show_collector_condition_in_collection") == "1",
+            "show_region": get_preference(db, request.state.user["id"], "show_region_in_collection") == "1",
+        }
 
     return request.app.state.templates.TemplateResponse(
         request,
@@ -52,6 +59,7 @@ async def index(
             **summary,
             "media_type_labels": MEDIA_TYPES,
             "home_tiles": home_tiles,
+            "collection_appearance": collection_appearance,
             "feature_flags": {
                 "lending": feature_enabled("lending"),
                 "stats": feature_enabled("stats"),
@@ -132,6 +140,13 @@ async def browse(
                 "WHERE language IS NOT NULL AND language != '' ORDER BY language"
             ).fetchall()
         ]
+        item_regions = [
+            row["region"]
+            for row in db.execute(
+                "SELECT DISTINCT region FROM items_live "
+                "WHERE region IS NOT NULL AND region != '' ORDER BY region"
+            ).fetchall()
+        ]
 
         has_more = len(items) < total_filtered
         from app.services.user_preferences import get_preference
@@ -143,6 +158,9 @@ async def browse(
         ) == "1"
         show_collector_condition_in_collection = get_preference(
             db, request.state.user["id"], "show_collector_condition_in_collection"
+        ) == "1"
+        show_region_in_collection = get_preference(
+            db, request.state.user["id"], "show_region_in_collection"
         ) == "1"
         from app.services.user_preferences import platform_logo_map
         platform_logo_paths = platform_logo_map(db, request.state.user["id"])
@@ -166,16 +184,19 @@ async def browse(
         "all_tags": all_tags,
         "lent_out_count": lent_out_count,
         "item_languages": item_languages,
+        "item_regions": item_regions,
         "has_more": has_more,
         "has_filters": browse_filters.has_active_filters(values),
         "load_more_url": load_more_url,
         "seven_days_ago": (datetime.now(tz=None) - timedelta(days=7)).strftime("%Y-%m-%d"),
         "initial_query": values["q"],
+        "search_query": values["q"],
         "author_filter_label": author_filter_label,
         "initial_filters": {name: values[name] for name in browse_filters.FILTER_NAMES},
         "always_show_game_title": always_show_game_title,
         "show_platform_logo_in_collection": show_platform_logo_in_collection,
         "show_collector_condition_in_collection": show_collector_condition_in_collection,
+        "show_region_in_collection": show_region_in_collection,
         "platform_logo_paths": platform_logo_paths,
         "game_platforms": game_platforms,
     }
@@ -293,9 +314,17 @@ async def item_detail(
     request: Request,
     item_id: int,
     from_: str = Query("", alias="from"),
+    browse: str = Query(""),
     _=Depends(require_role("viewer")),
 ):
     back = nav.back_target(from_)
+    # A detail page may only return to a Browse URL made from the declared
+    # filter registry.  Do not echo a user-provided path/query back into HTML.
+    if browse:
+        browse_values = browse_filters.values_from(QueryParams(browse))
+        browse_query = browse_filters.querystring(browse_values)
+        if browse_query:
+            back = {"key": "", "path": f"/browse?{browse_query}", "label": "Back to collection"}
     with get_db() as db:
         item = db.execute(
             f"SELECT i.*, l.name as location_name, "
@@ -307,6 +336,10 @@ async def item_detail(
         ).fetchone()
         if not item:
             return RedirectResponse(url="/browse")
+        # Display legacy values correctly before the startup migration has
+        # rewritten the stored row.
+        item = dict(item)
+        item["alternate_title"] = item_write.repair_malformed_unicode(item.get("alternate_title"))
 
         # Checkout info
         current_checkout = db.execute(
@@ -462,6 +495,8 @@ async def item_edit(
         ).fetchone()
         if not item:
             return RedirectResponse(url="/browse")
+        item = dict(item)
+        item["alternate_title"] = item_write.repair_malformed_unicode(item.get("alternate_title"))
         # An identifier_in_trash refusal names the blocking row by id; the
         # title is resolved here and escaped by the template, so nothing the
         # user typed is ever echoed back through the query string (G58).

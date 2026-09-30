@@ -73,6 +73,7 @@ follow-up writes (tags, scan log, cover path) to commit together, and
 (G16, G18).
 """
 
+import re
 from typing import Any, Iterable, Mapping
 
 from app.config import MEDIA_TYPES, canonical_media_type
@@ -94,6 +95,18 @@ from app.services.write_targets import (  # noqa: F401 — re-exported
 #: spell this out; it is declared once here and read from both.
 READING_STATUSES = ("want_to_read", "reading", "read")
 COLLECTOR_CONDITIONS = ("cib", "boxed", "loose")
+REGIONS = ("unknown", "PAL", "NTSC", "NTSC-J", "PAL-M")
+
+
+def repair_malformed_unicode(value: str | None) -> str | None:
+    """Turn legacy bare JSON escapes (``Poku00e9mon``) into Unicode."""
+    if not isinstance(value, str):
+        return value
+    return re.sub(
+        r"(?<!\\)u([0-9a-fA-F]{4})",
+        lambda match: chr(int(match.group(1), 16)),
+        value,
+    )
 
 
 class InvalidIsbn(ItemValueError):
@@ -129,6 +142,11 @@ class InvalidWishlisted(ItemValueError):
 class InvalidCollectorCondition(ItemValueError):
     code = "invalid_collector_condition"
     field = "collector_condition"
+
+
+class InvalidRegion(ItemValueError):
+    code = "invalid_region"
+    field = "region"
 
 
 #: Columns a caller may never set on insert — the database owns them.
@@ -213,6 +231,12 @@ def validate_item_fields(db, fields: Mapping[str, Any]) -> dict[str, Any]:
     `InvalidReadingStatus`, `InvalidOwned`.
     """
     out: dict[str, Any] = dict(fields)
+    # Some vision models emit a JSON Unicode escape without its backslash
+    # (``Pokku00e9n``). Repair that malformed transport spelling before it is
+    # stored, so display and title searches both receive Pokémon.
+    for field in ("title", "subtitle", "authors", "publisher", "alternate_title"):
+        if isinstance(out.get(field), str):
+            out[field] = repair_malformed_unicode(out[field])
 
     # ISBN — the canonical pair rewrites BOTH columns whenever either is
     # supplied, so an inconsistent isbn10 a caller passed is overwritten and
@@ -283,6 +307,16 @@ def validate_item_fields(db, fields: Mapping[str, Any]) -> dict[str, Any]:
                 f"Invalid collector condition: {condition!r}", value=condition
             )
         out["collector_condition"] = condition
+
+    if "region" in out:
+        region = out["region"]
+        if isinstance(region, str):
+            region = region.strip() or None
+            aliases = {"pal": "PAL", "ntsc": "NTSC", "ntsc-j": "NTSC-J", "ntscj": "NTSC-J", "pal-m": "PAL-M", "palm": "PAL-M", "unknown": "unknown"}
+            region = aliases.get(region.casefold(), region)
+        if region is not None and region not in REGIONS:
+            raise InvalidRegion(f"Invalid region: {region!r}", value=region)
+        out["region"] = region
 
     if "owned" in out:
         out["owned"] = _coerce_owned(out["owned"])

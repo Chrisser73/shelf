@@ -12,7 +12,7 @@ from app.auth import (
     require_role,
 )
 from app import features
-from app.config import get_client_ip
+from app.config import get_client_ip, JWT_EXPIRY_SECONDS, REMEMBER_ME_EXPIRY_SECONDS
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,12 @@ async def login_page(request: Request):
 
 
 @router.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+async def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    remember_me: bool = Form(False),
+):
     templates = request.app.state.templates
     with get_db() as db:
         user = db.execute(
@@ -64,7 +69,10 @@ async def login(request: Request, username: str = Form(...), password: str = For
             status_code=401,
         )
 
-    token = create_token(user["id"], user["username"], user["role"], user["display_name"], user["token_version"])
+    token = create_token(
+        user["id"], user["username"], user["role"], user["display_name"], user["token_version"],
+        expiry_seconds=REMEMBER_ME_EXPIRY_SECONDS if remember_me else JWT_EXPIRY_SECONDS,
+    )
     response = RedirectResponse(url="/", status_code=303)
     set_auth_cookie(request, response, token)
     logger.info("User '%s' logged in from %s", username, get_client_ip(request))
