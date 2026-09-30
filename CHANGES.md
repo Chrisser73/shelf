@@ -4,6 +4,30 @@ This file is the central record of customizations in this fork. The upstream
 [`README.md`](README.md) continues to document Shelf itself; this file covers
 only added or changed fork-specific features.
 
+## V1.2.2 — Upgrade V1.2.2
+
+- Photo Intake is more useful for games and international releases: it now
+  captures language, region, alternate searchable names, publisher, developer
+  and release year, while preserving titles in their original script. The
+  review screen makes those fields easy to correct before saving.
+- AI recognition prompts and validation were strengthened for front-cover
+  scans. Recognized titles retain their exact edition name, alternate names
+  are normalized for searching, and malformed legacy Unicode escapes are
+  repaired on display and on future saves.
+- Collection browsing is more practical on desktop and mobile: list columns
+  can be selected and sorted, filters include region and missing covers, text
+  matches are highlighted, and filter state survives opening an item and
+  returning to the collection.
+- Item pages and bulk editing now support alternate names, language and region
+  alongside existing collection metadata. The inline alternate-name editor
+  gives clear save feedback and returns to its normal read-only view.
+- The installable web app and sign-in experience were polished for mobile,
+  including updated app icons, a persistent Remember me option, and reliable
+  navigation back to the collection when Store Mode is disabled.
+- Platform coverage and metadata tooling were extended with Nintendo Switch 2,
+  additional platform-logo mappings, provider connection status, and more
+  resilient IGDB cover and game-metadata lookups.
+
 ## V1.2.0.1 — Upgrade V1.2.1
 
 - Locations can be made the current user's default while creating or editing
