@@ -18,6 +18,7 @@ from app.services import lists
 from app.services import isbn as isbn_svc
 from app.services import upc as upc_svc
 from app.services import tags as tags_svc
+from app.services import wrapups
 from app.database import get_db, get_setting, get_game_platforms, get_reading_history
 from app.routers import items_common
 from app.routers.items_common import SORT_OPTIONS
@@ -443,6 +444,11 @@ async def item_edit(
     )
 
 
+def _today() -> date:
+    """The date the Stats pages read — one seam, so a test can pin January."""
+    return date.today()
+
+
 @router.get("/stats")
 async def stats(request: Request, _=Depends(require_role("viewer")),
                 __=Depends(require_feature("stats"))):
@@ -499,8 +505,8 @@ async def stats(request: Request, _=Depends(require_role("viewer")),
             "WHERE COALESCE(manual_value, estimated_value) IS NOT NULL AND owned = 1"
         ).fetchone()["v"]
 
-    from datetime import date as _date
-    current_year = str(_date.today().year)
+    today = _today()
+    current_year = str(today.year)
 
     by_key: dict[str, dict[str, int]] = {}
     book_by_year: dict[str, int] = {}
@@ -570,6 +576,31 @@ async def stats(request: Request, _=Depends(require_role("viewer")),
             "chart_growth": chart_growth,
             "chart_authors": chart_authors,
             "chart_valuation": chart_valuation,
+            # January only: the previous year's wrap-up, as "<year> in Books".
+            "year_in_books": str(today.year - 1) if today.month == 1 else None,
+        },
+    )
+
+
+@router.get("/stats/wrapup")
+async def stats_wrapup(request: Request, period: str | None = None,
+                       _=Depends(require_role("viewer")),
+                       __=Depends(require_feature("stats"))):
+    today = _today()
+    with get_db() as db:
+        # No `period` at all (the link from Stats) opens on the newest month with
+        # content; a supplied but bad one still falls back to the current month.
+        chosen = (wrapups.latest_period(db, today) if period is None
+                  else wrapups.parse_period(period, today))
+        summary = wrapups.summarize(db, chosen)
+        first_year = wrapups.earliest_year(db, today)
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "stats_wrapup.html",
+        {
+            "period": chosen,
+            "summary": summary,
+            "period_options": wrapups.period_options(today, first_year),
         },
     )
 

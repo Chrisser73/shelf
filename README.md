@@ -3,8 +3,8 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-4795%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![E2E tests](https://img.shields.io/badge/e2e%20tests-311%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-4842%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![E2E tests](https://img.shields.io/badge/e2e%20tests-314%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
 A self-hosted home library catalog with barcode scanning, multi-mode scanning workflows, automatic metadata lookup, cover art, and collection management — all in a single Docker container.
@@ -56,6 +56,10 @@ Most home library apps are cloud-hosted, mobile-only, or require you to manually
 | Photo Intake | Series |
 |--------------|--------|
 | ![Photo Intake](screenshots/photo-intake.png) | ![Series](screenshots/series.png) |
+
+| Wrap-up |
+|---------|
+| ![Wrap-up](screenshots/wrapup.png) |
 
 ## Documentation
 
@@ -185,6 +189,7 @@ each option before anything is sent.
 - **Custom tags** — free-form tags (`signed`, `first-edition`, whatever you like) as chips on the item page and its edit page, applied to many items at once from the Browse bulk bar, with a tag filter and an optional Tags column on Browse. Admins rename, scope and delete tags in Settings, which shows how many items carry each. Set **default tags** for a scanning session on Scan, Shelf Fill or Photo Intake and every item you add is tagged as it arrives, with suggestions for the media type you are scanning
 - **Synopses** — item descriptions fetched automatically on add, plus a one-click backfill for your existing catalog (Open Library, Google Books, Hardcover)
 - **Stats dashboard** — books read per year, collection growth, top authors, and value-over-time charts (server-rendered SVG, no JS)
+- **Wrap-ups** — a shareable image of a month or a year: what you finished, what you added, your top author and a grid of covers. Drawn in your browser and never stored or published; download it, or share it from your phone. In January, Stats also links to last year's wrap-up ("2025 in Books"). See [Stats → Wrap-ups](docs/user-guide/stats-and-valuation.md#wrap-ups)
 - **Locations** — organize by room, shelf, or any system you like, and nest them: a shelf inside a bookcase inside a room. Rename or move a location and everything beneath it follows. See [Locations](docs/user-guide/locations.md)
 - **Shelf Fill** — pick a room, bookcase or shelf and it stays selected while you scan item after item onto it. Items already catalogued move without a fresh metadata lookup; unrecognised barcodes fall through to the normal Add pipeline. See [Shelf Fill](docs/user-guide/shelf-fill.md)
 - **Physical copies** — own two of something and track them apart: add a copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes. Removing the copy marked primary promotes the next one and the item's location follows it. A removed copy goes to Trash with its details, not away for good

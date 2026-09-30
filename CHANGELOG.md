@@ -6,6 +6,49 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-09-30
+
+Shelf knew what you finished and added each month, but the only way to show
+anyone was a screenshot of the Stats charts. Now Stats makes a wrap-up: one
+image of a month or a year, with its covers and headline numbers, ready to
+download or share.
+
+### Added
+
+- **Wrap-ups — a shareable image of a month or a year.** Open **Wrap-up** at
+  the top of the Stats page. The image shows the period, how many items were
+  finished in it (split into read · watched · played), how many were added,
+  and a grid of their covers. **Download image** saves it as a PNG; where your
+  device can share files (most phones), **Share** sends it straight to another
+  app.
+- **The Period menu picks any month or whole year** since your library began.
+  The page opens on the most recent month in which anything was finished or
+  added, so a quiet current month does not greet you with an empty page.
+- **When nothing was finished, the grid shows what was added.** The grid holds
+  at most 24 covers, newest first, and says so ("Latest 24 of 60"); the
+  numbers above it always count the whole period.
+- **In January, Stats links to last year's wrap-up** — "2025 in Books" in
+  January 2026.
+- **A top author, when one stands out.** It appears only when an author
+  accounts for more than one item in the period — with every author at one,
+  naming the alphabetically first would be arbitrary.
+- **Square covers get square tiles.** When most covers in the grid are square
+  (audiobooks, music), the tiles are square too; otherwise they are book-shaped.
+  An item without a cover gets a tile with its title.
+
+Wrap-ups are drawn in your browser and never stored or published — Shelf has
+no link to one, and nothing leaves your device unless you share the image.
+They count the whole household's library; a per-person wrap-up waits for
+per-person reading status. They live and die with Stats: turning Stats off
+turns wrap-ups off.
+
+### Security
+
+- **PyJWT is updated to 2.15.0** for advisory GHSA-42vr-xj54-vc7v. The advisory
+  concerns reading a token before checking its signature; Shelf checks the
+  signature first, so no install was exposed. The update clears the
+  dependency audit.
+
 ## [0.60.0] - 2026-09-30
 
 Leaving LibraryThing or Libib for Shelf meant reshaping the export by hand
@@ -4712,6 +4755,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.61.0]: https://github.com/dgahagan/shelf/releases/tag/v0.61.0
 [0.60.0]: https://github.com/dgahagan/shelf/releases/tag/v0.60.0
 [0.59.0]: https://github.com/dgahagan/shelf/releases/tag/v0.59.0
 [0.58.0]: https://github.com/dgahagan/shelf/releases/tag/v0.58.0

@@ -162,7 +162,7 @@ FEATURES: dict[str, Feature] = {
         profile="standard",
         nav_tabs=("stats",),
         entry_path="/stats",
-        routes=(("GET", "/stats"),),
+        routes=(("GET", "/stats"), ("GET", "/stats/wrapup")),
     ),
     "store": Feature(
         label="Store Mode",

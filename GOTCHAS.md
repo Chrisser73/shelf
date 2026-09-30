@@ -652,6 +652,14 @@ python -m pytest tests/test_authors.py -q
   - **`display_name` is baked into the JWT** (`app/auth.py:63`), so the nav
     kept saying `E2E Admin` after a `UPDATE users SET display_name` — the
     page reads the token, not the row. Clear cookies and log in again.
+  - **Shoot from `data-dev/demo-seeded`, never from `make seed-dev`.** The
+    name suggests demo data, but `seed-dev` copies **prod's** `shelf.db`
+    (`Makefile:260`), so a public screenshot taken there carries the real
+    library's titles. Copy `data-dev/demo-seeded` (32 curated items, all with
+    covers) into a scratch dir and point a throwaway uvicorn at it with
+    `DATA_DIR`. Its schema is old, so the app migrates it on boot, and the
+    password column is `users.password`. Found when `plan-wrapups` T5 named
+    `seed-dev` as the safe source (`4327e47`, 2026-09-30).
 - **Evidence:** `f618b11` (2026-08-20) — the previous demo GIF was recorded
   this way and shipped for six weeks showing four cover-less books.
 - **Verify:** the import path is still fire-and-forget (expect 1 hit; if it
@@ -5788,6 +5796,37 @@ grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py test
   "delimiter or price"` — both halves have parametrised pins.
 - **Status:** documented. Not a lint candidate — whether a stripped character
   was decoration is a judgement about the source format.
+
+## G132 — When a plan adds a new page, a cover grid or a vendored file
+
+- **Rule:** put the three structural unit tests in the touch-set of the task
+  that adds the thing, as G80 does for the badge:
+  - a new top-level `GET` page → `tests/test_nav.py`
+    (`test_every_top_level_page_is_reachable_from_the_nav`) needs a `NAV_TABS`
+    entry **or** an `EXEMPT` reason naming the link that reaches it;
+  - any element forced into a box (`aspect-[…]`, `object-cover`,
+    `.cover-card`) → `tests/test_cover_shape_guard.py` needs
+    `data-cover-shape="{{ cover_shape(media_type) }}"` on it, so the query
+    feeding it must select `media_type`;
+  - a vendored asset → `tests/test_vendor_integrity.py` hashes only the
+    **top level** of `static/vendor/` (`iterdir()`), so a file goes flat there
+    with its `HASHES` line. A subfolder, or `static/fonts/`, is not checked.
+- **Why:** each test fails with a clear message, but only when `make test`
+  runs. A plan that leaves the file out of the touch-set leaves the builder a
+  red gate on a file it was not given, as with G80.
+- **Evidence:** `feat/wrapups`, 2026-09-30. The impl plan caught the vendor
+  rule and missed the other two. `1ae8687` added the `EXEMPT` reason for
+  `/stats/wrapup` and `media_type` on the tiles.
+- **Verify:**
+
+```bash
+grep -n "EXEMPT = {" tests/test_nav.py
+grep -n "def test_every_forced_cover_box_declares_its_shape" tests/test_cover_shape_guard.py
+grep -n "iterdir" tests/test_vendor_integrity.py
+```
+
+- **Status:** documented. The tests are the lint. This entry exists so
+  `/impl-plan` names the files.
 
 ## Graveyard
 

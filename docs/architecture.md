@@ -1010,6 +1010,29 @@ field carries no `x-model`, so every reader — htmx, `FormData`, the catalog
 results' `.tags-sync` mirror in `app.js` — reads the DOM value. The item
 page's tag chips still server-render their own list.
 
+**Images are made on a `<canvas>` in the browser; the server renders no
+raster images.** Photo Intake does it twice: `static/js/intake-capture.js`
+grabs a webcam frame, and `static/js/intake.js` resizes and crops the photo
+before `/api/intake/analyze`. `static/js/wrapup.js` draws the
+Stats wrap-up (`GET /stats/wrapup`, gated by the `stats` feature): the route
+renders the period's numbers and up to 24 cover tiles as `data-*` attributes
+from `app/services/wrapups.py`, and the script draws them at 1080 × 1350 and
+hands the `toBlob` PNG to a download link and, where `navigator.canShare`
+accepts files, the Web Share API. It is a plain script, not an Alpine component,
+and it makes no request beyond the font and the covers. **The canvas must stay
+untainted**: covers are same-origin `/covers/` files, and the script skips any
+cover whose URL is not same-origin, because one foreign image makes `toBlob`
+throw. A cover that fails to load becomes a titled placeholder tile rather than
+a failed export. The wrap-up also brings **the only vendored font**, Inter 4.1
+(OFL), unmodified from the upstream release as `static/vendor/inter-4.1-*`.
+The files sit flat in `static/vendor/` because `tests/test_vendor_integrity.py`
+hashes only that folder's top level, so each one has its `HASHES` line. The script
+loads them with the `FontFace` API (`font-src 'self'`) and draws only after they
+resolve, so the image is the same on every device. The pages' own CSS still uses
+the system font stack. The server-side renderers (Pillow, SVG) were rejected: a
+Pillow renderer puts an image decoder in the app process, and the major social
+platforms do not accept an SVG upload.
+
 **The script load order is a stated invariant, and `make check-alpine`
 enforces it.** Eight files under `static/js/` register Alpine components; every
 one of them is a **classic** script, and Alpine's own tag is the only one that

@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Stats — Shelf{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-6">Collection Statistics</h1>
+<div class="flex flex-wrap items-baseline justify-between gap-3 mb-6">
+    <h1 class="text-2xl font-bold">Collection Statistics</h1>
+    <div class="flex flex-wrap gap-4 text-sm">
+        {% if year_in_books %}
+        <a href="/stats/wrapup?period={{ year_in_books }}" class="text-shelf-accent hover:underline" data-testid="stats-year-in-books">{{ year_in_books }} in Books</a>
+        {% endif %}
+        <a href="/stats/wrapup" class="text-shelf-accent hover:underline" data-testid="stats-wrapup-link">Wrap-up</a>
+    </div>
+</div>
 
 <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
     <div class="bg-shelf-card border border-shelf-border rounded-lg p-5">

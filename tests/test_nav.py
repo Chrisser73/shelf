@@ -633,6 +633,11 @@ def test_every_top_level_page_is_reachable_from_the_nav():
         "/docs/oauth2-redirect": "FastAPI's own docs UI",
         "/redoc": "FastAPI's own docs UI",
         "/openapi.json": "schema, not a page",
+        "/stats/wrapup": (
+            "reached from the Wrap-up link on /stats, not the nav: a recap of the "
+            "stats is a stats surface (wrap-ups design). The link is pinned by "
+            "test_wrapup_route.py::test_stats_links_to_the_wrapup_always"
+        ),
         "/cover-review": (
             "reached from Settings -> Data -> Maintenance, not the nav: a "
             "maintenance chore does not earn permanent nav real estate "
