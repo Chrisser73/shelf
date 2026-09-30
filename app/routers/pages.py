@@ -44,7 +44,7 @@ async def index(
         summary = dashboard_summary(db, recent_limit=8, user_id=request.state.user["id"])
         from app.services.user_preferences import get_preference
         home_tiles = {key: get_preference(db, request.state.user["id"], f"home_tile:{key}", "1") == "1"
-                      for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "media_types")}
+                      for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types")}
         collection_appearance = {
             "always_show_game_title": get_preference(db, request.state.user["id"], "always_show_game_title") == "1",
             "show_platform_logo": get_preference(db, request.state.user["id"], "show_platform_logo_in_collection") == "1",
@@ -774,7 +774,7 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
         settings["default_location_id"] = get_preference(
             db, request.state.user["id"], "default_location_id"
         )
-        for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "media_types"):
+        for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types"):
             settings[f"home_tile:{key}"] = get_preference(db, request.state.user["id"], f"home_tile:{key}", "1")
         locations = db.execute(
             "SELECT * FROM locations ORDER BY sort_order, name"
@@ -788,6 +788,8 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
         missing_covers = db.execute(
             "SELECT COUNT(*) AS c FROM items_live WHERE cover_path IS NULL AND cover_review_dismissed = 0"
         ).fetchone()["c"]
+        from app.services import game_metadata
+        missing_game_metadata = game_metadata.missing_metadata_count(db)
         cover_queue_stats = cover_queue.stats()
         # Carries each borrower's *returned* loan count for the delete
         # confirmation's copy. Returned rows only: the dialog fires before the
@@ -873,13 +875,15 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
          "current_profile": current_profile,
          "lending_enabled": feature_enabled("lending"),
          "borrower_error_message": borrower_error_message,
-         "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats,
+         "missing_covers": missing_covers, "missing_game_metadata": missing_game_metadata,
+         "cover_queue_stats": cover_queue_stats,
          "tags": tags, "media_types": MEDIA_TYPES,
          "price_alert_last_run_display": price_alert_last_run_display,
          "price_alert_default_threshold": price_alerts.DEFAULT_THRESHOLD_PCT,
          "price_alert_max_threshold": price_alerts.MAX_THRESHOLD_PCT,
          "price_alert_default_cap": price_alerts.DEFAULT_NIGHTLY_CAP,
          "price_alert_max_cap": price_alerts.MAX_NIGHTLY_CAP,
+         "game_platforms": {row["slug"]: row["name"] for row in game_platforms_list},
          "is_admin": request.state.user["role"] == "admin"
          },
     )

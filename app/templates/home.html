@@ -52,6 +52,17 @@
             </button>
             {% endif %}
         </div>{% endif %}
+        {% if home_tiles.missing_game_metadata and missing_game_metadata_count %}<div class="relative bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+            <a href="/browse?missing_game_metadata=1" class="block pr-8">
+                <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="database-zap" class="w-4 h-4" aria-hidden="true"></i>Missing game metadata</p>
+                <p class="text-3xl font-bold">{{ missing_game_metadata_count }}</p>
+                <p class="text-xs text-shelf-muted mt-1">Name, developer, publisher, platform, region, language or year</p>
+            </a>
+            {% if user and user.role == 'admin' %}
+            <a href="/settings#data" title="Review missing game metadata"
+               class="absolute bottom-1 right-2 p-1.5 rounded-lg text-shelf-muted hover:bg-shelf-hover hover:text-shelf-accent2 transition-colors"><i data-lucide="file-pen-line" class="w-5 h-5" aria-hidden="true"></i></a>
+            {% endif %}
+        </div>{% endif %}
         {% if home_tiles.media_types %}<div class="bg-shelf-card border border-shelf-border rounded-lg p-5 {{ '' if lending_tile else 'col-span-2 lg:col-span-1' }}" data-testid="home-media-types">
             <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="book-open" class="w-4 h-4" aria-hidden="true"></i>Media types</p>
             <p class="text-3xl font-bold">{{ media_types|length }}</p>

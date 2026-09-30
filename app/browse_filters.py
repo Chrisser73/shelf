@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
 
 from app.services import lists
+from app.services import game_metadata
 from app.services.search_text import fold as fold_search_text
 from urllib.parse import quote
 
@@ -152,6 +153,14 @@ def _missing_cover(value):
     return "(i.cover_path IS NULL OR TRIM(i.cover_path) = '') AND i.cover_review_dismissed = 0", []
 
 
+def _missing_game_metadata(value):
+    # This deliberately has no visible filter control. It is the narrow link
+    # from Home's maintenance tile, not a second hand-maintained filter UI.
+    if value != "1":
+        return None
+    return game_metadata.missing_sql("i."), []
+
+
 def _collector_condition(value):
     values = [part.strip().lower() for part in value.split(",") if part.strip()]
     allowed = {"cib", "boxed", "loose"}
@@ -226,6 +235,7 @@ FILTERS: tuple[BrowseFilter, ...] = (
     BrowseFilter("lent_out", condition=_lent_out),
     BrowseFilter("platform_filter", prefix="Platform", condition=_platform),
     BrowseFilter("cover_missing", prefix="Missing cover", condition=_missing_cover),
+    BrowseFilter("missing_game_metadata", prefix="Missing metadata", condition=_missing_game_metadata, chip=False),
     BrowseFilter("collector_condition", prefix="Condition", condition=_collector_condition),
     BrowseFilter("tag", prefix="Tag", condition=_tag, quote_in_qs=True),
     # Set from an item page's author link; a hidden control, since hundreds

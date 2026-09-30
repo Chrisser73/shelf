@@ -438,7 +438,7 @@ async def update_appearance_settings(request: Request):
         set_preference(db, request.state.user["id"], "show_platform_logo_in_collection", show_platform_logo)
         set_preference(db, request.state.user["id"], "show_collector_condition_in_collection", show_collector_condition)
         set_preference(db, request.state.user["id"], "show_region_in_collection", show_region)
-        for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "media_types"):
+        for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types"):
             set_preference(db, request.state.user["id"], f"home_tile:{key}",
                            "1" if form.get(f"home_tile_{key}") in ("1", "on", "true") else "0")
     return RedirectResponse(url="/settings", status_code=303)
