@@ -167,13 +167,23 @@ async def _analyze_photo(photos: list[UploadFile]):
     # is visibly selected, not merely repaired later during save.
     with get_db() as db:
         for book in books:
-            if book.get("media_type") == "video_game":
+            media_type = book.get("media_type", "book")
+            if media_type == "video_game":
                 book["platform"] = _platform_slug(db, book.get("platform"))
-            existing = db.execute(
+            # A game title alone does not identify a physical edition.  In
+            # particular, Switch and Switch 2 releases may share an exact
+            # title; marking the other edition as replaceable here would let
+            # a confirmation overwrite it.  Match the normalized platform
+            # just as the final duplicate guard does below.
+            sql = (
                 "SELECT id, title, platform, publish_year FROM items_live "
-                "WHERE title = ? COLLATE NOCASE AND media_type = ? LIMIT 1",
-                (book["title"], book.get("media_type", "book")),
-            ).fetchone()
+                "WHERE title = ? COLLATE NOCASE AND media_type = ?"
+            )
+            params: list[str | None] = [book["title"], media_type]
+            if media_type == "video_game":
+                sql += " AND IFNULL(platform, '') = ?"
+                params.append(book.get("platform") or "")
+            existing = db.execute(sql + " LIMIT 1", params).fetchone()
             if existing:
                 book["existing"] = dict(existing)
     return {"ok": True, "books": books}
@@ -270,8 +280,9 @@ def _isbn_taken(isbn13: str, media_type: str) -> bool:
         ).fetchone() is not None
 
 
-def _title_taken(db, title: str, authors: str, media_type: str) -> bool:
-    """True when (title, authors, media_type) is already in the library.
+def _title_taken(db, title: str, authors: str, media_type: str,
+                 platform: str | None = None) -> bool:
+    """True when the item's identifying title tuple is already in the library.
 
     Takes the caller's connection, unlike `_isbn_taken`, and the difference is
     deliberate. `_isbn_taken` exists to classify an IntegrityError raised by
@@ -281,11 +292,18 @@ def _title_taken(db, title: str, authors: str, media_type: str) -> bool:
     which *must* run on that block's connection or the write lock buys nothing
     (G18). Declared once so the two cannot drift.
     """
-    return db.execute(
+    sql = (
         "SELECT id FROM items_live WHERE title = ? COLLATE NOCASE "
-        "AND IFNULL(authors, '') = ? COLLATE NOCASE AND media_type = ?",
-        (title, authors, media_type),
-    ).fetchone() is not None
+        "AND IFNULL(authors, '') = ? COLLATE NOCASE AND media_type = ?"
+    )
+    params: list[str | None] = [title, authors, media_type]
+    # A game released for more than one console is a separate physical
+    # edition. Other media types retain the established title/creator/type
+    # identity and deliberately ignore their empty platform field.
+    if media_type == "video_game":
+        sql += " AND IFNULL(platform, '') = ?"
+        params.append(platform or "")
+    return db.execute(sql, params).fetchone() is not None
 
 
 async def _confirm_one(
@@ -318,7 +336,9 @@ async def _confirm_one(
     # (G18). Do not collapse this into that one as a duplicate, and do not
     # promote it back into the decision.
     with get_db() as db:
-        if not replace_id and _title_taken(db, title, book.authors or "", media_type):
+        if not replace_id and _title_taken(
+            db, title, book.authors or "", media_type, platform,
+        ):
             return "skipped", {"title": title, "reason": "already in library"}, None
 
     # 2. A printed ISBN, if one survives re-validation, buys the full scan
@@ -517,7 +537,9 @@ async def _confirm_one(
         # *read* title — a rival that committed during the lookup window is
         # visible to this query and was not visible to that one. This is the
         # guard that decides.
-        if not replace_id and _title_taken(db, book.title.strip(), book.authors or "", media_type):
+        if not replace_id and _title_taken(
+            db, book.title.strip(), book.authors or "", media_type, platform,
+        ):
             return "skipped", {
                 "title": book.title.strip(), "reason": "already in library"}, None
 
@@ -529,11 +551,7 @@ async def _confirm_one(
         # already calls twice for this reason. Skipped when nothing moved,
         # where it would repeat step 1 verbatim.
         if not replace_id and title != book.title.strip():
-            resolved_dupe = db.execute(
-                "SELECT id FROM items_live WHERE title = ? COLLATE NOCASE AND media_type = ?",
-                (title, media_type),
-            ).fetchone()
-            if resolved_dupe:
+            if _title_taken(db, title, book.authors or "", media_type, platform):
                 return "skipped", {"title": title, "reason": "already in library"}, None
 
         # 4. ISBN dupe check, scoped to media type.

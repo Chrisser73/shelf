@@ -580,6 +580,38 @@ class TestAnalyzeEndpoint:
         resp = self._upload(admin_client)
         assert resp.json() == {"ok": True, "books": [{"title": "Dune", "authors": "Frank Herbert"}]}
 
+    def test_game_existing_marker_requires_the_same_platform(self, admin_client, db, monkeypatch):
+        """A Switch scan must not offer the separate Switch 2 edition for replacement."""
+        switch2_id = _insert_item(
+            db, title="Metroid Prime 4: Beyond", isbn=None,
+            media_type="video_game", platform="switch2",
+        )
+        db.commit()
+
+        async def fake_detect(images, settings):
+            return [{
+                "title": "Metroid Prime 4: Beyond",
+                "media_type": "video_game",
+                "platform": "Nintendo Switch",
+            }]
+
+        monkeypatch.setattr(vision, "detect_spines", fake_detect)
+        resp = self._upload(admin_client)
+        book = resp.json()["books"][0]
+        assert book["platform"] == "switch"
+        assert "existing" not in book
+
+        async def fake_same_platform(images, settings):
+            return [{
+                "title": "Metroid Prime 4: Beyond",
+                "media_type": "video_game",
+                "platform": "Nintendo Switch 2",
+            }]
+
+        monkeypatch.setattr(vision, "detect_spines", fake_same_platform)
+        same_edition = self._upload(admin_client).json()["books"][0]
+        assert same_edition["existing"]["id"] == switch2_id
+
     def test_multiple_tiles_reach_provider_in_order(self, admin_client, monkeypatch):
         seen = {}
 

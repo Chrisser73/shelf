@@ -35,22 +35,10 @@
         {% if home_tiles.wishlist %}<a href="/browse?owned=0" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
             <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="heart" class="w-4 h-4" aria-hidden="true"></i>Wishlist</p>
             <p class="text-3xl font-bold">{{ wishlist_count }}</p>
-        </a>
-        {% if lending_tile %}
-        <a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors" data-testid="home-lent-out">
-            <p class="text-shelf-muted text-sm">Lent out</p>
         </a>{% endif %}
-        {% if feature_flags.lending and home_tiles.lent_out %}<a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
+        {% if lending_tile and home_tiles.lent_out %}<a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors" data-testid="home-lent-out">
             <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="compass" class="w-4 h-4" aria-hidden="true"></i>Lent out</p>
             <p class="text-3xl font-bold">{{ lent_out_count }}</p>
-        </a>
-        {% endif %}
-        <div class="bg-shelf-card border border-shelf-border rounded-lg p-5">
-            <p class="text-shelf-muted text-sm">Missing covers</p>
-            <p class="text-3xl font-bold">{{ missing_cover_count }}</p>
-        </div>
-        <div class="bg-shelf-card border border-shelf-border rounded-lg p-5 {{ '' if lending_tile else 'col-span-2 lg:col-span-1' }}" data-testid="home-media-types">
-            <p class="text-shelf-muted text-sm">Media types</p>
         </a>{% endif %}
         {% if home_tiles.missing_covers %}<div class="relative bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
             <a href="/browse?cover_missing=1" class="block pr-8">
@@ -64,7 +52,7 @@
             </button>
             {% endif %}
         </div>{% endif %}
-        {% if home_tiles.media_types %}<div class="bg-shelf-card border border-shelf-border rounded-lg p-5">
+        {% if home_tiles.media_types %}<div class="bg-shelf-card border border-shelf-border rounded-lg p-5 {{ '' if lending_tile else 'col-span-2 lg:col-span-1' }}" data-testid="home-media-types">
             <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="book-open" class="w-4 h-4" aria-hidden="true"></i>Media types</p>
             <p class="text-3xl font-bold">{{ media_types|length }}</p>
         </div>{% endif %}
