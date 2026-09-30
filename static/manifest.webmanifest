@@ -1,8 +1,8 @@
 {
   "name": "Shelf",
   "short_name": "Shelf",
-  "description": "Home library catalog — offline store mode",
-  "start_url": "/store",
+  "description": "Home library catalog",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0f1117",
