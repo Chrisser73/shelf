@@ -59,6 +59,7 @@ from app.config import (
 from app.currency import CURRENCIES, format_money, get_currency
 from app.features import feature_enabled
 from app.services.national import SEARCH_LANGS
+from app.services.search_text import folded_match_ranges
 from app.database import init_db, get_db
 from app.routers import pages, items, item_copies, items_covers, cover_review, cover_review_actions, items_csv, items_catalog, locations, location_order, platforms, settings, sync, checkouts, valuation, hardcover, store, series, share, tags, intake, archive, shelf_fill, romm, komga, periodicals, music, related_media, trash
 from app.routers import auth_routes
@@ -523,17 +524,22 @@ def strip_html(value: str) -> str:
 
 
 def highlight_search(value: str, query: str) -> Markup:
-    """Escape text and mark every case-insensitive literal search match."""
+    """Escape text and mark every search match, including accent variants."""
     text = str(value or "")
-    needle = (query or "").strip()
-    if not needle:
+    ranges = folded_match_ranges(text, (query or ""))
+    if not ranges:
         return Markup(escape(text))
-    parts = re.split(f"({re.escape(needle)})", text, flags=re.IGNORECASE)
-    return Markup("".join(
-        f'<mark class="bg-shelf-accent/80 text-white rounded px-0.5">{escape(part)}</mark>'
-        if index % 2 else str(escape(part))
-        for index, part in enumerate(parts)
-    ))
+    parts: list[str] = []
+    previous_end = 0
+    for start, end in ranges:
+        parts.append(str(escape(text[previous_end:start])))
+        parts.append(
+            f'<mark class="bg-shelf-accent/80 text-white rounded px-0.5">'
+            f"{escape(text[start:end])}</mark>"
+        )
+        previous_end = end
+    parts.append(str(escape(text[previous_end:])))
+    return Markup("".join(parts))
 
 templates.env.filters["strip_html"] = strip_html
 templates.env.filters["highlight_search"] = highlight_search
