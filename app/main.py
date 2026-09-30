@@ -60,7 +60,7 @@ from app.features import feature_enabled
 from app.services.national import SEARCH_LANGS
 from app.services.search_text import folded_match_ranges
 from app.database import init_db, get_db
-from app.routers import pages, items, item_copies, items_covers, cover_review, cover_review_actions, items_csv, items_catalog, locations, location_order, platforms, settings, sync, checkouts, valuation, hardcover, store, series, share, tags, intake, archive, shelf_fill, romm, komga, periodicals, music, related_media, trash
+from app.routers import pages, items, item_copies, items_covers, cover_review, cover_review_actions, items_csv, items_catalog, locations, location_order, platforms, settings, sync, checkouts, valuation, hardcover, store, series, share, tags, intake, archive, shelf_fill, romm, komga, periodicals, music, related_media, trash, game_metadata
 from app.routers import auth_routes
 
 
@@ -617,5 +617,6 @@ app.include_router(romm.router)
 app.include_router(komga.router)
 app.include_router(periodicals.router)
 app.include_router(related_media.router)
+app.include_router(game_metadata.router)
 app.include_router(trash.router)
 app.include_router(trash.page_router)

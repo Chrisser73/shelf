@@ -10,6 +10,7 @@ service needing edits.
 from __future__ import annotations
 
 from app.services import lists
+from app.services import game_metadata
 from app.services.platform_logos import logo_path
 
 
@@ -36,6 +37,7 @@ def dashboard_summary(db, *, recent_limit: int = 8, user_id: int | None = None) 
         "WHERE (cover_path IS NULL OR TRIM(cover_path) = '') "
         "AND cover_review_dismissed = 0"
     ).fetchone()["c"]
+    missing_game_metadata = game_metadata.missing_metadata_count(db)
 
     type_rows = db.execute(
         "SELECT i.media_type, COUNT(*) AS item_count, "
@@ -84,6 +86,7 @@ def dashboard_summary(db, *, recent_limit: int = 8, user_id: int | None = None) 
         "wishlist_count": wishlist,
         "lent_out_count": lent_out,
         "missing_cover_count": missing_cover,
+        "missing_game_metadata_count": missing_game_metadata,
         "media_types": media_types,
         "platforms": platforms,
         "recent_items": recent,
