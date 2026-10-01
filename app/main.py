@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import re
@@ -389,6 +390,76 @@ async def _periodic_loan_reminders():
             logger.exception("Loan reminder check failed")
 
 
+_PRICE_ALERT_INTERVAL = 86400  # at most one pass per day — each costs ISBNdb lookups
+
+
+async def check_price_alerts() -> bool:
+    """One price-alert pass: look up the list price of the wishlist's next
+    batch of books, record it, and send one digest of the drops. Returns True
+    when a pass ran.
+
+    Unlike the loan digest, the stamp is written whether or not the digest was
+    sent or accepted: the expensive part is the ISBNdb lookups, and re-running
+    them five minutes later is what the throttle exists to prevent.
+    """
+    if not feature_enabled("price_alerts"):
+        return False
+
+    from app.database import get_setting, set_setting
+    from app.services import price_alerts
+
+    with get_db() as db:
+        # get_setting, so the ISBNDB_API_KEY env override and decryption count (G15).
+        api_key = get_setting(db, "isbndb_api_key")
+        if not api_key:
+            return False
+        last = get_setting(db, "price_alert_last_run")
+        now = time.time()
+        try:
+            if last and now - float(last) < _PRICE_ALERT_INTERVAL:
+                return False
+        except ValueError:
+            pass  # an unreadable stamp runs the pass and is overwritten below
+        notify_url = get_setting(db, "notify_url")
+        notify_format = get_setting(db, "notify_format") or "ntfy"
+        threshold = price_alerts.get_threshold_pct(db)
+        cap = price_alerts.get_nightly_cap(db)
+
+    result = await price_alerts.run_pass(
+        api_key, threshold=threshold, cap=cap,
+        notify_url=notify_url, notify_format=notify_format,
+    )
+    with get_db() as db:
+        set_setting(db, "price_alert_last_run", str(now))
+        set_setting(db, "price_alert_last_summary", json.dumps({
+            "looked_up": result["looked_up"], "failed": result["failed"],
+            "status": result["failed_status"],
+        }))
+    logger.info(
+        "Price-alert pass: %d looked up, %d drop(s), digest sent: %s",
+        result["looked_up"], result["drops"], result["sent"],
+    )
+    if result["failed"]:
+        logger.warning(
+            "Price-alert pass: %d of %d ISBNdb lookup(s) failed (last status: %s)",
+            result["failed"], result["looked_up"], result["failed_status"],
+        )
+    return True
+
+
+async def _periodic_price_alerts():
+    """Background task: run the daily wishlist price-alert pass."""
+    # Tests and the E2E servers set this so no pass can call ISBNdb live.
+    if os.environ.get("SHELF_DISABLE_PRICE_ALERTS"):
+        return
+    while True:
+        await asyncio.sleep(300)  # check every 5 minutes
+        try:
+            await check_price_alerts()
+        except Exception:
+            logger.exception("Price-alert pass failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -404,12 +475,14 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(_periodic_abs_sync())
     hc_task = asyncio.create_task(_periodic_hardcover_sync())
     loan_task = asyncio.create_task(_periodic_loan_reminders())
+    price_task = asyncio.create_task(_periodic_price_alerts())
     from app.services import cover_queue
     cover_task = cover_queue.start()
     yield
     task.cancel()
     hc_task.cancel()
     loan_task.cancel()
+    price_task.cancel()
     if cover_task is not None:
         cover_task.cancel()
 

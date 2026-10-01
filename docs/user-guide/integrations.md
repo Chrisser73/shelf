@@ -109,7 +109,8 @@ now probes TMDb exactly the way a real lookup does.
 [isbndb.com](https://isbndb.com) — paid.
 
 **Adds:** list-price valuation per item and in bulk, the insurance report's
-numbers, value-over-time stats. See
+numbers, value-over-time stats, and nightly wishlist
+[price alerts](wishlist-and-store-mode.md#price-alerts). See
 [Stats & valuation](stats-and-valuation.md).
 
 ## Google Books (optional API key)
@@ -175,8 +176,9 @@ Anthropic, any OpenAI-compatible endpoint, or Ollama. See
 ## Notifications (ntfy / webhook)
 
 Not an integration card — lives under Settings → Library → Lending — but the
-same idea: an ntfy topic or JSON webhook URL for the overdue-loan digest. See
-[Lending](lending.md#reminders).
+same idea: an ntfy topic or JSON webhook URL for the overdue-loan digest and
+the wishlist price-drop digest. See [Lending](lending.md#reminders) and
+[Price alerts](wishlist-and-store-mode.md#price-alerts).
 
 ## Always-on sources (no key)
 

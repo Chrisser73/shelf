@@ -59,7 +59,9 @@ tile and value chart, and Settings loses the valuate button and the report
 link. A value you typed yourself (a manual value) still shows.
 
 Settings → Integrations → **Collection Valuation** takes an
-[ISBNdb](https://isbndb.com) API key (paid; the basic tier suffices). Then:
+[ISBNdb](https://isbndb.com) API key (paid; the basic tier suffices). The
+same key powers [price alerts](wishlist-and-store-mode.md#price-alerts) for
+the wishlist. Then:
 
 - **Valuate all** walks every owned item with an ISBN and records the list price.
   It respects ISBNdb's pacing, so a large library takes a few minutes; a

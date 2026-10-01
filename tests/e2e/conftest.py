@@ -216,6 +216,9 @@ def _boot_server(
         # too, so E2E makes no outbound cover fetches. enqueue() still works —
         # jobs simply sit, which is what the cover-poll tests rely on.
         "SHELF_DISABLE_COVER_ENRICH": "1",
+        # The server outlives the price-alert loop's first five-minute sleep; a
+        # test that saved an ISBNdb key beside a wishlisted ISBN would call it live.
+        "SHELF_DISABLE_PRICE_ALERTS": "1",
         # The UPC Item DB stub, in the *fixed* block rather than in `env_extra`:
         # every E2E server gets it with no test opting in, and `clear_env`
         # cannot remove it. `env_extra` is applied after, so a test that wants

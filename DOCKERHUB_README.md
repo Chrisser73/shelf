@@ -135,7 +135,7 @@ key material.
 - Video game support with IGDB metadata and 30+ platforms (Atari 2600 to PS5)
 
 ### Collection Management
-- Choose your features — pick Minimal, Standard or Everything in the setup wizard, then turn any optional part (Lending, Sharing, Valuation, the integrations, …) on or off in Settings → Features; data is kept while a feature is off
+- Choose your features — pick Minimal, Standard or Everything in the setup wizard, then turn any optional part (Lending, Sharing, Valuation, Price alerts, the integrations, …) on or off in Settings → Features; data is kept while a feature is off
 - Home overview — totals, what is lent out, missing covers, a media-type breakdown and recent additions, with Browse kept for searching and bulk editing
 - Filter and search by media type, location, status (read, watched, played), ownership, lending status, source (which sync, provider or import an item arrived from), custom tags, and author — every author on an item page is a link to everything by that person, co-authors and translators each counted on their own
 - Shelf Fill — keep one shelf selected and scan item after item onto it; Arrange drags the copies on a shelf into the order they really sit in, or sorts them by title, creator, series, release or issue
@@ -152,6 +152,7 @@ key material.
 - Custom tags — free-form tags (`signed`, `first-edition`, …) on the item and edit pages or applied in bulk from Browse, with a tag filter and an optional Tags column on Browse, a tag manager in Settings (rename, scope, delete, counts), and default tags for a scanning session on Scan, Shelf Fill or Photo Intake
 - Bulk editing — select items in Browse to move them, change type or status, add to or remove from the wishlist, set and clear series, or add and remove a tag in one go
 - Valuation report — location-grouped, print-ready collection value report for insurance (via ISBNdb)
+- Price alerts — Shelf checks the list price of wishlisted books nightly through ISBNdb and sends a digest when one drops past your threshold; list price, not used-market price
 - Display currency — 20 currencies for every value surface (formatting, not conversion)
 - CSV import/export, plus a portable archive — export the whole collection as one zip **including physical copies and cover art** and merge it into any Shelf instance without refetching a cover
 
@@ -172,7 +173,7 @@ Shelf works fully out of the box with no API keys. These optional integrations a
 | [RomM](https://romm.app) | Sync a self-hosted RomM server's digital game library | Yes |
 | [Komga](https://komga.org) | Sync a self-hosted Komga server's digital comics and manga | Yes |
 | [TMDb](https://www.themoviedb.org) | DVD/Blu-ray metadata — from UPC barcodes, title search, and Photo Intake confirm | Yes |
-| [ISBNdb](https://isbndb.com) | Collection valuation with market prices | Paid |
+| [ISBNdb](https://isbndb.com) | Collection valuation with market prices; wishlist price alerts | Paid |
 | [Anthropic](https://console.anthropic.com) | Photo Intake spine recognition (best accuracy) | Pay-per-use |
 | [OpenAI-compatible](https://platform.openai.com) | Photo Intake via any OpenAI Chat Completions endpoint (OpenAI, OpenRouter, vLLM, LM Studio…) | Pay-per-use / free |
 | [Ollama](https://ollama.com) | Photo Intake with a fully local vision model | Free |

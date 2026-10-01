@@ -130,6 +130,8 @@ nullable `media_type` **scope**) + `item_tags`, `authors` + `item_authors`
 (the author index, below), `series_meta` (Hardcover
 completeness), `reading_log`, `users`, `settings` (k/v, secrets encrypted),
 `share_links`, `scan_log`, `game_platforms`, `valuation_history`,
+`price_history` (append-only list-price observations for wishlisted books,
+one row per lookup, a `NULL` price recording a miss),
 `cover_queue`, `lists` (named lists — one seeded row, `wishlist`) +
 `list_items` (which items are on which list),
 `legacy_book_mappings` (a confirmed legacy price-point
@@ -934,19 +936,48 @@ the queue and walk the reviewer backwards.
 Started in the app lifespan, each polling every 5 minutes and reading its
 schedule from `settings`: Audiobookshelf sync, Hardcover reading-status
 sync, overdue-loan reminder digest (ntfy / webhook via `services/notify.py`),
-plus the cover queue worker. All are plain `asyncio` tasks in the one
+the wishlist price-alert pass (`services/price_alerts.py`), plus the cover
+queue worker. All are plain `asyncio` tasks in the one
 process. The Audiobookshelf sync is idempotent per item — an unchanged item
 is neither rewritten nor re-covered, and a same-format ISBN already present
 is adopted rather than inserted — and isolated per library, so one library's
 timeout is reported for that library and the rest still run.
 
-Each of the three scheduled jobs checks its feature flag (`abs_sync`,
-`hardcover`, `lending`) at the top of every pass. A disabled job skips the
-pass without calling its service and without writing its
-`abs_last_sync` / `hc_last_sync` / `loan_reminder_last_sent` stamp, so
+Each of the four scheduled jobs checks its feature flag (`abs_sync`,
+`hardcover`, `lending`, `price_alerts`) at the top of every pass. A disabled
+job skips the pass without calling its service and without writing its
+`abs_last_sync` / `hc_last_sync` / `loan_reminder_last_sent` /
+`price_alert_last_run` stamp, so
 re-enabling does not pretend a sync ran. The loop never exits: turning the
 feature back on resumes it at the next five-minute wake, with no restart. The
 cover queue is core and has no flag.
+
+The price-alert pass runs at most once a day. It selects live, wishlisted,
+ISBN-bearing items (`items_live` + `lists.WISHLISTED_SQL`) ordered by their
+newest `price_history` row, never-observed first, and takes the first
+`price_alert_nightly_cap`. That ordering is the round-robin: no cursor, it
+survives restarts, and a newly wishlisted book jumps the queue. Each lookup
+**bypasses the ISBNdb cache read** (`lookup_price(..., use_cache=False)`) —
+valuation keeps a year-long cache, which would have the watcher re-read the
+same price for a year — but still writes a fresh answer back, so valuation
+sees it. Only an *answer* is cached: a 200, or a 404 for a book ISBNdb does
+not have. A refused key, a rate limit, a 5xx or a timeout leaves the cache
+alone — an entry written for it would be trusted for a year and would
+overwrite a good price valuation had cached. Pacing is unchanged: every
+request goes through `outbound.acquire`.
+A lookup that returns no price is recorded as a `NULL` row, so a title ISBNdb
+cannot price moves to the back of the queue instead of holding a slot every
+night. A lookup ISBNdb did not answer (`lookup_price(..., raise_on_failure=True)`
+raises `LookupFailed`) records **no** row, so the book keeps its place; it is
+counted, a 401 or 403 ends the pass (every further lookup would be refused),
+and the pass logs a warning and stores `price_alert_last_summary`, which the
+Settings block shows beside the last-run time. Unlike the loan digest, the pass writes its stamp whether or not the
+digest was delivered: the expensive part is the lookups, not the send.
+A feature with no flag row reads as on, so migration 41 writes
+`feature.price_alerts = '0'` on upgrade wherever `feature.valuation` is `'0'`:
+an install on Standard or Minimal does not wake up spending its ISBNdb key.
+`SHELF_DISABLE_PRICE_ALERTS` keeps the loop from starting, which the test
+suites rely on to stay offline.
 
 ## Self-hosted library sync
 

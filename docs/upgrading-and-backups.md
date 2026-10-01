@@ -30,6 +30,28 @@ Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
 
+### After upgrading to X.Y.Z
+
+**A `price_history` table is created on first start.** It holds the list
+prices the new [price alerts](user-guide/wishlist-and-store-mode.md#price-alerts)
+record for wishlisted books. It starts empty and fills only while Price alerts
+is on and an ISBNdb key is saved.
+
+**Price alerts starts the way Valuation stands.** If Valuation is off — as
+it is under the Standard and Minimal profiles — the upgrade turns Price alerts
+off too. Otherwise (the Everything profile, or an install that never chose a
+profile) it is on, and if an ISBNdb key is saved the first check runs a few
+minutes after the upgrade, looking up to 100 wishlisted books a night — each
+one an ISBNdb request against your plan. Change it under Settings →
+**Features**, or lower **Books checked per night** under Settings →
+Integrations → Collection Valuation → **Price alerts**.
+
+**Price history is in a database backup, not in a portable archive.** Copying
+`data/` or downloading a Settings backup keeps it. A portable archive leaves
+it out, so importing an archive into a new install starts every book's price
+history from zero — and, as with loans and reading history, an archive
+exported before a change and imported after it does not bring history back.
+
 ### After upgrading to 0.59.0
 
 **Stats' Books Read per Year chart may show lower bars.** It now counts only
@@ -375,7 +397,8 @@ a new server or hand your library to someone else, and it imports with a
 preview step that shows what's new, what's already there and how duplicates
 were matched. See [Import & export](user-guide/import-and-export.md).
 The author index is not in the archive either: it is rebuilt from each item's
-authors field on the receiving server.
+authors field on the receiving server. Wishlist price history is left out
+too, and is not rebuilt — the receiving server starts recording prices afresh.
 
 A sensible routine: an automated copy of `data/` (e.g. nightly via your
 backup tool), plus a portable archive before any big change.

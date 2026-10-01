@@ -3,8 +3,8 @@
 [![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
 [![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-4847%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![E2E tests](https://img.shields.io/badge/e2e%20tests-314%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-4968%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
+[![E2E tests](https://img.shields.io/badge/e2e%20tests-321%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
 
 A self-hosted home library catalog with barcode scanning, multi-mode scanning workflows, automatic metadata lookup, cover art, and collection management — all in a single Docker container.
@@ -182,7 +182,7 @@ photo into overlapping tiles for better accuracy — with a cost estimate for
 each option before anything is sent.
 
 ### Collection Management
-- **Choose your features** — the setup wizard starts you on Minimal, Standard or Everything, and Settings → Features turns any optional part (Lending, Sharing, Valuation, Photo Intake, the integrations, …) on or off later, one at a time or by applying a profile. A feature that is off leaves the pages you use, and its data is kept for when it comes back. See [Configuration → Features](docs/configuration.md#features)
+- **Choose your features** — the setup wizard starts you on Minimal, Standard or Everything, and Settings → Features turns any optional part (Lending, Sharing, Valuation, Price alerts, Photo Intake, the integrations, …) on or off later, one at a time or by applying a profile. A feature that is off leaves the pages you use, and its data is kept for when it comes back. See [Configuration → Features](docs/configuration.md#features)
 - **Home overview** — Shelf opens on a page that answers "what is happening in my library?": catalogue, owned and wishlist totals, what is lent out, missing covers, a media-type breakdown and recent additions. Browse stays the place for searching, filtering and bulk editing. See [Home](docs/user-guide/home.md)
 - **Filter and search** — by media type, location, status (read, watched, played), ownership, lending status, source (which sync, provider or import an item arrived from), and free text
 - **Reading tracking** — want-to-read, reading, and read with start/finish dates
@@ -205,6 +205,7 @@ each option before anything is sent.
 - **Bulk editing** — select multiple items in Browse to move them, change type or status, add them to or remove them from the wishlist, set and clear their series, or add and remove a tag in one go
 - **Choose your columns** — Browse's list view has a column picker (value, series, publisher, year, pages, language, added date, platform, ISBN/UPC, and more), on top of the author/type/location/status shown by default; the choice is remembered per browser, not per account
 - **Valuation report** — location-grouped, print-ready report of your collection's list-price value for insurance documentation ([print view](screenshots/valuation-report-print.png)); prices via ISBNdb
+- **Price alerts** — Shelf checks the list price of wishlisted books nightly through ISBNdb and sends a digest when one drops past your threshold; list price, not used-market price. See [Price alerts](docs/user-guide/wishlist-and-store-mode.md#price-alerts)
 - **Display currency** — pick from 20 currencies under Settings → Collection and every value surface follows. This is formatting, not conversion: Shelf never converts amounts between currencies, so the figure ISBNdb returns is the figure shown
 - **CSV import/export** — bulk operations and backups
 - **Portable archive** — export your whole collection as a single zip (items, tags, locations, series, reading log, checkouts, physical copies, **and your cover art**) and merge it back into any Shelf instance without refetching a single cover. No credentials or instance-specific data are included, so it's the safe way to move servers or hand your library to someone else — unlike a database backup, which carries password hashes and encrypted API keys but no covers at all. Importing previews first: you see how many items are new, how many are already yours, how each duplicate was matched (exactly on ISBN, or heuristically on title and author), and you can leave parts of the archive out before anything is written. Trash travels too: what you deleted arrives in Trash on the other side, with its deletion date, and an import never moves a live item to Trash
@@ -217,7 +218,7 @@ each option before anything is sent.
 - **[IGDB](https://www.igdb.com)** — video game metadata, cover art, and platform info via Twitch developer credentials (free)
 - **[RomM](https://romm.app)** — sync a self-hosted RomM server's digital game library. A RomM game gets its own record rather than being matched onto a physical cartridge you already own; link the two yourself. See [RomM](docs/romm.md)
 - **[Komga](https://komga.org)** — sync a self-hosted Komga server's digital comics and manga, matching on ISBN where one exists. A library's Comic/Manga kind is kept apart from Shelf's own media type, so it never reclassifies an item you catalogued by hand. See [Komga](docs/komga.md)
-- **[ISBNdb](https://isbndb.com)** — collection valuation with list prices for insurance documentation
+- **[ISBNdb](https://isbndb.com)** — collection valuation with list prices for insurance documentation, and wishlist price alerts
 
 ### Store Mode (Offline PWA)
 
@@ -309,7 +310,7 @@ Configure in Settings to unlock additional features:
 | **Google Books** | Optional credentialed metadata, synopsis, and cover requests; anonymous access remains available | [Google Books API](https://developers.google.com/books) |
 | **IGDB** (Twitch) | Video game metadata, cover art, and platform info — on UPC scan, title search, and Photo Intake confirm | [dev.twitch.tv/console](https://dev.twitch.tv/console) |
 | **Discogs** | Pick the exact pressing of a Music item; Shelf keeps only the Discogs release ID | [discogs.com/settings/developers](https://www.discogs.com/settings/developers) |
-| **ISBNdb** | Collection valuation with market prices | [isbndb.com](https://isbndb.com) |
+| **ISBNdb** | Collection valuation with market prices; wishlist price alerts | [isbndb.com](https://isbndb.com) |
 | **TMDb** | DVD/Blu-ray metadata — on UPC scan, title search, and Photo Intake confirm | [themoviedb.org](https://www.themoviedb.org) |
 | **Anthropic** | Photo Intake — reads spines and recognizes covers (best accuracy) | [console.anthropic.com](https://console.anthropic.com) |
 | **OpenAI-compatible** | Photo Intake via any OpenAI Chat Completions endpoint (OpenAI, OpenRouter, vLLM, LM Studio…) | [platform.openai.com](https://platform.openai.com) |

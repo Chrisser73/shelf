@@ -1,4 +1,4 @@
-"""T8: each of the three background jobs skips its pass while its feature is
+"""T8: each of the four background jobs skips its pass while its feature is
 off — no service call, no last-sync/last-sent stamp written — and resumes on
 the very next pass once the feature is turned back on (no restart needed).
 
@@ -144,3 +144,44 @@ class TestLoanRemindersFeatureGate:
             assert await check_loan_reminders() is True
         send.assert_awaited_once()
         assert _stamp(db, "loan_reminder_last_sent") is not None
+
+
+class TestPriceAlertsFeatureGate:
+    def _seed(self, db):
+        _insert_item(db, title="Wanted Book", isbn="9780306406157", wishlisted=True)
+        _set_setting(db, "isbndb_api_key", "test-key")
+        db.execute("COMMIT")
+
+    @pytest.fixture(autouse=True)
+    def _no_cache_file(self):
+        # isbndb.CACHE_FILE is frozen at import and not redirected by conftest.
+        with patch("app.services.isbndb._load_cache", return_value={}), \
+             patch("app.services.isbndb._save_cache"):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_off_skips_lookup_and_writes_no_stamp(self, db):
+        from app.main import check_price_alerts
+        self._seed(db)
+        _toggle("price_alerts", False)
+
+        with patch("app.services.isbndb.lookup_price", new=AsyncMock()) as lookup:
+            assert await check_price_alerts() is False
+        lookup.assert_not_awaited()
+        assert _stamp(db, "price_alert_last_run") is None
+
+    @pytest.mark.asyncio
+    async def test_on_after_off_runs_and_writes_stamp(self, db):
+        from app.main import check_price_alerts
+        self._seed(db)
+        _toggle("price_alerts", False)
+        with patch("app.services.isbndb.lookup_price", new=AsyncMock()) as lookup:
+            assert await check_price_alerts() is False
+        lookup.assert_not_awaited()
+
+        _toggle("price_alerts", True)
+        with patch("app.services.isbndb.lookup_price",
+                   new=AsyncMock(return_value={"msrp": "12.99"})) as lookup:
+            assert await check_price_alerts() is True
+        lookup.assert_awaited_once()
+        assert _stamp(db, "price_alert_last_run") is not None

@@ -529,6 +529,7 @@
                 Save
             </button>
         </form>
+        {% include "fragments/settings/price_alerts.html" %}
         <div class="border-t border-shelf-border pt-4 space-y-2">
             {% if feature_on('valuation') %}
             <button @click="startValuation()"

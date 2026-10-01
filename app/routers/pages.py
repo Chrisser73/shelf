@@ -18,6 +18,7 @@ from app.services import lists
 from app.services import isbn as isbn_svc
 from app.services import upc as upc_svc
 from app.services import tags as tags_svc
+from app.services import price_alerts
 from app.services import wrapups
 from app.database import get_db, get_setting, get_game_platforms, get_reading_history
 from app.routers import items_common
@@ -366,6 +367,9 @@ async def item_detail(
                 "gaps": find_gaps(positions),
                 "hc_total": meta["hc_total"] if meta else None,
             }
+        # The list-price line reads history only for the live item on screen;
+        # the template also gates it on feature_on('price_alerts').
+        price_line = price_alerts.price_line(db, item_id) if item["wishlisted"] else None
 
     return request.app.state.templates.TemplateResponse(
         request,
@@ -394,6 +398,7 @@ async def item_detail(
             "reading_history": reading_history,
             "series_progress": series_progress,
             "item_authors": item_authors,
+            "price_line": price_line,
         },
     )
 
@@ -744,6 +749,8 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
     # for it — and both Audiobookshelf actions gate on the URL: Test on typed-or-
     # present, Sync Now on presence alone (issue #41).
     abs_url_present = bool(settings.get("abs_url")) or "abs_url" in env_overrides
+    price_alert_last_run_display = price_alerts.describe_last_run(
+        settings.get("price_alert_last_run"), settings.get("price_alert_last_summary"))
     for k in SENSITIVE_KEYS:
         if k in settings:
             settings[k] = ""
@@ -760,5 +767,10 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
          "current_profile": current_profile,
          "borrower_error_message": borrower_error_message,
          "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats,
-         "tags": tags, "media_types": MEDIA_TYPES},
+         "tags": tags, "media_types": MEDIA_TYPES,
+         "price_alert_last_run_display": price_alert_last_run_display,
+         "price_alert_default_threshold": price_alerts.DEFAULT_THRESHOLD_PCT,
+         "price_alert_max_threshold": price_alerts.MAX_THRESHOLD_PCT,
+         "price_alert_default_cap": price_alerts.DEFAULT_NIGHTLY_CAP,
+         "price_alert_max_cap": price_alerts.MAX_NIGHTLY_CAP},
     )

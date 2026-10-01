@@ -13,7 +13,7 @@ Each flag is one `settings` row, `feature.<key>`. Only the exact value "0"
 disables a feature: an absent row (every upgraded install) or any other value
 means enabled, so an upgrade changes nothing until an admin turns something
 off. Flags are rows only; no env var overrides them. A new install writes all
-fourteen rows explicitly, from the profile chosen at setup; an upgraded
+fifteen rows explicitly, from the profile chosen at setup; an upgraded
 install has none, and reads as Everything.
 
 `nav.py` imports this module, never the reverse at module level.
@@ -117,6 +117,10 @@ def _hardcover_configured() -> bool:
     return _settings_present("hardcover_token")
 
 
+def _price_alerts_configured() -> bool:
+    return _settings_present("isbndb_api_key")
+
+
 def _abs_configured() -> bool:
     return _settings_present("abs_url", "abs_token")
 
@@ -194,6 +198,14 @@ FEATURES: dict[str, Feature] = {
             ("POST", "/api/valuate/test-key"): _CONFIG,
             ("POST", "/api/tmdb/test-key"): "TMDb is core DVD scanning",
         },
+    ),
+    "price_alerts": Feature(
+        label="Price alerts",
+        description="Watch wishlist list prices nightly and send a drop digest.",
+        profile="everything",
+        job="price_alerts",
+        entry_path="/settings",
+        configured=_price_alerts_configured,
     ),
     "music": Feature(
         label="Music",

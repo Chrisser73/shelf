@@ -3545,3 +3545,50 @@ class TestArchiveUploadReadsAreBounded:
 
         assert result.status_code == 200
         assert calls == [MAX_IMPORT_UPLOAD_SIZE + 1]
+
+
+class TestPriceHistoryStaysOut:
+    """Price-alert history is an observation cache for one feature, not part
+    of the catalog: the portable archive neither exports nor imports it, and
+    FORMAT_VERSION stays put (design: plan-price-alerts, Archive and CSV)."""
+
+    def _seed_priced(self, db):
+        item_id = _insert_item(db, title="Dune", isbn="9780441013593", owned=0, wishlisted=True)
+        db.execute("INSERT INTO price_history (item_id, price) VALUES (?, 12.99)", (item_id,))
+        db.execute("INSERT INTO price_history (item_id, price) VALUES (?, NULL)", (item_id,))
+        db.execute("COMMIT")
+        return item_id
+
+    def test_export_has_no_price_history(self, db):
+        self._seed_priced(db)
+        with zipfile.ZipFile(build_archive(db)) as zf:
+            raw = zf.read("library.json").decode()
+        library = json.loads(raw)
+        assert "price_history" not in library
+        assert "price_history" not in raw
+        assert "12.99" not in raw
+
+    def test_import_ignores_a_price_history_key(self, db, tmp_path):
+        self._seed_priced(db)
+        exported = build_archive(db)
+        with zipfile.ZipFile(exported) as zf:
+            entries = {n: zf.read(n) for n in zf.namelist()}
+        library = json.loads(entries["library.json"])
+        library["price_history"] = [{"item_id": 1, "price": 1.0, "observed_at": "2026-01-01"}]
+        entries["library.json"] = json.dumps(library).encode()
+        doctored = tmp_path / "doctored.zip"
+        with zipfile.ZipFile(doctored, "w") as zf:
+            for name, data in entries.items():
+                zf.writestr(name, data)
+
+        _wipe_library(db)
+        db.execute("DELETE FROM price_history")
+        db.execute("COMMIT")
+
+        with read_archive(doctored) as reader:
+            report = merge_archive(db, reader, mode="skip")
+        db.execute("COMMIT")
+
+        assert report["errors"] == []
+        assert report["imported"] == 1
+        assert db.execute("SELECT COUNT(*) FROM price_history").fetchone()[0] == 0

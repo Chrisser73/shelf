@@ -34,7 +34,7 @@ New here? Start with **[Installation](installation.md)**, then
 | [Shelf Fill](user-guide/shelf-fill.md) | Rapid placement: keep a shelf selected and scan items onto it one after another |
 | [Series](user-guide/series.md) | Series page, gaps, Hardcover completeness checks, rename/merge/disband |
 | [Lending](user-guide/lending.md) | Borrowers, Lend/Return modes, overdue tracking, reminder notifications |
-| [Wishlist & Store Mode](user-guide/wishlist-and-store-mode.md) | Building a wishlist; the offline bookstore PWA |
+| [Wishlist & Store Mode](user-guide/wishlist-and-store-mode.md) | Building a wishlist; price alerts; the offline bookstore PWA |
 | [Sharing](user-guide/sharing.md) | Public read-only wishlist and collection links |
 | [Stats & valuation](user-guide/stats-and-valuation.md) | Stats dashboard, ISBNdb valuation, the insurance report, display currency |
 | [Import & export](user-guide/import-and-export.md) | CSV, Goodreads/StoryGraph migration, portable archive, database backup |

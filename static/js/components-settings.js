@@ -39,6 +39,25 @@ document.addEventListener('alpine:init', function () {
             setTab(name) {
                 this.tab = name;
                 localStorage.setItem('shelf_settings_tab', name);
+            },
+            // Switch tab, then bring one field on it into view and focus it —
+            // setTab alone keeps the old tab's scroll offset, which can leave
+            // the field far below the fold. The panel's x-show has not applied
+            // by $nextTick (measured: visible only a frame later), and a hidden
+            // field neither scrolls nor focuses, so wait a few frames for it.
+            goToField(name, id) {
+                this.setTab(name);
+                const reveal = (tries) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    if (!el.offsetParent && tries > 0) {
+                        requestAnimationFrame(() => reveal(tries - 1));
+                        return;
+                    }
+                    el.scrollIntoView({ block: 'center' });
+                    el.focus({ preventScroll: true });
+                };
+                this.$nextTick(() => reveal(10));
             }
         };
     });

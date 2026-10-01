@@ -33,6 +33,49 @@ duplicating it. Scanning it in **Wishlist** mode changes nothing.
 
 Share it as a gift list with a public link — see [Sharing](sharing.md).
 
+## Price alerts
+
+Shelf can watch the wishlist for price cuts. It checks the **publisher's list
+price** through [ISBNdb](https://isbndb.com) — the same source as
+[Valuation](stats-and-valuation.md#valuation-isbndb). That makes it good for
+spotting reprints and publisher price cuts, and no use for used-market or
+second-hand deals, which ISBNdb does not track.
+
+It needs two things: an ISBNdb API key (Settings → Integrations →
+**Collection Valuation**) and the **Price alerts** feature, which is on in
+the Everything profile (Settings → **Features**). Until a key is saved, the
+Features row says it needs setup.
+
+Once a day Shelf looks up wishlisted books that have an ISBN, starting with
+the ones it has never checked and then the ones it checked longest ago. It
+checks at most **Books checked per night** of them (default 100), so a
+larger wishlist is covered over several nights, and a book you have just
+wishlisted is checked first. Lookups are paced to ISBNdb's rate limit.
+Games, discs and music are not watched — there is no list-price source for
+them.
+
+When a book's price has fallen by at least the **drop threshold** (default
+15%) since its last recorded price, it goes into a digest — one message per
+night for all the drops, like `Dune — $12.99 → $8.49 (−35%)`. The digest
+goes to the notification URL under Settings → Library → **Lending**, in the
+same ntfy or webhook format as [loan reminders](lending.md#reminders). With
+no URL set, prices are still recorded; you just get no message.
+
+On a wishlisted book's page, a line under the title shows the latest price
+and, if it has changed, the previous one: *List price $8.49 · was $12.99 on
+2026-09-02*. If a later check found no price for the book, the latest price
+is dated so it does not read as current: *List price $8.49 as of 2026-09-20*.
+
+Both settings and the last check are in the **Price alerts** block on the
+Collection Valuation card. The last check reads like *2026-10-01 02:40 UTC —
+100 checked*; if ISBNdb did not answer some lookups it adds how many and why,
+such as *1 checked, 1 failed (ISBNdb refused the API key)* — a refused key
+stops that night's check at the first book. A book whose lookup failed is
+checked again first next time — see
+[Settings → Price alerts](settings.md#price-alerts). Price history is kept in
+the database and is **not** included in a portable archive export — see
+[Upgrading and backups](../upgrading-and-backups.md).
+
 ## Store Mode (offline)
 
 Standing in a shop with no signal and a stack of second-hand books, you want

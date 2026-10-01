@@ -5856,6 +5856,34 @@ grep -n "WHERE pi.barcode_ean = ? AND pi.barcode_supplement = ?" app/services/pe
 - **Status:** documented. Retire it if the barcode strategy becomes scoped
   to a publication.
 
+## G134 — When a test drives code that reads or writes a file under `DATA_DIR` through a module-level path
+
+- **Rule:** a module-level constant *derived* from `DATA_DIR`
+  (`CACHE_FILE = DATA_DIR / ".isbn_price_cache.json"` in
+  `app/services/isbndb.py`) escapes the test isolation. Patch the module's
+  load/save helpers in the test (`isbndb._load_cache` / `_save_cache`, as
+  `tests/test_valuation_report.py` does), or — in new code — resolve the path
+  at call time from `app.config.DATA_DIR`, as `import_staging._staging_dir()`
+  does.
+- **Why:** `tests/conftest.py::_redirect_stale_path_constants` redirects only
+  attributes *named* `DATA_DIR`, `DATABASE_PATH` or `COVERS_DIR`. A path
+  computed from `DATA_DIR` at import time has another name and keeps the real
+  directory, so an unpatched test writes into the repo's `data/` (or `/data`
+  in the container) and passes. Nothing fails; the pollution is silent.
+- **Evidence:** `3fd1a78` / `0137126` (2026-09-30, price-alerts T3/T4). The
+  price-alert pass loads and saves the ISBNdb cache itself; every `run_pass`
+  and `check_price_alerts` test patches both helpers for this reason.
+- **Verify:** lists every module-level path built from `DATA_DIR` outside
+  `app/config.py` (whose two are redirected by name); each hit is one
+  conftest does not redirect.
+
+```bash
+grep -rnE '^[A-Z_]+ *= *DATA_DIR */' app --include=*.py | grep -v '^app/config.py'
+```
+
+- **Status:** documented. Retire it when `isbndb.CACHE_FILE` resolves at call
+  time and the grep above returns nothing.
+
 ## Graveyard
 
 Retired entries land here with a one-line reason (refactored away, lint

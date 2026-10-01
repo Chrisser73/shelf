@@ -165,9 +165,9 @@ def test_registry_entry_paths_are_local():
         assert f.entry_path.startswith("/") and not f.entry_path.startswith("//"), key
 
 
-def test_registry_has_the_fourteen_designed_features():
+def test_registry_has_the_fifteen_designed_features():
     assert list(FEATURES) == [
-        "lending", "series", "stats", "store", "share", "valuation", "music",
+        "lending", "series", "stats", "store", "share", "valuation", "price_alerts", "music",
         "periodicals", "shelf_fill", "intake", "hardcover", "abs_sync", "komga", "romm",
     ]
 
@@ -216,7 +216,7 @@ def _profile_rows(db):
 
 
 @pytest.mark.parametrize("name", ["minimal", "standard", "everything"])
-def test_apply_profile_writes_all_fourteen_rows(db, name):
+def test_apply_profile_writes_all_fifteen_rows(db, name):
     apply_profile(db, name)
     db.commit()
     rows = _profile_rows(db)
@@ -455,3 +455,26 @@ def test_role_is_answered_before_feature():
         if roles and min(gates) < max(roles):
             problems.append(f"{method} {path} ({module}) resolves its feature gate before its role check")
     assert not problems, "\n".join(problems)
+
+
+# --- price_alerts ------------------------------------------------------------
+
+def test_price_alerts_is_everything_only():
+    assert FEATURES["price_alerts"].profile == "everything"
+    assert "price_alerts" in profile_keys("everything")
+    assert "price_alerts" not in profile_keys("standard")
+    assert profile_keys("standard") == _STANDARD_KEYS
+
+
+def _price_alerts_row():
+    return next(r for r in features.feature_rows() if r["key"] == "price_alerts")
+
+
+def test_price_alerts_needs_an_isbndb_key(monkeypatch):
+    monkeypatch.delenv("ISBNDB_API_KEY", raising=False)
+    assert _price_alerts_row()["configured"] is False
+
+
+def test_price_alerts_configured_by_env_only_key(monkeypatch):
+    monkeypatch.setenv("ISBNDB_API_KEY", "env-only-isbndb-key")
+    assert _price_alerts_row()["configured"] is True

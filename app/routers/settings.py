@@ -205,6 +205,39 @@ async def update_trash_settings(trash_retention_days: str = Form("180")):
     return RedirectResponse(url="/settings", status_code=303)
 
 
+@router.post("/price-alerts")
+async def update_price_alert_settings(
+    price_alert_threshold_pct: str = Form("15"),
+    price_alert_nightly_cap: str = Form("100"),
+):
+    """Save the price-alert drop threshold and nightly lookup cap.
+
+    Separate from POST /api/settings for the same reason as /trash: a partial
+    form posted there would blank the integration credentials.
+    """
+    from app.services import price_alerts
+
+    def _whole(raw: str) -> int:
+        # ASCII-only int(): str.isdigit() also accepts "²" (see /trash).
+        raw = raw.strip()
+        try:
+            return int(raw) if raw.isascii() else -1
+        except ValueError:
+            return -1
+
+    threshold = _whole(price_alert_threshold_pct)
+    cap = _whole(price_alert_nightly_cap)
+    if not 1 <= threshold <= price_alerts.MAX_THRESHOLD_PCT:
+        return {"ok": False, "message": f"Drop threshold must be a whole number from 1 to {price_alerts.MAX_THRESHOLD_PCT}"}
+    if not 1 <= cap <= price_alerts.MAX_NIGHTLY_CAP:
+        return {"ok": False, "message": f"Books per night must be a whole number from 1 to {price_alerts.MAX_NIGHTLY_CAP}"}
+
+    with get_db() as db:
+        _upsert_setting(db, "price_alert_threshold_pct", str(threshold))
+        _upsert_setting(db, "price_alert_nightly_cap", str(cap))
+    return RedirectResponse(url="/settings", status_code=303)
+
+
 @router.post("/nav")
 async def update_nav_settings(request: Request):
     """Save which nav tabs are visible.

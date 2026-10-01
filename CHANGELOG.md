@@ -6,6 +6,64 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-10-01
+
+The wishlist was a shopping list nobody watched: to know whether a book you
+wanted had got cheaper, you looked its price up by hand, again and again. Shelf
+now checks the wishlist's prices every night and sends one message when any of
+them drop.
+
+### Added
+
+- **Wishlist price alerts.** Once a day Shelf looks up the **publisher's list
+  price** of wishlisted books through ISBNdb, the same source as Valuation. When
+  a price has fallen by at least your threshold since it was last seen, the
+  book goes into one nightly digest — `Dune — $12.99 → $8.49 (−35%)` — sent to
+  the notification URL under Settings → Library → **Lending**, in the same ntfy
+  or webhook format as loan reminders. With no URL set, prices are still
+  recorded. It needs an ISBNdb API key, and is the new **Price alerts** row in
+  Settings → Features, part of the Everything profile.
+- **It tracks list price, not street price.** That makes it good for spotting
+  reprints and publisher price cuts, and no use for used or second-hand deals,
+  which ISBNdb does not track; the settings say so. Only books with an ISBN are
+  watched — games, discs and music have no list-price source.
+- **Two settings, under Settings → Integrations → Collection Valuation →
+  Price alerts:** the drop threshold (default 15%) and how many books are
+  checked per night (default 100). A wishlist larger than that is covered
+  over several nights, the books checked longest ago first, and a book you have
+  just wishlisted is checked first of all.
+- **The last check, and what went wrong with it.** The same block shows when
+  the last check ran and how many books it checked — and, when ISBNdb did not
+  answer, how many lookups failed and why: *1 checked, 1 failed (ISBNdb refused
+  the API key)*. A refused key stops that night's check at the first book
+  rather than spending the rest of the night on refusals, and a book whose
+  lookup failed is checked again first next time.
+- **The list price on a wishlisted book's page.** A line under the title shows
+  the latest list price and, if it has changed, the previous one: *List price
+  $8.49 · was $12.99 on 2026-09-02*. If a later check found no price for the
+  book, the price is dated so it does not read as current: *List price $8.49 as
+  of 2026-09-20*.
+
+There is deliberately no "check now" button: every lookup is an ISBNdb request
+against your plan, so checks run on the nightly schedule only. Removing a book
+from the wishlist is how you stop watching it.
+
+### Changed
+
+- **Price history is kept in the database, not in a portable archive.** A
+  database backup keeps it; importing a portable archive into a new install
+  starts every book's price history from zero.
+- **A failed ISBNdb lookup no longer blanks a Valuation price for a year.**
+  Valuation caches ISBNdb's answers for a year. Before, a lookup refused for a
+  bad key, rate-limited or timed out was cached as "no price", and that book
+  showed no price in the valuation report until the entry expired. Only a real
+  answer is cached now.
+- **Upgrading starts Price alerts the way Valuation stands.** If Valuation is
+  off — as under the Standard and Minimal profiles — Price alerts starts off
+  too. Otherwise it starts on, so an install with an ISBNdb key saved begins
+  checking up to 100 wishlisted books a night a few minutes after the upgrade.
+  See [Upgrading](docs/upgrading-and-backups.md) to change either.
+
 ## [0.61.1] - 2026-09-30
 
 Two editions of a magazine that share a title — the US and UK *Wired*, say —
@@ -4787,6 +4845,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.62.0]: https://github.com/dgahagan/shelf/releases/tag/v0.62.0
 [0.61.1]: https://github.com/dgahagan/shelf/releases/tag/v0.61.1
 [0.61.0]: https://github.com/dgahagan/shelf/releases/tag/v0.61.0
 [0.60.0]: https://github.com/dgahagan/shelf/releases/tag/v0.60.0

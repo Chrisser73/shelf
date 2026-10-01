@@ -328,7 +328,7 @@ def test_profile_cards_name_what_applying_turns_off(admin_client):
     never setup's "Adds:", which is relative to the next-smaller profile."""
     page = admin_client.get("/settings").text
     assert "Adds:" not in _profiles_block(page)
-    assert "Turns off: Sharing, Valuation, Photo Intake, Hardcover, " \
+    assert "Turns off: Sharing, Valuation, Price alerts, Photo Intake, Hardcover, " \
         "Audiobookshelf sync, Komga, RomM" in _visible(page, "standard")
     assert "Turns on:" not in _visible(page, "standard")
     assert "Turns off: Lending, Series" in _visible(page, "minimal")
@@ -353,3 +353,11 @@ def test_profile_card_from_custom_names_both_directions(admin_client):
     standard = _visible(page, "standard")
     assert "Turns on: Series" in standard
     assert "Turns off: Sharing" in standard
+
+
+def test_price_alerts_row_says_needs_setup_without_a_key(admin_client, monkeypatch):
+    monkeypatch.delenv("ISBNDB_API_KEY", raising=False)
+    page = admin_client.get("/settings").text
+    assert 'data-testid="feature-row-price_alerts"' in page
+    row = _row(page, "price_alerts")
+    assert "data-feature-needs-setup" in row

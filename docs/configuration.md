@@ -20,6 +20,7 @@ Set these in your `.env` file next to `docker-compose.yml`, or with `-e` on
 | `SHELF_ENCRYPTION_KEY` | *(auto)* | Key for API credentials stored in the database. If unset, generated at `data/encryption.key`. Set it (`openssl rand -hex 32`) so the data directory alone can't decrypt credentials |
 | `DATA_DIR` | `/data` | Where the database, covers and certs live. Only relevant outside Docker |
 | `SHELF_DISABLE_RATE_LIMIT` | *(unset)* | Turns off per-IP rate limiting. For tests and local development only |
+| `SHELF_DISABLE_PRICE_ALERTS` | *(unset)* | Stops the nightly wishlist price-alert check from starting, so it never calls ISBNdb. For tests only — the test suite sets it; leave it unset in production |
 | `SHELF_UPC_LOOKUP_URL` | *(unset)* | Overrides the UPC Item DB lookup endpoint. For the test suite only — the E2E gate points it at a local stub. Leave it unset in production; the trial endpoint is used and paced when it is |
 
 ### Credential overrides
@@ -34,7 +35,7 @@ priority** over anything stored:
 | `GOOGLE_BOOKS_API_KEY` | Optional Google Books API key; anonymous lookups remain available when unset |
 | `ABS_URL`, `ABS_TOKEN` | Audiobookshelf server URL and API token |
 | `ABS_PUBLIC_URL` | Optional browser-facing Audiobookshelf URL, for **Listen** / **Read** links only. Set it when `ABS_URL` is an internal Docker or LAN address |
-| `ISBNDB_API_KEY` | ISBNdb key (valuation) |
+| `ISBNDB_API_KEY` | ISBNdb key (valuation, price alerts) |
 | `TMDB_API_KEY` | TMDb credential (DVD / Blu-ray metadata **and** DVD cover search) — either the 32-character v3 API Key or the v4 Read Access Token |
 | `IGDB_CLIENT_ID`, `IGDB_CLIENT_SECRET` | Twitch developer credentials (video game metadata **and** game cover search — both fields are required) |
 
@@ -76,7 +77,7 @@ lives:
 | **Locations** | Add, rename and delete shelves/rooms. Names must be unique and non-blank — a clash is refused with a message rather than saved. Deleting a location unassigns its items |
 | **Borrowers** | People you lend to. Deleting a borrower keeps their loan history |
 | **Game Platforms** | The platform list used for video games — 30 built in, add your own |
-| **Lending** | "Overdue after N days" for loans without a due date (0 disables). Notification URL (ntfy topic or JSON webhook) for the daily overdue digest, with a **Send test** button |
+| **Lending** | "Overdue after N days" for loans without a due date (0 disables). Notification URL (ntfy topic or JSON webhook) for the daily overdue digest and the wishlist price-drop digest, with a **Send test** button |
 | **Trash** | "Prompt to empty Trash after N days" (`trash_retention_days`, default 180; 0 never prompts). Past the window, admins see a dismissable banner linking to the expired rows; nothing is deleted automatically. See [Trash](user-guide/items.md#trash) |
 
 ### Integrations
@@ -85,7 +86,7 @@ lives:
 |---|---|
 | **Audiobookshelf Sync** | Server URL, optional browser URL, API token, **Test**, per-library include/exclude, sync interval, manual sync |
 | **Hardcover** | API token, import your Hardcover library, reading-status sync direction and schedule, export to Hardcover |
-| **Collection Valuation** | ISBNdb API key, valuate all / test key |
+| **Collection Valuation** | ISBNdb API key, valuate all / test key. Its **Price alerts** block sets the drop threshold (`price_alert_threshold_pct`, 1–100, default 15) and books checked per night (`price_alert_nightly_cap`, 1–500, default 100), and shows the last run. See [Price alerts](user-guide/wishlist-and-store-mode.md#price-alerts) |
 | **Google Books** | Optional API key, **Test Key**. Authenticates the Google Books requests Shelf already makes; keyless access stays enabled without it |
 | **Movie Database (TMDb)** | API key for DVD / Blu-ray lookups, for **Find cover** on a DVD, and for the lookup a Photo Intake row typed DVD runs when you confirm it |
 | **Photo Intake (Vision)** | Provider: Anthropic (API key + model), OpenAI-compatible (base URL, optional key, model, ingest long-edge), or Ollama (URL, model, ingest long-edge) |
@@ -113,8 +114,8 @@ Add users, set roles, reset passwords. See [Users & roles](user-guide/users-and-
 ### Features
 
 Turn optional parts of Shelf on or off: Lending, Series, Statistics, Store
-Mode, Sharing, Valuation, Music, Periodicals, Shelf Fill, Photo Intake,
-Hardcover, Audiobookshelf sync, Komga and RomM. An upgrade leaves everything
+Mode, Sharing, Valuation, Price alerts, Music, Periodicals, Shelf Fill, Photo
+Intake, Hardcover, Audiobookshelf sync, Komga and RomM. An upgrade leaves everything
 on. A new install starts with the profile chosen in the setup wizard.
 Scanning, Browse, items, locations, tags, Trash, settings, users, backups and
 logs are core and cannot be turned off.
@@ -125,7 +126,7 @@ logs are core and cannot be turned off.
 |---|---|
 | **Minimal** | None — only the core above |
 | **Standard** | Lending, Series, Statistics, Store Mode, Music, Periodicals, Shelf Fill |
-| **Everything** | Standard, plus Sharing, Valuation, Photo Intake, Hardcover, Audiobookshelf sync, Komga and RomM |
+| **Everything** | Standard, plus Sharing, Valuation, Price alerts, Photo Intake, Hardcover, Audiobookshelf sync, Komga and RomM |
 
 The **Profiles** row at the top of Features applies one in a single step and
 shows which one the install matches. After you turn one feature on or off by
@@ -145,8 +146,9 @@ A feature that is off:
 - **disappears from the pages that stay on** — the item page, Home, Browse,
   Scan and Stats drop its buttons, badges, links and read-outs. Fields you
   typed onto an item stay, such as a series name or a manual value,
-- **pauses its background job** — Audiobookshelf sync, Hardcover sync and the
-  overdue-loan digest skip their runs until it is back on,
+- **pauses its background job** — Audiobookshelf sync, Hardcover sync, the
+  overdue-loan digest and the nightly price-alert check skip their runs until
+  it is back on,
 - **keeps all its data.** Turning it back on shows everything again,
   including anything added while it was off.
 

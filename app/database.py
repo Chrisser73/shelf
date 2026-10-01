@@ -248,6 +248,31 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
     # up without the column (G1).
     (39, "Add tags media_type scope column",
      "ALTER TABLE tags ADD COLUMN media_type TEXT DEFAULT NULL"),
+    # 40 is a new table, so it follows 33/34 rather than 37/38: the CREATE is a
+    # numbered entry *and* lives in MIGRATION_TABLES. The numbered copy runs
+    # first on an upgrade; the MIGRATION_TABLES copy runs on every boot and is
+    # the only one a fresh install ever executes. A CREATE that lived in one
+    # place only would leave one of the two bootstrap routes without the table
+    # (G1; test_schema_parity pins the pair). The index is in MIGRATION_TABLES
+    # alone, since a numbered entry is a single statement.
+    (40, "Add price history",
+     "CREATE TABLE IF NOT EXISTS price_history ("
+     " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+     " item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,"
+     " price REAL,"
+     " source TEXT NOT NULL DEFAULT 'isbndb',"
+     " observed_at TEXT NOT NULL DEFAULT (datetime('now')))"),
+    # A feature with no flag row reads as on, and price_alerts is new in the
+    # same release, so an upgrade would switch it on for every install — even
+    # one that applied Standard or Minimal. Start it the way Valuation stands:
+    # off where Valuation is off (it spends the same ISBNdb key), untouched
+    # elsewhere. INSERT OR IGNORE keeps a choice already made. A fresh
+    # database has no feature rows, so this is a no-op there.
+    (41, "Start price alerts off where Valuation is off",
+     """INSERT OR IGNORE INTO settings (key, value)
+        SELECT 'feature.price_alerts', '0'
+        WHERE EXISTS (SELECT 1 FROM settings
+                      WHERE key = 'feature.valuation' AND value = '0')"""),
 )
 
 MIGRATION_TABLES = """
@@ -277,6 +302,15 @@ CREATE TABLE IF NOT EXISTS valuation_history (
     priced_count INTEGER NOT NULL,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS price_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id     INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    price       REAL,
+    source      TEXT NOT NULL DEFAULT 'isbndb',
+    observed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_price_history_item ON price_history(item_id, observed_at);
 
 CREATE TABLE IF NOT EXISTS borrowers (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
