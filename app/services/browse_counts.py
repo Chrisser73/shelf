@@ -29,7 +29,7 @@ SOURCE_LABELS = {
 }
 
 
-def filter_counts(db, values: dict, total: int) -> dict:
+def filter_counts(db, values: dict, total: int, missing_fields=None) -> dict:
     """Cross-filter dropdown counts: each group is build_where minus its own filter.
 
     `values` is the dict `browse_filters.values_from` produced; `total` is the
@@ -38,7 +38,7 @@ def filter_counts(db, values: dict, total: int) -> dict:
     so the numbers cannot disagree between the first paint and the first swap.
     """
     def _count_where(exclude):
-        return browse_filters.build_where(values, exclude=exclude)
+        return browse_filters.build_where(values, exclude=exclude, missing_fields=missing_fields)
 
     type_where, type_params = _count_where("media_type_filter")
     type_counts = {

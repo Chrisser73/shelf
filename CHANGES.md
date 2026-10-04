@@ -4,6 +4,33 @@ This file is the central record of customizations in this fork. The upstream
 [`README.md`](README.md) continues to document Shelf itself; this file covers
 only added or changed fork-specific features.
 
+## V1.2.3 — Upgrade V1.2.3
+
+- **Game metadata is configurable where it matters.** Settings now lets an
+  administrator choose which empty game fields make an item count as *Missing game data*. The Home tile and Browse
+  filter use exactly that
+  selection. Platform also has an **Unknown** tile and filter for games with
+  no assigned platform.
+- **Browse is easier to tailor.** Users can choose the visible filters,
+  including Lent out, Platform, Tag and Author. Grid density can be adjusted
+  with **Grid**, **Grid +1**, **Grid +2** or **Grid +3** at every screen size.
+- **Editing games needs fewer page changes.** Developer, Publisher, Language
+  and Year can be edited inline from the item page with consistent icon-only
+  save controls. Region, Platform and Collector state remain controlled
+  dropdowns in the details form; Language now includes Unknown.
+- **Bulk editing covers more collection work.** Platform and Collector state
+  can be applied to a selection, and the page reserves space below the bulk
+  action bar so it no longer covers the last items.
+- **Photo Intake identifies game collections more carefully.** Recognition
+  now reads shelves and spines as shared platform context, avoids treating
+  logos as titles, checks rotated spines, improves PAL/USK/PEGI and language
+  inference, and fills developer, publisher and year once a game is securely
+  identified. Confirmed IGDB lookups now retain the developer as well as
+  publisher and year before cover recovery begins.
+- **Long-running intake actions are easier to follow.** Photo analysis and
+  item confirmation show their current Shelf phase and a progress indicator,
+  from image preparation through recognition, metadata matching and saving.
+
 ## V1.2.2 — Upgrade V1.2.2
 
 - Photo Intake is more useful for games and international releases: it now

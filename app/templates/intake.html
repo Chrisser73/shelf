@@ -132,9 +132,12 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
         </svg>
-        <div>
+        <div class="min-w-0 flex-1">
             <p class="text-sm font-medium">Reading your photo&hellip;</p>
-            <p class="text-xs text-shelf-muted">The vision model is analyzing your photo &mdash; large shelves can take a minute.</p>
+            <p class="text-xs text-shelf-muted" x-text="analysisPhase || 'The vision model is analyzing your photo…'"></p>
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-shelf-hover" role="progressbar" aria-label="Photo analysis progress" :aria-valuenow="analysisProgress" aria-valuemin="0" aria-valuemax="100">
+                <div class="h-full rounded-full bg-shelf-accent transition-all duration-500" :style="'width: ' + analysisProgress + '%'" :class="analysisProgress === 55 ? 'animate-pulse' : ''"></div>
+            </div>
         </div>
         <button type="button" @click="cancelAnalysis()" class="ml-auto px-3 py-1.5 rounded-lg text-xs bg-shelf-hover text-shelf-text hover:bg-shelf-border transition-colors">Cancel</button>
     </div>
@@ -144,9 +147,12 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
         </svg>
-        <div>
+        <div class="min-w-0 flex-1">
             <p class="text-sm font-medium">Adding items&hellip;</p>
-            <p class="text-xs text-shelf-muted">Looking up metadata for each selected item &mdash; a few seconds per item.</p>
+            <p class="text-xs text-shelf-muted" x-text="confirmationPhase || 'Looking up metadata for each selected item…'"></p>
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-shelf-hover" role="progressbar" aria-label="Item metadata progress" :aria-valuenow="confirmationProgress" aria-valuemin="0" aria-valuemax="100">
+                <div class="h-full rounded-full bg-shelf-accent transition-all duration-500" :style="'width: ' + confirmationProgress + '%'" :class="confirmationProgress < 88 ? 'animate-pulse' : ''"></div>
+            </div>
         </div>
     </div>
 

@@ -26,6 +26,14 @@ EDITABLE_FIELDS = (
     "region", "language", "publish_year", "location_id",
 )
 
+# Storage names behind the labels used in the admin settings UI.
+MISSING_FIELD_LABELS = {
+    "alternate_title": "Name", "authors": "Developer", "publisher": "Publisher",
+    "platform": "Platform", "region": "Region", "language": "Language",
+    "publish_year": "Year",
+}
+DEFAULT_MISSING_FIELDS = tuple(MISSING_FIELD_LABELS)
+
 # A missing platform should describe the original physical release, not a
 # later eShop/Virtual-Console port that happened to rank first in IGDB. These
 # are the launch years for Shelf's built-in platform slugs; unknown/custom
@@ -38,21 +46,30 @@ PLATFORM_LAUNCH_YEARS = {
     "ps1": 1994, "ps2": 2000, "ps3": 2006, "ps4": 2013, "ps5": 2020,
     "xbox": 2001, "xbox360": 2005, "xboxone": 2013, "xboxsx": 2020,
 }
-def missing_sql(prefix: str = "") -> str:
+def missing_sql(prefix: str = "", fields=None) -> str:
     """SQL predicate for games with at least one maintenance field missing."""
-    return f"""{prefix}media_type = 'video_game' AND (
-        {prefix}alternate_title IS NULL OR TRIM({prefix}alternate_title) = '' OR
-        {prefix}authors IS NULL OR TRIM({prefix}authors) = '' OR
-        {prefix}publisher IS NULL OR TRIM({prefix}publisher) = '' OR
-        {prefix}platform IS NULL OR TRIM({prefix}platform) = '' OR
-        {prefix}region IS NULL OR TRIM({prefix}region) = '' OR
-        {prefix}language IS NULL OR TRIM({prefix}language) = '' OR
-        {prefix}publish_year IS NULL
-    )"""
+    fields = tuple(field for field in (fields if fields is not None else DEFAULT_MISSING_FIELDS)
+                   if field in MISSING_FIELD_LABELS)
+    if not fields:
+        return "0 = 1"
+    clauses = [f"{prefix}{field} IS NULL" if field == "publish_year"
+               else f"({prefix}{field} IS NULL OR TRIM({prefix}{field}) = '')"
+               for field in fields]
+    return f"{prefix}media_type = 'video_game' AND (" + " OR ".join(clauses) + ")"
+
+
+def configured_missing_fields(db) -> tuple[str, ...]:
+    from app.database import get_setting
+    raw = get_setting(db, "missing_game_metadata_fields")
+    if raw is None or raw == "":
+        return DEFAULT_MISSING_FIELDS
+    if raw == "none":
+        return ()
+    return tuple(field for field in raw.split(",") if field in MISSING_FIELD_LABELS)
 
 
 def missing_metadata_count(db) -> int:
-    return db.execute(f"SELECT COUNT(*) AS c FROM items_live WHERE {missing_sql()}").fetchone()["c"]
+    return db.execute(f"SELECT COUNT(*) AS c FROM items_live WHERE {missing_sql(fields=configured_missing_fields(db))}").fetchone()["c"]
 
 
 def cost_hint(settings: dict[str, Any], item_count: int) -> str:

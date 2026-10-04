@@ -3,7 +3,7 @@
 {% block content %}
 <div x-data="browsePage" data-initial-query="{{ initial_query or '' }}">
     <!-- Bulk Action Bar -->
-    <div x-show="selectMode && selectedIds.length > 0" x-transition
+    <div x-show="selectMode && selectedIds.length > 0" x-ref="bulkBar" data-bulk-action-bar x-transition
          class="fixed bottom-0 inset-x-0 z-40 bg-shelf-card border-t border-shelf-border py-3 px-4 shadow-lg">
         <div class="max-w-7xl mx-auto flex items-center gap-3 flex-wrap">
             <span class="text-sm text-shelf-muted" x-text="selectedIds.length + ' selected'"></span>
@@ -44,6 +44,17 @@
                 <option value="">Set region...</option><option value="unknown">Unknown</option><option value="PAL">PAL</option><option value="NTSC">NTSC</option><option value="NTSC-J">NTSC-J</option><option value="PAL-M">PAL-M</option><option value="__clear__">Clear region</option>
             </select>
             <button @click="bulkUpdate({region: bulkRegionVal === '__clear__' ? '' : bulkRegionVal})" x-show="bulkRegionVal"
+                    class="px-3 py-1 bg-shelf-accent text-white rounded-lg text-xs">Apply</button>
+            <select x-model="bulkPlatformVal" class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">
+                <option value="">Set platform...</option><option value="__clear__">Unknown</option>
+                {% for key, label in game_platforms.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+            </select>
+            <button @click="bulkUpdate({platform: bulkPlatformVal === '__clear__' ? '' : bulkPlatformVal})" x-show="bulkPlatformVal"
+                    class="px-3 py-1 bg-shelf-accent text-white rounded-lg text-xs">Apply</button>
+            <select x-model="bulkCollectorConditionVal" class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">
+                <option value="">Set collector state...</option><option value="cib">CIB</option><option value="boxed">Boxed</option><option value="loose">Loose</option><option value="__clear__">Not specified</option>
+            </select>
+            <button @click="bulkUpdate({collector_condition: bulkCollectorConditionVal === '__clear__' ? '' : bulkCollectorConditionVal})" x-show="bulkCollectorConditionVal"
                     class="px-3 py-1 bg-shelf-accent text-white rounded-lg text-xs">Apply</button>
             <select x-model="bulkWishlistVal" class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">
                 <option value="">Wishlist...</option>
@@ -114,6 +125,12 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                 </button>
             </div>
+            <div x-show="viewMode === 'grid'" class="shrink-0">
+                <select :value="gridSize" @change="setGridSize($event.target.value)" aria-label="Grid columns"
+                        class="bg-shelf-card border border-shelf-border rounded-lg px-2 py-1 text-xs text-shelf-muted">
+                    <option value="default">Grid</option><option value="plus1">Grid +1</option><option value="plus2">Grid +2</option><option value="plus3">Grid +3</option>
+                </select>
+            </div>
             <!-- Select mode stays here for the grid. In list view it moves to
                  the Title header where selection is discovered more naturally. -->
             <div class="relative shrink-0" x-show="viewMode !== 'list'">
@@ -164,6 +181,18 @@
                             data-testid="columns-reset">
                         Reset to defaults
                     </button>
+                </div>
+            </div>
+            <div class="relative shrink-0">
+                <button @click="filterEditorOpen = !filterEditorOpen" :aria-expanded="filterEditorOpen"
+                        :class="filterEditorOpen ? 'bg-shelf-accent/20 text-shelf-accent2' : 'bg-shelf-card text-shelf-muted'"
+                        class="px-3 py-1 rounded-lg text-xs border border-shelf-border hover:border-shelf-accent/50 transition-colors" data-testid="filter-picker">Edit Filters</button>
+                <div x-show="filterEditorOpen" x-transition @click.outside="filterEditorOpen = false"
+                     class="absolute top-full left-0 mt-2 w-52 bg-shelf-card border border-shelf-border rounded-lg p-2 shadow-xl z-50 max-h-[28rem] overflow-y-auto" data-testid="filter-menu">
+                    <template x-for="filter in editableFilterDefs()" :key="filter.name">
+                        <label class="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-shelf-text hover:bg-shelf-hover cursor-pointer"><input type="checkbox" :checked="visibleFilters[filter.name]" @change="toggleFilter(filter.name)" class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent"><span x-text="filterLabel(filter)"></span></label>
+                    </template>
+                    <div class="border-t border-shelf-border my-1"></div><button @click="resetFilters()" class="w-full text-left px-2 py-1.5 rounded text-xs text-shelf-muted hover:text-shelf-accent2 hover:bg-shelf-hover transition-colors">Reset to defaults</button>
                 </div>
             </div>
         </div>
@@ -299,7 +328,6 @@
             </select>
 
             <!-- Platform Filter (only when games with a platform exist) -->
-            {% if platform_counts or f.platform_filter %}
             <select id="platform-filter" name="platform_filter"
                     hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
                     hx-include="{{ filter_includes('platform_filter') }}"
@@ -312,10 +340,8 @@
                 <option value="{{ f.platform_filter }}" selected>{{ f.platform_filter }} (0)</option>
                 {% endif %}
             </select>
-            {% endif %}
 
             <!-- Tag Filter (only when tags exist) -->
-            {% if all_tags %}
             <select id="tag-filter" name="tag"
                     hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
                     hx-include="{{ filter_includes('tag') }}"
@@ -325,7 +351,14 @@
                 <option value="{{ t.name }}" {{ 'selected' if f.tag == t.name else '' }}>{{ t.name }} ({{ t.count }})</option>
                 {% endfor %}
             </select>
-            {% endif %}
+            <select id="author-filter" name="author_filter"
+                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+                    hx-include="{{ filter_includes('author_filter') }}"
+                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <option value="" {{ 'selected' if not f.author_filter else '' }}>All Authors</option>
+                {% for author in browse_authors %}<option value="{{ author.id }}" {{ 'selected' if f.author_filter == author.id|string else '' }}>{{ author.name }}</option>{% endfor %}
+                {% if f.author_filter and not author_filter_label %}<option value="{{ f.author_filter }}" selected>{{ f.author_filter }} (unknown)</option>{% endif %}
+            </select>
 
             <!-- Language Filter (only when the library has languages) -->
             {% if item_languages %}
@@ -387,16 +420,6 @@
 
     <!-- Hidden view mode input for HTMX requests -->
     <input type="hidden" name="view" :value="viewMode">
-
-    {# The author filter (#117b), set from an item page's author link. Hidden —
-       hundreds of authors make no usable dropdown — so it carries its own
-       request (G54): clearing its chip fires `change` here. data-label is the
-       name browse.js shows on the chip; the id never reaches the user. #}
-    {% set author_value = (initial_filters or {}).get('author_filter', '') %}
-    <input type="hidden" name="author_filter" value="{{ author_value }}"
-           data-label="{{ author_filter_label or '' }}"
-           hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
-           hx-include="{{ filter_includes('author_filter') }}">
 
     <!-- Item Grid -->
     <div id="item-grid">

@@ -61,6 +61,10 @@ def dashboard_summary(db, *, recent_limit: int = 8, user_id: int | None = None) 
         {**dict(row), "logo_path": logo_path(row["slug"], row["svg_path"])}
         for row in platform_rows
     ]
+    unknown_platform_count = db.execute(
+        "SELECT COUNT(*) AS c FROM items_live WHERE media_type = 'video_game' "
+        "AND (platform IS NULL OR TRIM(platform) = '')"
+    ).fetchone()["c"]
 
     limit = max(0, min(int(recent_limit), 50))
     recent = []
@@ -89,5 +93,6 @@ def dashboard_summary(db, *, recent_limit: int = 8, user_id: int | None = None) 
         "missing_game_metadata_count": missing_game_metadata,
         "media_types": media_types,
         "platforms": platforms,
+        "unknown_platform_count": unknown_platform_count,
         "recent_items": recent,
     }

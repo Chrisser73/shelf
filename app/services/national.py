@@ -73,6 +73,7 @@ def iso_to_marc(code: str | None) -> str | None:
 # Ordered code -> English display name, for the settings search-language
 # dropdown. Order is deliberate (display order in the UI).
 SEARCH_LANGS: dict[str, str] = {
+    "unknown": "Unknown",
     "multi": "Multilanguage",
     "en": "English",
     "de": "German",

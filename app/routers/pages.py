@@ -42,6 +42,11 @@ async def index(
     """Render a collection overview while leaving Browse for exploration."""
     with get_db() as db:
         summary = dashboard_summary(db, recent_limit=8, user_id=request.state.user["id"])
+        from app.services import game_metadata
+        missing_game_metadata_labels = [
+            game_metadata.MISSING_FIELD_LABELS[field]
+            for field in game_metadata.configured_missing_fields(db)
+        ]
         from app.services.user_preferences import get_preference
         home_tiles = {key: get_preference(db, request.state.user["id"], f"home_tile:{key}", "1") == "1"
                       for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types")}
@@ -59,6 +64,7 @@ async def index(
             **summary,
             "media_type_labels": MEDIA_TYPES,
             "home_tiles": home_tiles,
+            "missing_game_metadata_labels": missing_game_metadata_labels,
             "collection_appearance": collection_appearance,
             "feature_flags": {
                 "lending": feature_enabled("lending"),
@@ -84,9 +90,10 @@ async def browse(
     values = browse_filters.values_from(request.query_params)
     # Truncate search query to prevent slow LIKE scans (parity with /api/search)
     values["q"] = values["q"][:200]
-    where, params = browse_filters.build_where(values)
-
     with get_db() as db:
+        from app.services import game_metadata
+        missing_fields = game_metadata.configured_missing_fields(db)
+        where, params = browse_filters.build_where(values, missing_fields=missing_fields)
         _, order_clause = SORT_OPTIONS.get(values["sort"], SORT_OPTIONS["newest"])
 
         from app.routers.checkouts import OVERDUE_CONDITION, get_overdue_days
@@ -119,7 +126,7 @@ async def browse(
         # Cross-filter dropdown counts — `locations`, `type_counts`,
         # `location_counts`, `reading_status_counts`, `owned_count`,
         # `wishlist_count` and `filtered_total` all come from here.
-        counts = browse_counts.filter_counts(db, values, total_filtered)
+        counts = browse_counts.filter_counts(db, values, total_filtered, missing_fields=missing_fields)
 
         # Deliberately still global (design §5): none of these appears in
         # `fragments/filter_counts_oob.html`, so none can diverge.
@@ -130,6 +137,10 @@ async def browse(
 
         from app.services.tags import get_all_tags
         all_tags = get_all_tags(db)
+        browse_authors = db.execute(
+            "SELECT a.id, a.name FROM authors a JOIN item_authors ia ON ia.author_id = a.id "
+            "JOIN items_live i ON i.id = ia.item_id GROUP BY a.id, a.name ORDER BY a.name COLLATE NOCASE"
+        ).fetchall()
 
         # Languages present in the library — the filter only renders/offers
         # what actually exists.
@@ -182,6 +193,7 @@ async def browse(
         "media_types": MEDIA_TYPES,
         "series_names": series_names,
         "all_tags": all_tags,
+        "browse_authors": browse_authors,
         "lent_out_count": lent_out_count,
         "item_languages": item_languages,
         "item_regions": item_regions,
@@ -758,6 +770,8 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
     borrower_error_message = BORROWER_ERROR_MESSAGES.get(request.query_params.get("borrower_error"))
     with get_db() as db:
         settings = get_all_settings(db)
+        from app.services import game_metadata
+        settings["missing_game_metadata_fields"] = set(game_metadata.configured_missing_fields(db))
         from app.services.user_preferences import get_preference
         settings["always_show_game_title"] = get_preference(
             db, request.state.user["id"], "always_show_game_title"

@@ -147,6 +147,12 @@ def _platform(value):
     return "i.platform = ? AND i.media_type = 'video_game'", [value]
 
 
+def _unknown_platform(value):
+    if value != "1":
+        return None
+    return "i.media_type = 'video_game' AND (i.platform IS NULL OR TRIM(i.platform) = '')", []
+
+
 def _missing_cover(value):
     if value != "1":
         return None
@@ -234,6 +240,7 @@ FILTERS: tuple[BrowseFilter, ...] = (
     BrowseFilter("owned", condition=_owned),
     BrowseFilter("lent_out", condition=_lent_out),
     BrowseFilter("platform_filter", prefix="Platform", condition=_platform),
+    BrowseFilter("unknown_platform", prefix="Platform", condition=_unknown_platform),
     BrowseFilter("cover_missing", prefix="Missing cover", condition=_missing_cover),
     BrowseFilter("missing_game_metadata", prefix="Missing metadata", condition=_missing_game_metadata, chip=False),
     BrowseFilter("collector_condition", prefix="Condition", condition=_collector_condition),
@@ -283,7 +290,7 @@ def filter_includes(exclude=None) -> Markup:
     return Markup(",".join(f"[name='{f.name}']" for f in FILTERS if f.name not in names))
 
 
-def build_where(values: Mapping[str, str], exclude=None) -> "tuple[str, list]":
+def build_where(values: Mapping[str, str], exclude=None, missing_fields=None) -> "tuple[str, list]":
     """Build a WHERE clause from filter values, optionally dropping some.
 
     Excluding a filter is how each dropdown's cross-filter counts are built:
@@ -302,7 +309,7 @@ def build_where(values: Mapping[str, str], exclude=None) -> "tuple[str, list]":
         value = values.get(f.name, "")
         if not f.is_active(value):
             continue
-        built = f.condition(value)
+        built = (game_metadata.missing_sql("i.", fields=missing_fields), []) if f.name == "missing_game_metadata" and value == "1" else f.condition(value)
         if built is None:
             continue
         sql, sql_params = built

@@ -933,11 +933,13 @@ async def search_items(
     sort = values["sort"]
     view = values["view"]
 
-    where, params = browse_filters.build_where(values)
     _, order_clause = SORT_OPTIONS.get(sort, SORT_OPTIONS["newest"])
     offset = (max(page, 1) - 1) * per_page
 
     with get_db() as db:
+        from app.services import game_metadata
+        missing_fields = game_metadata.configured_missing_fields(db)
+        where, params = browse_filters.build_where(values, missing_fields=missing_fields)
         total = db.execute(
             f"SELECT COUNT(*) as c FROM items_live i {where}", params
         ).fetchone()["c"]
@@ -960,7 +962,7 @@ async def search_items(
         # same where-clause with its own filter excluded, so the number beside
         # an option says what selecting it would yield. Shared with /browse so
         # the two routes cannot disagree.
-        counts = browse_counts.filter_counts(db, values, total) if page <= 1 else None
+        counts = browse_counts.filter_counts(db, values, total, missing_fields=missing_fields) if page <= 1 else None
         from app.services.user_preferences import get_preference
         always_show_game_title = get_preference(
             db, request.state.user["id"], "always_show_game_title"
@@ -1033,7 +1035,7 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
     except (ValueError, TypeError):
         return {"ok": False, "message": "Invalid item IDs"}
 
-    allowed = {"media_type", "location_id", "reading_status", "owned", "wishlisted", "series_name", "language", "region"}
+    allowed = {"media_type", "location_id", "reading_status", "owned", "wishlisted", "series_name", "language", "region", "platform", "collector_condition"}
     filtered = {k: v for k, v in updates.items() if k in allowed}
     if not filtered:
         return {"ok": False, "message": "No valid fields to update"}
@@ -1194,6 +1196,43 @@ async def update_alternate_title(request: Request, item_id: int, _=Depends(requi
             "alternateNameSaved": {"item_id": item_id},
         })},
     )
+
+
+@router.post("/items/{item_id}/quick-metadata")
+async def update_quick_metadata(request: Request, item_id: int, _=Depends(require_role("editor"))):
+    """Save one top-of-page metadata field for the compact item editor."""
+    form = await request.form()
+    field = (form.get("field") or "").strip()
+    value = (form.get("value") or "").strip()
+    allowed = {"title", "authors", "publisher", "platform", "region", "language", "publish_year"}
+    if field not in allowed:
+        return JSONResponse({"ok": False, "message": "Unknown metadata field"}, status_code=400)
+    if field == "publish_year":
+        try:
+            value = int(value) if value else None
+        except ValueError:
+            return JSONResponse({"ok": False, "message": "Year must be a number"}, status_code=400)
+    else:
+        value = value or None
+    try:
+        with get_db() as db:
+            if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
+                return JSONResponse({"ok": False, "message": "Item not found"}, status_code=404)
+            update_item_fields(db, item_id, {field: value})
+            if field == "platform" and value:
+                display = get_game_platforms(db).get(value, value)
+            elif field == "language" and value:
+                from app.services.national import SEARCH_LANGS
+                display = SEARCH_LANGS.get(value, value)
+            else:
+                display = str(value) if value is not None else "—"
+    except (ItemValueError, ValueError) as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400,
+                            headers={"HX-Trigger": items_common._toast_header(str(exc), "error")})
+    return JSONResponse({"ok": True, "field": field, "display": display}, headers={"HX-Trigger": json.dumps({
+        "itemMetadataSaved": {"item_id": item_id, "field": field, "display": display},
+        "showToast": {"message": "Details saved", "type": "success"},
+    })})
 
 
 @router.post("/items/{item_id}")

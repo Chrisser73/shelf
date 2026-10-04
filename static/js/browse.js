@@ -8,17 +8,22 @@ function browsePage() {
         bulkStatusVal: '',
         bulkLanguageVal: '',
         bulkRegionVal: '',
+        bulkPlatformVal: '',
+        bulkCollectorConditionVal: '',
         bulkWishlistVal: '',
         bulkSeriesVal: '',
         bulkTagVal: '',
         filterPills: [],
         viewMode: localStorage.getItem('shelf-view') || 'grid',
+        gridSize: localStorage.getItem('shelf-grid-size') || 'default',
         // viewMode is the only thing that decides whether the list view
         // exists at all; visibleCols only decides which cells of an existing
         // list are shown. Keep that distinction straight -- it is easy to
         // gate the wrong behaviour on the wrong flag.
         visibleCols: {},
+        visibleFilters: {},
         columnsOpen: false,
+        filterEditorOpen: false,
         filtersOpen: false,
         // Bound (x-model) to BOTH the mobile and desktop search inputs, which
         // share name="q". Keeping them in lockstep is what stops hx-include
@@ -39,6 +44,8 @@ function browsePage() {
             // loadColumns() always returns a complete object, so it must run
             // first rather than being populated lazily.
             this.visibleCols = this.loadColumns();
+            this.visibleFilters = this.loadFilters();
+            this.applyFilterVisibility();
             this.searchQuery = this.$el.dataset.initialQuery || '';
             // Returning to a bare /browse re-applies the last filter set.
             // Falls through to the sort-only restore when there's nothing stored
@@ -65,6 +72,7 @@ function browsePage() {
                 });
                 this.syncFilters();
                 this.updateUrl();
+                this.applyFilterVisibility();
             });
             // Persist sort preference on change
             var browse = this;
@@ -89,6 +97,16 @@ function browsePage() {
             this._keyHandler = (e) => this.handleKey(e);
             document.addEventListener('keydown', this._keyHandler);
             this.watchGridForHtmx();
+            this.$watch('selectedIds', () => this.$nextTick(() => this.syncBulkBarSpacing()));
+            this.$watch('selectMode', () => this.$nextTick(() => this.syncBulkBarSpacing()));
+        },
+
+        // The fixed bulk bar must never hide the final collection cards.
+        // It wraps on small screens, so measure rather than guessing a height.
+        syncBulkBarSpacing() {
+            var bar = this.$refs && this.$refs.bulkBar;
+            var active = this.selectMode && this.selectedIds.length > 0 && bar;
+            document.body.style.paddingBottom = active ? (bar.offsetHeight + 24) + 'px' : '';
         },
 
         // Both branches of item_grid.html live inside <template x-if="viewMode
@@ -159,6 +177,51 @@ function browsePage() {
         // Every filter control, for the htmx re-process loop.
         filterNames() {
             return this.filterDefs().map(function(def) { return def.name; });
+        },
+
+        editableFilterDefs() {
+            return this.filterDefs().filter(function(def) {
+                return !['q', 'sort', 'view', 'missing_game_metadata', 'unknown_platform'].includes(def.name);
+            });
+        },
+
+        filterLabel(def) {
+            return {owned: 'Lists', lent_out: 'Lent out', platform_filter: 'Platform',
+                tag: 'Tag', author_filter: 'Author' }[def.name] || def.prefix || def.name;
+        },
+
+        loadFilters() {
+            var stored = {};
+            try { stored = JSON.parse(localStorage.getItem('shelf-filters') || '{}') || {}; } catch (e) {}
+            var visible = {};
+            this.editableFilterDefs().forEach(function(def) {
+                visible[def.name] = typeof stored[def.name] === 'boolean' ? stored[def.name] : true;
+            });
+            return visible;
+        },
+
+        toggleFilter(name) {
+            var next = Object.assign({}, this.visibleFilters, {[name]: !this.visibleFilters[name]});
+            this.visibleFilters = next;
+            localStorage.setItem('shelf-filters', JSON.stringify(next));
+            this.applyFilterVisibility();
+        },
+
+        resetFilters() {
+            this.visibleFilters = this.editableFilterDefs().reduce(function(out, def) { out[def.name] = true; return out; }, {});
+            localStorage.removeItem('shelf-filters');
+            this.applyFilterVisibility();
+        },
+
+        applyFilterVisibility() {
+            var self = this;
+            this.editableFilterDefs().forEach(function(def) {
+                document.querySelectorAll('[name="' + def.name + '"]').forEach(function(el) {
+                    // Search has the same name but remains permanently visible.
+                    if (el.type === 'search') return;
+                    el.style.display = self.visibleFilters[def.name] ? '' : 'none';
+                });
+            });
         },
 
         // The Browse list-view column set, read from the JSON block
@@ -388,6 +451,11 @@ function browsePage() {
             if (trigger) htmx.trigger(trigger, 'change');
         },
 
+        setGridSize(size) {
+            this.gridSize = size;
+            localStorage.setItem('shelf-grid-size', size);
+        },
+
         syncFilters() {
             var pills = [];
             this.filterDefs().forEach(function(def) {
@@ -401,7 +469,7 @@ function browsePage() {
                 } else {
                     // A hidden control may carry a display label (the author
                     // filter's name) in place of its raw value.
-                    var shown = el.dataset.label || el.value;
+                    var shown = el.dataset.label || (el.options && el.selectedIndex >= 0 && el.options[el.selectedIndex].text) || el.value;
                     var prefix = def.prefix;
                     if (def.name === 'author_filter') {
                         // Author/Artist/Director/Developer, as the sort option

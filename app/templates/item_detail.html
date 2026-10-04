@@ -9,6 +9,12 @@
 {% endif %}
 {% endblock %}
 {% block content %}
+{% macro inline_text(field, label, value, input_type='text', raw_value=None) -%}
+<div x-data='{ "editing": false }'>
+    <span x-show="!editing"><span class="text-shelf-muted">{{ label }}:</span> <span data-inline-display="{{ item.id }}-{{ field }}">{{ value or '—' }}</span>{% if user and user.role in ('admin', 'editor') %} <button type="button" @click="editing = true" class="ml-1 text-xs text-shelf-accent2 hover:text-shelf-accent">Edit</button>{% endif %}</span>
+    {% if user and user.role in ('admin', 'editor') %}<form x-show="editing" x-cloak hx-post="/api/items/{{ item.id }}/quick-metadata" hx-swap="none" data-inline-field-form="{{ item.id }}-{{ field }}" class="flex items-center gap-2"><input type="hidden" name="field" value="{{ field }}">{% if field == 'language' %}<select name="value" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text"><option value="">Unknown</option>{% for key, text in search_langs.items() %}<option value="{{ key }}" {% if raw_value == key %}selected{% endif %}>{{ text }}</option>{% endfor %}</select>{% elif field == 'region' %}<select name="value" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text"><option value="">Not specified</option>{% for option in ['unknown', 'PAL', 'NTSC', 'NTSC-J', 'PAL-M'] %}<option value="{{ option }}" {% if raw_value == option %}selected{% endif %}>{{ option|upper }}</option>{% endfor %}</select>{% else %}<input name="value" type="{{ input_type }}" value="{{ raw_value if raw_value is not none else value or '' }}" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">{% endif %}<button type="submit" class="inline-flex items-center justify-center w-8 h-8 rounded bg-shelf-accent text-white hover:bg-shelf-accent2 transition-colors" title="Save {{ label }}" aria-label="Save {{ label }}"><i data-lucide="save" class="w-4 h-4"></i></button><button type="button" @click="editing = false" data-inline-field-cancel="{{ item.id }}-{{ field }}" class="text-xs text-shelf-muted">Cancel</button></form>{% endif %}
+</div>
+{%- endmacro %}
 <div class="max-w-4xl mx-auto">
     <!-- Back link -->
     <a href="{{ back.path }}" class="text-shelf-muted hover:text-shelf-text text-sm mb-4 inline-block">&larr; {{ back.label }}</a>
@@ -90,21 +96,11 @@
                     {% if item.media_type %}
                     <div><span class="text-shelf-muted">Type:</span> {{ media_types.get(item.media_type, item.media_type) }}</div>
                     {% endif %}
-                    {% if item.language %}
-                    <div><span class="text-shelf-muted">Language:</span> {{ search_langs.get(item.language, item.language) }}</div>
-                    {% endif %}
-                    {% if item.region %}
-                    <div><span class="text-shelf-muted">Region:</span> {{ item.region }}</div>
-                    {% endif %}
-                    {% if item.platform %}
-                    <div><span class="text-shelf-muted">Platform:</span> {{ game_platforms.get(item.platform, item.platform) }}</div>
-                    {% endif %}
-                    {% if item.publisher %}
-                    <div><span class="text-shelf-muted">Publisher:</span> {{ item.publisher }}</div>
-                    {% endif %}
-                    {% if item.publish_year %}
-                    <div><span class="text-shelf-muted">Year:</span> {{ item.publish_year }}</div>
-                    {% endif %}
+                    <div>{{ inline_text('authors', 'Developer', item.authors) }}</div>
+                    <div>{{ inline_text('language', 'Language', search_langs.get(item.language, item.language), raw_value=item.language) }}</div>
+                    {% if item.platform %}<div><span class="text-shelf-muted">Platform:</span> {{ game_platforms.get(item.platform, item.platform) }}</div>{% endif %}
+                    <div>{{ inline_text('publisher', 'Publisher', item.publisher) }}</div>
+                    <div>{{ inline_text('publish_year', 'Year', item.publish_year, 'number') }}</div>
                     {% if item.page_count %}
                     <div><span class="text-shelf-muted">Pages:</span> {{ item.page_count }}</div>
                     {% endif %}
@@ -148,6 +144,9 @@
                         </select>
                     </label>
                     {% endif %}
+                    <label class="text-xs text-shelf-muted">Region
+                        <select name="region" class="mt-1 block bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text"><option value="">Not specified</option><option value="unknown" {% if item.region == 'unknown' %}selected{% endif %}>Unknown</option><option value="PAL" {% if item.region == 'PAL' %}selected{% endif %}>PAL</option><option value="NTSC" {% if item.region == 'NTSC' %}selected{% endif %}>NTSC</option><option value="NTSC-J" {% if item.region == 'NTSC-J' %}selected{% endif %}>NTSC-J</option><option value="PAL-M" {% if item.region == 'PAL-M' %}selected{% endif %}>PAL-M</option></select>
+                    </label>
                     <label class="text-xs text-shelf-muted">Collector state
                         <select name="collector_condition" class="mt-1 block bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text">
                             <option value="">Not specified</option>
