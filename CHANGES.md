@@ -7,10 +7,10 @@ only added or changed fork-specific features.
 ## V1.2.3 — Upgrade V1.2.3
 
 - **Game metadata is configurable where it matters.** Settings now lets an
-  administrator choose which empty game fields make an item count as *Missing game data*. The Home tile and Browse
-  filter use exactly that
-  selection. Platform also has an **Unknown** tile and filter for games with
-  no assigned platform.
+  administrator choose which empty game fields make an item count as *Missing
+  game data*. The Home tile and Browse filter use exactly that selection.
+  Platform also has an **Unknown** tile and filter for games with no assigned
+  platform.
 - **Browse is easier to tailor.** Users can choose the visible filters,
   including Lent out, Platform, Tag and Author. Grid density can be adjusted
   with **Grid**, **Grid +1**, **Grid +2** or **Grid +3** at every screen size.
