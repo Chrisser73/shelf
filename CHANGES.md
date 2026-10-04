@@ -30,6 +30,17 @@ only added or changed fork-specific features.
 - **Long-running intake actions are easier to follow.** Photo analysis and
   item confirmation show their current Shelf phase and a progress indicator,
   from image preparation through recognition, metadata matching and saving.
+- **Metadata maintenance filters now follow their configuration exactly.**
+  The Name checkbox checks the actual catalogue title rather than the optional
+  alternate title, and existing saved selections are migrated automatically.
+  Browse also offers one **Missing** filter for unset name, alternate name,
+  developer, publisher, platform, region, language, year or collector state.
+- **Collection cards are less noisy when desired.** The per-user Appearance
+  settings can hide the New label. The Home **Unknown platform** tile appears
+  only when at least one game needs a platform.
+- **Maintenance links land in the right place.** Reviewing missing game
+  metadata now opens the Library settings tab and scrolls directly to its
+  configuration section.
 
 ## V1.2.2 — Upgrade V1.2.2
 

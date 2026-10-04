@@ -59,7 +59,7 @@
                 <p class="text-xs text-shelf-muted mt-1">{{ missing_game_metadata_labels|join(', ') or 'No fields selected' }}</p>
             </a>
             {% if user and user.role == 'admin' %}
-            <a href="/settings#data" title="Review missing game metadata"
+            <a href="/settings?tab=library#missing-game-metadata" title="Review missing game metadata"
                class="absolute bottom-1 right-2 p-1.5 rounded-lg text-shelf-muted hover:bg-shelf-hover hover:text-shelf-accent2 transition-colors"><i data-lucide="file-pen-line" class="w-5 h-5" aria-hidden="true"></i></a>
             {% endif %}
         </div>{% endif %}
@@ -90,10 +90,11 @@
 <!--                <p class="text-xs text-shelf-muted mt-1">{{ 'game' if platform.item_count == 1 else 'games' }}</p>-->
             </a>
             {% endfor %}
-            <a href="/browse?unknown_platform=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors text-center gap-4 grid" data-testid="home-platform-unknown">
+            {% if unknown_platform_count %}<a href="/browse?unknown_platform=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors text-center gap-4 grid" data-testid="home-platform-unknown">
                 <p class="text-shelf-muted text-sm truncate">Unknown platform</p>
                 <p class="text-3xl font-bold">{{ unknown_platform_count }}</p>
             </a>
+            {% endif %}
         </div>
     </section>
     {% endif %}
@@ -168,7 +169,7 @@
                     {% if item.wishlisted %}
                     <div class="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-warning/90 text-black shadow">Wishlist</div>
                     {% endif %}
-                    <div class="absolute top-2 {% if item.wishlisted %}right-2 top-8{% else %}right-2{% endif %} z-10 px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-accent/80 text-white shadow">New</div>
+                    {% if collection_appearance.show_new_label %}<div class="absolute top-2 {% if item.wishlisted %}right-2 top-8{% else %}right-2{% endif %} z-10 px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-accent/80 text-white shadow">New</div>{% endif %}
                     {% if item.cover_path %}
                     <img src="/{{ item.cover_path }}" alt="{{ item.title }}" loading="lazy">
                     {% else %}
@@ -179,7 +180,7 @@
                     {% endif %}
                 </div>
                 <div class="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent rounded-lg transition-opacity flex items-end p-3 group-hover:ring-2 group-hover:ring-inset group-hover:ring-shelf-accent {% if not collection_appearance.always_show_game_title %}opacity-0 group-hover:opacity-100{% endif %}">
-                    <div class="min-w-0">
+                    <div class="min-w-0 grow">
                         <p class="text-white text-sm font-medium truncate">{{ item.title }}</p>
                         {% if item.authors %}<p class="text-gray-300 text-xs truncate">{{ item.authors }}</p>{% endif %}
                         {% if (collection_appearance.show_collector_condition and item.collector_condition) or (collection_appearance.show_region and item.region) %}

@@ -314,6 +314,16 @@
                 <option value="1" {{ 'selected' if f.cover_missing == '1' else '' }}>Missing cover</option>
             </select>
 
+            <select id="missing-value-filter" name="missing_value"
+                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+                    hx-include="{{ filter_includes('missing_value') }}"
+                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <option value="" {{ 'selected' if not f.missing_value else '' }}>All metadata</option>
+                {% for value, label in missing_value_options.items() %}
+                <option value="{{ value }}" {{ 'selected' if f.missing_value == value else '' }}>{{ label }}</option>
+                {% endfor %}
+            </select>
+
             <!-- Reading Status Filter -->
             {% set sl = status_labels(active_type or none) %}
             <select id="reading-status-filter" name="reading_status"

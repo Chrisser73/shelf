@@ -187,7 +187,7 @@ function browsePage() {
 
         filterLabel(def) {
             return {owned: 'Lists', lent_out: 'Lent out', platform_filter: 'Platform',
-                tag: 'Tag', author_filter: 'Author' }[def.name] || def.prefix || def.name;
+                tag: 'Tag', author_filter: 'Author', missing_value: 'Missing'}[def.name] || def.prefix || def.name;
         },
 
         loadFilters() {

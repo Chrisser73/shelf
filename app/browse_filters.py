@@ -167,6 +167,37 @@ def _missing_game_metadata(value):
     return game_metadata.missing_sql("i."), []
 
 
+# One negative metadata control is clearer than several misleading "Unknown"
+# values: an unset value is not necessarily the literal value "unknown".
+MISSING_VALUE_OPTIONS = {
+    "title": "Missing name",
+    "alternate_title": "Missing alternate name",
+    "authors": "Missing developer",
+    "publisher": "Missing publisher",
+    "platform": "Missing platform",
+    "region": "Missing region",
+    "language": "Missing language",
+    "publish_year": "Missing year",
+    "collector_condition": "Missing collector state",
+}
+
+
+def _missing_value(value):
+    if value not in MISSING_VALUE_OPTIONS:
+        return _NEVER
+    condition = (
+        f"(i.{value} IS NULL OR TRIM(i.{value}) = '')"
+        if value != "publish_year" else "i.publish_year IS NULL"
+    )
+    # These metadata fields are game-only. Collector state is meaningful for
+    # physical non-book media, while title/creator/publisher work everywhere.
+    if value in {"platform", "region", "language", "publish_year"}:
+        condition = "i.media_type = 'video_game' AND " + condition
+    elif value == "collector_condition":
+        condition = "i.media_type != 'book' AND " + condition
+    return condition, []
+
+
 def _collector_condition(value):
     values = [part.strip().lower() for part in value.split(",") if part.strip()]
     allowed = {"cib", "boxed", "loose"}
@@ -243,6 +274,7 @@ FILTERS: tuple[BrowseFilter, ...] = (
     BrowseFilter("unknown_platform", prefix="Platform", condition=_unknown_platform),
     BrowseFilter("cover_missing", prefix="Missing cover", condition=_missing_cover),
     BrowseFilter("missing_game_metadata", prefix="Missing metadata", condition=_missing_game_metadata, chip=False),
+    BrowseFilter("missing_value", prefix="Missing", condition=_missing_value),
     BrowseFilter("collector_condition", prefix="Condition", condition=_collector_condition),
     BrowseFilter("tag", prefix="Tag", condition=_tag, quote_in_qs=True),
     # Set from an item page's author link; a hidden control, since hundreds

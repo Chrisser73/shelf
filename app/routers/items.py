@@ -976,6 +976,9 @@ async def search_items(
         show_region_in_collection = get_preference(
             db, request.state.user["id"], "show_region_in_collection"
         ) == "1"
+        show_new_label_in_collection = get_preference(
+            db, request.state.user["id"], "show_new_label_in_collection", "1"
+        ) == "1"
         from app.services.user_preferences import platform_logo_map
         platform_logo_paths = platform_logo_map(db, request.state.user["id"])
         game_platforms = get_game_platforms(db)
@@ -1010,6 +1013,7 @@ async def search_items(
         "show_platform_logo_in_collection": show_platform_logo_in_collection,
         "show_collector_condition_in_collection": show_collector_condition_in_collection,
         "show_region_in_collection": show_region_in_collection,
+        "show_new_label_in_collection": show_new_label_in_collection,
         "platform_logo_paths": platform_logo_paths,
         "game_platforms": game_platforms,
     }

@@ -55,6 +55,7 @@ async def index(
             "show_platform_logo": get_preference(db, request.state.user["id"], "show_platform_logo_in_collection") == "1",
             "show_collector_condition": get_preference(db, request.state.user["id"], "show_collector_condition_in_collection") == "1",
             "show_region": get_preference(db, request.state.user["id"], "show_region_in_collection") == "1",
+            "show_new_label": get_preference(db, request.state.user["id"], "show_new_label_in_collection", "1") == "1",
         }
 
     return request.app.state.templates.TemplateResponse(
@@ -173,6 +174,9 @@ async def browse(
         show_region_in_collection = get_preference(
             db, request.state.user["id"], "show_region_in_collection"
         ) == "1"
+        show_new_label_in_collection = get_preference(
+            db, request.state.user["id"], "show_new_label_in_collection", "1"
+        ) == "1"
         from app.services.user_preferences import platform_logo_map
         platform_logo_paths = platform_logo_map(db, request.state.user["id"])
         game_platforms = get_game_platforms(db)
@@ -197,6 +201,7 @@ async def browse(
         "lent_out_count": lent_out_count,
         "item_languages": item_languages,
         "item_regions": item_regions,
+        "missing_value_options": browse_filters.MISSING_VALUE_OPTIONS,
         "has_more": has_more,
         "has_filters": browse_filters.has_active_filters(values),
         "load_more_url": load_more_url,
@@ -209,6 +214,7 @@ async def browse(
         "show_platform_logo_in_collection": show_platform_logo_in_collection,
         "show_collector_condition_in_collection": show_collector_condition_in_collection,
         "show_region_in_collection": show_region_in_collection,
+        "show_new_label_in_collection": show_new_label_in_collection,
         "platform_logo_paths": platform_logo_paths,
         "game_platforms": game_platforms,
     }

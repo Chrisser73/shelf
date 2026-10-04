@@ -28,7 +28,7 @@ EDITABLE_FIELDS = (
 
 # Storage names behind the labels used in the admin settings UI.
 MISSING_FIELD_LABELS = {
-    "alternate_title": "Name", "authors": "Developer", "publisher": "Publisher",
+    "title": "Name", "authors": "Developer", "publisher": "Publisher",
     "platform": "Platform", "region": "Region", "language": "Language",
     "publish_year": "Year",
 }
@@ -65,7 +65,14 @@ def configured_missing_fields(db) -> tuple[str, ...]:
         return DEFAULT_MISSING_FIELDS
     if raw == "none":
         return ()
-    return tuple(field for field in raw.split(",") if field in MISSING_FIELD_LABELS)
+    # V1.2.3 originally bound the user-facing "Name" checkbox to the
+    # optional alternate title.  Preserve administrators' saved choice, but
+    # interpret it as the actual catalogue title from now on.
+    return tuple(
+        "title" if field == "alternate_title" else field
+        for field in raw.split(",")
+        if field in MISSING_FIELD_LABELS or field == "alternate_title"
+    )
 
 
 def missing_metadata_count(db) -> int:
