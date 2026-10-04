@@ -9,11 +9,7 @@
         <div class="cover-card bg-shelf-card rounded-lg overflow-hidden border border-shelf-border group-hover:border-shelf-accent/50 transition-colors shadow-lg"
              data-cover-shape="{{ cover_shape(item.media_type) }}"
              :class="selectedIds.includes({{ item.id }}) ? 'ring-2 ring-shelf-accent' : ''">
-            {% if item.wishlisted %}
-            <div class="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-warning/90 text-black shadow">
-                Wishlist
-            </div>
-            {% elif item.lent_to and feature_on('lending') %}
+            {% if item.lent_to and feature_on('lending') %}
             <div x-data="{ show: false }" @click.stop.prevent="show = !show" @mouseleave="show = false"
                  data-testid="loan-badge"
                  class="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-medium {% if item.lent_overdue %}bg-shelf-error/90{% else %}bg-orange-500/90{% endif %} text-white shadow cursor-pointer max-w-[140px] truncate"
@@ -28,7 +24,7 @@
             {% elif item.reading_status == 'want_to_read' %}bg-shelf-warning{% endif %}"></div>
             {% endif %}
             {% if show_new_label_in_collection and item.created_at and item.created_at >= seven_days_ago %}
-            <div class="absolute top-2 {% if item.wishlisted or (item.lent_to and feature_on('lending')) or item.reading_status %}right-2 top-8{% else %}right-2{% endif %} z-10 px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-accent/80 text-white shadow">
+            <div class="absolute top-2 {% if (item.lent_to and feature_on('lending')) or item.reading_status %}right-2 top-8{% else %}right-2{% endif %} z-10 px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-accent/80 text-white shadow">
                 New
             </div>
             {% endif %}
@@ -49,16 +45,24 @@
             {% endif %}
         </div>
         <!-- Hover overlay with title -->
-        <div class="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent rounded-lg transition-opacity flex items-end p-3 group-hover:ring-2 group-hover:ring-inset group-hover:ring-shelf-accent {% if not always_show_game_title %} opacity-0 group-hover:opacity-100{% endif %}">
-            <div class="min-w-0 grow">
+        <div class="absolute inset-0 rounded-lg transition-opacity flex items-end p-3 group-hover:ring-2 group-hover:ring-inset group-hover:ring-shelf-accent {% if not always_show_game_title %} opacity-0 group-hover:opacity-100{% endif %}">
+            <div class="absolute inset-0 rounded-lg bg-linear-to-t from-black/80 via-transparent to-transparent opacity-100 transition-opacity duration-150 group-hover:opacity-0"
+                 style="--tw-gradient-stops: to top, rgb(0 0 0 / 0.85) 0%, rgb(0 0 0 / 0.70) 30%, rgb(0 0 0 / 0.08) 48%, transparent 100%;"></div>
+            <div class="relative z-10 min-w-0 w-full">
                 <p class="text-white text-sm font-medium truncate">{{ item.title|highlight_search(search_query) }}</p>
                 {% if item.authors %}<p class="text-gray-300 text-xs truncate">{{ item.authors }}</p>{% endif %}
-                {% if (show_collector_condition_in_collection and item.collector_condition) or
+                {% if (show_wishlist_icon_in_collection and item.wishlisted) or (show_collector_condition_in_collection and item.collector_condition) or
                 (show_region_in_collection and item.region) %}
                 <div class="mt-2 flex items-center justify-between gap-2">
-                    {% if show_collector_condition_in_collection and item.collector_condition %}<span
-                        class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-card/80 text-white shadow">{{ item.collector_condition|upper }}</span>{%
-                    else %}<span></span>{% endif %}
+                    <div class="flex min-w-0 items-center gap-1">
+                        {% if show_wishlist_icon_in_collection and item.wishlisted %}<i data-lucide="heart"
+                                                   class="w-5 h-5 shrink-0 text-shelf-text p-1 rounded bg-shelf-card/80 shadow"
+                                                   fill="currentColor" aria-label="Wishlisted" title="Wishlisted"></i>{%
+                        endif %}
+                        {% if show_collector_condition_in_collection and item.collector_condition %}<span
+                            class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-card/80 text-white shadow">{{ item.collector_condition|upper }}</span>{%
+                        endif %}
+                    </div>
                     {% if show_region_in_collection and item.region %}<span
                         class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-card/80 text-white shadow">{{ item.region|upper }}</span>{%
                     endif %}

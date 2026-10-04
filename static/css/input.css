@@ -7,6 +7,7 @@
 
 /* Former tailwind.config.js theme, now expressed as native CSS theme tokens. */
 @theme {
+    --color-white: #ffffff;
     --color-shelf-bg: #0f1117;
     --color-shelf-card: #1a1d27;
     --color-shelf-hover: #242836;
@@ -29,8 +30,14 @@ body {
     color: #e2e8f0;
 }
 
-a, button, select { cursor: pointer; }
-button:disabled, select:disabled { cursor: not-allowed; }
+a, button, select {
+    cursor: pointer;
+}
+
+button:disabled, select:disabled {
+    cursor: not-allowed;
+}
+
 .nav-icon {
     display: block;
     width: 20px;
@@ -45,32 +52,89 @@ button:disabled, select:disabled { cursor: not-allowed; }
     grid-template-columns: repeat(1, minmax(0, 1fr));
     gap: 1.25rem;
 }
-.cover-grid[data-grid-size="plus1"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.cover-grid[data-grid-size="plus2"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.cover-grid[data-grid-size="plus3"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.cover-grid[data-grid-size="plus1"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cover-grid[data-grid-size="plus2"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cover-grid[data-grid-size="plus3"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 @media (min-width: 40rem) {
-    .cover-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus1"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus2"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus3"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .cover-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus1"] {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus2"] {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus3"] {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
 }
+
 @media (min-width: 48rem) {
-    .cover-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus1"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus2"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus3"] { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .cover-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus1"] {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus2"] {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus3"] {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
 }
+
 @media (min-width: 64rem) {
-    .cover-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus1"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus2"] { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus3"] { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+    .cover-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus1"] {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus2"] {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus3"] {
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
 }
+
 @media (min-width: 80rem) {
-    .cover-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus1"] { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus2"] { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-    .cover-grid[data-grid-size="plus3"] { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+    .cover-grid {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus1"] {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus2"] {
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus3"] {
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+    }
 }
 
 .cover-card {
@@ -83,7 +147,12 @@ button:disabled, select:disabled { cursor: not-allowed; }
     object-fit: cover;
     border-radius: 0.5rem;
 }
-[data-cover-shape="square"] { aspect-ratio: 1 / 1; height: auto; }
+
+[data-cover-shape="square"] {
+    aspect-ratio: 1 / 1;
+    height: auto;
+}
+
 /* Square artwork (music). Keeps each box's width and derives its height, so
    it overrides .cover-card's 2:3, aspect-[2/3] and any fixed h-* utility. */
 .scan-result {
@@ -119,6 +188,7 @@ button:disabled, select:disabled { cursor: not-allowed; }
 [x-cloak] {
     display: none !important;
 }
+
 /* Busy state: static/js/app.js sets aria-busy on the htmx control that issued a
    request. An Alpine control can opt into the same look with :aria-busy="<flag>". */
 button[aria-busy="true"]::after {
@@ -133,11 +203,19 @@ button[aria-busy="true"]::after {
     border-radius: 9999px;
     animation: busy-spin 0.7s linear infinite;
 }
+
 /* The alternate-name editor has its own spinner so it can replace the save
    icon. Do not add the shared busy spinner beside it. */
 button[data-alternate-name-save][aria-busy="true"]::after {
     display: none;
 }
+
+/* The detail-page wishlist toggle also replaces its icon with its own
+   spinner. Suppress the generic adjacent spinner for the same reason. */
+button[data-wishlist-toggle][aria-busy="true"]::after {
+    display: none;
+}
+
 input[aria-busy="true"] {
     padding-right: 2.25rem;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='none' stroke='%232d3148' stroke-width='3'/%3E%3Cpath d='M12 3a9 9 0 0 1 9 9' fill='none' stroke='%236366f1' stroke-width='3' stroke-linecap='round'%3E%3CanimateTransform attributeName='transform' type='rotate' from='0 12 12' to='360 12 12' dur='0.7s' repeatCount='indefinite'/%3E%3C/path%3E%3C/svg%3E");
@@ -145,9 +223,18 @@ input[aria-busy="true"] {
     background-position: right 0.75rem center;
     background-size: 1rem 1rem;
 }
-@keyframes busy-spin { to { transform: rotate(360deg); } }
+
+@keyframes busy-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
-    button[aria-busy="true"]::after { animation: none; }
+    button[aria-busy="true"]::after {
+        animation: none;
+    }
+
     input[aria-busy="true"] {
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='none' stroke='%232d3148' stroke-width='3'/%3E%3Cpath d='M12 3a9 9 0 0 1 9 9' fill='none' stroke='%236366f1' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
     }

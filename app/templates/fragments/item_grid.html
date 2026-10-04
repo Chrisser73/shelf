@@ -44,7 +44,7 @@
                     <button type="button" @click.stop="toggleSelectMode()"
                             class="px-2 py-1 rounded-md text-[10px] border border-shelf-border bg-shelf-card text-shelf-muted hover:border-shelf-accent/50 transition-colors normal-case tracking-normal">Select</button>
                     {% else %}
-                    <span class="inline-flex items-center gap-1">{{ browse_creator_label(active_type) if col.name == 'author' else col.label }}{% if col.name not in ('select', 'cover', 'tags') %}<span class="text-shelf-muted" x-text="listSort === '{{ col.name }}' || listSort === '{{ col.name }}_asc' || (('{{ col.name }}' === 'title') && listSort === 'title_asc') ? '↑' : (listSort === '{{ col.name }}_desc' || (('{{ col.name }}' === 'title') && listSort === 'title_desc') ? '↓' : '↕')"></span>{% endif %}</span>
+                    <span class="inline-flex items-center gap-1">{{ browse_creator_label(active_type) if col.name == 'author' else col.label }}{% if col.name not in ('select', 'cover', 'tags') %}<i data-lucide="arrow-down-up" x-show="listSortDirection('{{ col.name }}') === 'none'" class="w-3 h-3 text-shelf-muted" aria-label="Not sorted"></i><i data-lucide="arrow-up" x-show="listSortDirection('{{ col.name }}') === 'asc'" class="w-3 h-3 text-shelf-muted" aria-label="Sorted ascending"></i><i data-lucide="arrow-down" x-show="listSortDirection('{{ col.name }}') === 'desc'" class="w-3 h-3 text-shelf-muted" aria-label="Sorted descending"></i>{% endif %}</span>
                     {% endif %}
                 </th>
                 {% endfor %}
