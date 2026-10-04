@@ -80,7 +80,7 @@
             <div class="border-t border-shelf-border pt-4 space-y-2">
                 <p class="text-sm font-medium">Home</p>
                 <p class="text-xs text-shelf-muted">Choose the summary tiles shown on your Home page.</p>
-                {% for key, label in [('catalogue', 'Catalogue'), ('owned', 'Owned'), ('wishlist', 'Wishlist'), ('lent_out', 'Lent out'), ('missing_covers', 'Missing covers'), ('missing_game_metadata', 'Missing game metadata'), ('media_types', 'Media types')] %}
+                {% for key, label in [('catalogue', 'Catalogue'), ('owned', 'Owned'), ('wishlist', 'Wishlist'), ('lent_out', 'Lent out'), ('missing_covers', 'Missing covers'), ('missing_game_metadata', 'Missing metadata'), ('media_types', 'Media types')] %}
                 {% if key != 'lent_out' or lending_enabled %}
                 <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" name="home_tile_{{ key }}" value="1" {% if settings.get('home_tile:' ~ key, '1') == '1' %}checked{% endif %} class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">{{ label }}</label>
                 {% endif %}
