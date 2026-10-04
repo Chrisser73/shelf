@@ -10,6 +10,10 @@ function intakePage() {
         preview: false,
         analyzing: false,
         confirming: false,
+        analysisPhase: '',
+        analysisProgress: 0,
+        confirmationPhase: '',
+        confirmationProgress: 0,
         error: false,
         books: [],
         result: false,
@@ -103,6 +107,8 @@ function intakePage() {
             this.imageEl = null;
             this.lowRes = false;
             this.analyzing = false;
+            this.analysisPhase = '';
+            this.analysisProgress = 0;
             this.photoW = 0;
             this.photoH = 0;
             if (this.preview) URL.revokeObjectURL(this.preview);
@@ -320,6 +326,8 @@ function intakePage() {
             // returns without clearing `analyzing` — the replacer clears it.
             var gen = this.photoGeneration;
             this.analyzing = true;
+            this.analysisPhase = 'Preparing your photo…';
+            this.analysisProgress = 12;
             this.error = false;
             this.books = [];
             this.result = false;
@@ -333,10 +341,14 @@ function intakePage() {
                     : '00000000-0000-4000-8000-' + Date.now().toString(16).padStart(12, '0').slice(-12);
                 form.append('job_id', this.activeAnalysisJob);
                 if (tiled && this.plan.tiles.length && this.imageEl) {
+                    this.analysisPhase = 'Preparing detailed image sections…';
+                    this.analysisProgress = 28;
                     var blobs = await this.makeTileBlobs();
                     if (gen !== this.photoGeneration) return;
                     blobs.forEach((b, i) => form.append('photos', b, 'tile-' + i + '.jpg'));
                 } else {
+                    this.analysisPhase = 'Preparing the image for analysis…';
+                    this.analysisProgress = 28;
                     // Never upload more pixels than the provider will ingest:
                     // /plan's preview dims are exactly what it resizes to.
                     // factor is rounded (a 2586px photo reports 1.0), preview
@@ -355,6 +367,8 @@ function intakePage() {
                         form.append('photos', this.file);
                     }
                 }
+                this.analysisPhase = 'Reading titles, packaging and platform clues with AI…';
+                this.analysisProgress = 55;
                 var resp = await fetch('/api/intake/analyze', {
                     method: 'POST',
                     headers: { 'X-CSRF-Token': window.csrfToken() },
@@ -363,6 +377,8 @@ function intakePage() {
                 if (gen !== this.photoGeneration) return;
                 var data = await resp.json();
                 if (gen !== this.photoGeneration) return;
+                this.analysisPhase = 'Reviewing identified items…';
+                this.analysisProgress = 88;
                 if (data.ok) {
                     this.needsChoice = false;
                     this.books = data.books.map(b => ({
@@ -372,6 +388,8 @@ function intakePage() {
                         collector_condition: b.collector_condition || '', language: b.language || '', region: b.region || '', alternate_title: b.alternate_title || '', existing: b.existing || null,
                         include: !b.existing,
                     }));
+                    this.analysisPhase = 'Ready to review';
+                    this.analysisProgress = 100;
                 } else if (data.cancelled) {
                     this.error = false;
                     showToast(data.message || 'Analysis cancelled — the AI request was stopped.', 'info');
@@ -467,6 +485,10 @@ function intakePage() {
 
         async confirm(skipMetadata) {
             this.confirming = true;
+            this.confirmationPhase = skipMetadata
+                ? 'Adding the selected items…'
+                : 'Looking up game metadata and matching covers…';
+            this.confirmationProgress = 18;
             this.error = false;
             // Read synchronously, before the await, so a re-render mid-request
             // cannot leave this stale (G2).
@@ -496,9 +518,12 @@ function intakePage() {
                     }),
                 });
                 var data = await resp.json();
+                this.confirmationPhase = 'Saving the collection entries…';
+                this.confirmationProgress = 88;
                 if (data.ok) {
                     this.result = data;
                     this.books = [];
+                    this.confirmationProgress = 100;
                     showToast('Added ' + data.added.length + ' items');
                 } else {
                     this.error = data.message || 'Add failed';

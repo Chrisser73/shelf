@@ -56,7 +56,7 @@
             <a href="/browse?missing_game_metadata=1" class="block pr-8">
                 <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="database-zap" class="w-4 h-4" aria-hidden="true"></i>Missing game metadata</p>
                 <p class="text-3xl font-bold">{{ missing_game_metadata_count }}</p>
-                <p class="text-xs text-shelf-muted mt-1">Name, developer, publisher, platform, region, language or year</p>
+                <p class="text-xs text-shelf-muted mt-1">{{ missing_game_metadata_labels|join(', ') or 'No fields selected' }}</p>
             </a>
             {% if user and user.role == 'admin' %}
             <a href="/settings#data" title="Review missing game metadata"
@@ -90,6 +90,10 @@
 <!--                <p class="text-xs text-shelf-muted mt-1">{{ 'game' if platform.item_count == 1 else 'games' }}</p>-->
             </a>
             {% endfor %}
+            <a href="/browse?unknown_platform=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors text-center gap-4 grid" data-testid="home-platform-unknown">
+                <p class="text-shelf-muted text-sm truncate">Unknown platform</p>
+                <p class="text-3xl font-bold">{{ unknown_platform_count }}</p>
+            </a>
         </div>
     </section>
     {% endif %}

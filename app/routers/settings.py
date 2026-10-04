@@ -444,6 +444,17 @@ async def update_appearance_settings(request: Request):
     return RedirectResponse(url="/settings", status_code=303)
 
 
+@router.post("/missing-game-metadata")
+async def update_missing_game_metadata_settings(request: Request):
+    """Save the admin-selected fields behind the maintenance tile/filter."""
+    form = await request.form()
+    from app.services.game_metadata import MISSING_FIELD_LABELS
+    fields = [field for field in form.getlist("fields") if field in MISSING_FIELD_LABELS]
+    with get_db() as db:
+        set_setting(db, "missing_game_metadata_fields", ",".join(fields) or "none")
+    return RedirectResponse(url="/settings", status_code=303)
+
+
 @personal_router.post("/platform-logo")
 async def update_platform_logo(request: Request):
     form = await request.form()

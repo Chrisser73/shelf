@@ -177,6 +177,14 @@ document.body.addEventListener('alternateNameSaved', function(e) {
     var cancel = id && document.querySelector('[data-alternate-name-cancel="' + id + '"]');
     if (cancel) cancel.click();
 });
+document.body.addEventListener('itemMetadataSaved', function(e) {
+    var d = e.detail || {};
+    var key = d.item_id + '-' + d.field;
+    var display = document.querySelector('[data-inline-display="' + key + '"]');
+    if (display) display.textContent = d.display || '—';
+    var cancel = document.querySelector('[data-inline-field-cancel="' + key + '"]');
+    if (cancel) cancel.click();
+});
 document.body.addEventListener('htmx:beforeRequest', function(e) {
     var form = e.detail.elt;
     if (!form || !form.matches || !form.matches('[data-alternate-name-form]')) return;

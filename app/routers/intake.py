@@ -477,6 +477,11 @@ async def _confirm_one(
         elif meta_langs:
             language = national.to_iso639_1(meta_langs[0])
 
+    # IGDB calls this field ``developer`` while book providers use the shared
+    # ``authors`` key.  Intake stores either in the item's creator column, so
+    # a successful game lookup must not silently discard the IGDB developer.
+    creator = book.authors or meta.get("authors") or meta.get("developer")
+
     # A surviving printed ISBN names the physical copy; Open Library's names
     # its best-known edition. The printed one wins. `isbn10` is no longer
     # tracked here — the funnel derives it from `isbn` on insert.
@@ -518,7 +523,7 @@ async def _confirm_one(
                 return "skipped", {"title": title, "reason": "existing item changed"}, None
             updates = {
                 "title": title,
-                "authors": book.authors or meta.get("authors"),
+                "authors": creator,
                 "publisher": book.publisher or meta.get("publisher"),
                 "publish_year": book.publish_year or meta.get("publish_year"),
                 "platform": platform,
@@ -569,7 +574,7 @@ async def _confirm_one(
             item_id = insert_item(
                 db,
                 title=title,
-                authors=book.authors or meta.get("authors"),
+                authors=creator,
                 isbn=isbn13,
                 media_type=media_type,
                 publisher=book.publisher or meta.get("publisher"),
