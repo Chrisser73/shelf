@@ -25,6 +25,9 @@ function browsePage() {
         columnsOpen: false,
         filterEditorOpen: false,
         filtersOpen: false,
+        missingValues: [],
+        configuredMissingValues: [],
+        showingConfiguredMissingValues: false,
         // Bound (x-model) to BOTH the mobile and desktop search inputs, which
         // share name="q". Keeping them in lockstep is what stops hx-include
         // from sending "q=typed&q=" — Starlette's QueryParams.get() returns the
@@ -45,6 +48,13 @@ function browsePage() {
             // first rather than being populated lazily.
             this.visibleCols = this.loadColumns();
             this.visibleFilters = this.loadFilters();
+            var missingInput = document.querySelector('[name="missing_value"]');
+            this.missingValues = missingInput && missingInput.value
+                ? missingInput.value.split(',').filter(Boolean) : [];
+            this.configuredMissingValues = (this.$el.dataset.configuredMissingFields || '')
+                .split(',').filter(Boolean);
+            this.showingConfiguredMissingValues = !this.missingValues.length &&
+                this.$el.dataset.initialMissingGameMetadata === '1';
             this.applyFilterVisibility();
             this.searchQuery = this.$el.dataset.initialQuery || '';
             // Returning to a bare /browse re-applies the last filter set.
@@ -73,6 +83,15 @@ function browsePage() {
                 this.syncFilters();
                 this.updateUrl();
                 this.applyFilterVisibility();
+            });
+            // OOB dropdown replacements can happen after the first swap
+            // event. Reapply after htmx has settled every replacement so a
+            // user-hidden filter cannot reappear after a search.
+            document.body.addEventListener('htmx:afterSettle', () => {
+                this.applyFilterVisibility();
+                requestAnimationFrame(function() {
+                    if (window.renderShelfLucideIcons) window.renderShelfLucideIcons();
+                });
             });
             // Persist sort preference on change
             var browse = this;
@@ -118,15 +137,37 @@ function browsePage() {
         watchGridForHtmx() {
             var grid = document.getElementById('item-grid');
             if (!grid || !window.MutationObserver) return;
+            var iconRenderQueued = false;
             var observer = new MutationObserver(function(records) {
+                var hasNewLucidePlaceholder = false;
                 records.forEach(function(rec) {
                     rec.addedNodes.forEach(function(node) {
                         // ELEMENT_NODE only; htmx.process ignores text nodes.
                         // Re-processing an already-wired element is a no-op for
                         // htmx, so overlapping mutations are safe.
-                        if (node.nodeType === 1) htmx.process(node);
+                        if (node.nodeType === 1) {
+                            htmx.process(node);
+                            // Lucide replaces an <i> with an <svg>, which is
+                            // itself another mutation. Only schedule a render
+                            // for a genuinely new placeholder, never for the
+                            // SVG Lucide just produced; otherwise cards keep
+                            // repainting their icons in a loop.
+                            if (node.matches('i[data-lucide]') || node.querySelector('i[data-lucide]')) {
+                                hasNewLucidePlaceholder = true;
+                            }
+                        }
                     });
                 });
+                // Alpine's x-if inserts the list-table contents in a later
+                // mutation. A frame after that is the first point at which
+                // the Lucide placeholders exist as real nodes to replace.
+                if (hasNewLucidePlaceholder && !iconRenderQueued) {
+                    iconRenderQueued = true;
+                    requestAnimationFrame(function() {
+                        iconRenderQueued = false;
+                        if (window.renderShelfLucideIcons) window.renderShelfLucideIcons();
+                    });
+                }
             });
             observer.observe(grid, {childList: true, subtree: true});
             this._gridObserver = observer;
@@ -181,7 +222,7 @@ function browsePage() {
 
         editableFilterDefs() {
             return this.filterDefs().filter(function(def) {
-                return !['q', 'sort', 'view', 'missing_game_metadata', 'unknown_platform'].includes(def.name);
+                return !['q', 'sort', 'view', 'missing_game_metadata', 'unknown_platform', 'cover_missing'].includes(def.name);
             });
         },
 
@@ -219,9 +260,34 @@ function browsePage() {
                 document.querySelectorAll('[name="' + def.name + '"]').forEach(function(el) {
                     // Search has the same name but remains permanently visible.
                     if (el.type === 'search') return;
-                    el.style.display = self.visibleFilters[def.name] ? '' : 'none';
+                    var control = el.closest('[data-filter-control]') || el;
+                    control.style.display = self.visibleFilters[def.name] ? '' : 'none';
                 });
             });
+        },
+
+        toggleMissingValue(value, checked) {
+            var currentValues = this.showingConfiguredMissingValues
+                ? this.configuredMissingValues : this.missingValues;
+            var values = currentValues.filter(function(current) { return current !== value; });
+            if (checked) values.push(value);
+            this.missingValues = values;
+            this.showingConfiguredMissingValues = false;
+            this.setControlValue('missing_value', values.join(','));
+            var input = document.querySelector('[name="missing_value"]');
+            if (input) htmx.trigger(input, 'change');
+        },
+
+        missingValueSummary() {
+            var values = this.showingConfiguredMissingValues
+                ? this.configuredMissingValues : this.missingValues;
+            return values.length ? 'Missing (' + values.length + ')' : 'Missing';
+        },
+
+        missingValueSelected(value) {
+            var values = this.showingConfiguredMissingValues
+                ? this.configuredMissingValues : this.missingValues;
+            return values.includes(value);
         },
 
         // The Browse list-view column set, read from the JSON block
@@ -320,6 +386,10 @@ function browsePage() {
         // assigning Alpine state alone because htmx serializes the form
         // synchronously on `change`, before Alpine flushes its DOM effects.
         setControlValue(name, value) {
+            if (name === 'missing_value') {
+                this.missingValues = value ? value.split(',').filter(Boolean) : [];
+                this.showingConfiguredMissingValues = false;
+            }
             document.querySelectorAll('[name="' + name + '"]').forEach(function(el) {
                 el.value = value;
             });
@@ -454,6 +524,14 @@ function browsePage() {
         setGridSize(size) {
             this.gridSize = size;
             localStorage.setItem('shelf-grid-size', size);
+        },
+
+        listSortDirection(column) {
+            if (this.listSort === column || this.listSort === column + '_asc' ||
+                (column === 'title' && this.listSort === 'title_asc')) return 'asc';
+            if (this.listSort === column + '_desc' ||
+                (column === 'title' && this.listSort === 'title_desc')) return 'desc';
+            return 'none';
         },
 
         syncFilters() {

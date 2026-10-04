@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Browse — Shelf{% endblock %}
 {% block content %}
-<div x-data="browsePage" data-initial-query="{{ initial_query or '' }}">
+<div x-data="browsePage" data-initial-query="{{ initial_query or '' }}"
+     data-configured-missing-fields="{{ configured_missing_fields|join(',') }}"
+     data-initial-missing-game-metadata="{{ initial_filters.missing_game_metadata or '' }}">
     <!-- Bulk Action Bar -->
     <div x-show="selectMode && selectedIds.length > 0" x-ref="bulkBar" data-bulk-action-bar x-transition
          class="fixed bottom-0 inset-x-0 z-40 bg-shelf-card border-t border-shelf-border py-3 px-4 shadow-lg">
@@ -306,23 +308,25 @@
             </select>
             {% endif %}
 
-            <select id="missing-cover-filter" name="cover_missing"
-                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
-                    hx-include="{{ filter_includes('cover_missing') }}"
-                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
-                <option value="" {{ 'selected' if not f.cover_missing else '' }}>All covers</option>
-                <option value="1" {{ 'selected' if f.cover_missing == '1' else '' }}>Missing cover</option>
-            </select>
-
-            <select id="missing-value-filter" name="missing_value"
-                    hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
-                    hx-include="{{ filter_includes('missing_value') }}"
-                    class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
-                <option value="" {{ 'selected' if not f.missing_value else '' }}>All metadata</option>
-                {% for value, label in missing_value_options.items() %}
-                <option value="{{ value }}" {{ 'selected' if f.missing_value == value else '' }}>{{ label }}</option>
-                {% endfor %}
-            </select>
+            <div class="relative" data-filter-control="missing_value" x-data="{ open: false }"
+                 @click.outside="open = false" @keydown.escape.window="open = false">
+                <input type="hidden" name="missing_value" value="{{ f.missing_value }}"
+                       hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
+                       hx-include="{{ filter_includes('missing_value') }}">
+                <button type="button" @click="open = !open" :aria-expanded="open"
+                        class="w-full cursor-pointer bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none flex items-center gap-2">
+                    <span x-text="missingValueSummary()">Missing</span><i data-lucide="chevron-down" class="w-4 h-4 ml-auto text-shelf-muted transition-transform" :class="open ? 'rotate-180' : ''" aria-hidden="true"></i>
+                </button>
+                <div x-show="open" x-cloak x-transition class="absolute z-30 mt-2 w-56 bg-shelf-card border border-shelf-border rounded-lg shadow-xl p-2 space-y-1">
+                        {% for value, label in missing_value_options.items() %}
+                        <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-shelf-hover text-sm cursor-pointer">
+                            <input type="checkbox" value="{{ value }}" :checked="missingValueSelected('{{ value }}')" @change="toggleMissingValue('{{ value }}', $event.target.checked)"
+                                   class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                            {{ label }}
+                        </label>
+                        {% endfor %}
+                </div>
+            </div>
 
             <!-- Reading Status Filter -->
             {% set sl = status_labels(active_type or none) %}

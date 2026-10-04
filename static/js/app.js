@@ -185,6 +185,50 @@ document.body.addEventListener('itemMetadataSaved', function(e) {
     var cancel = document.querySelector('[data-inline-field-cancel="' + key + '"]');
     if (cancel) cancel.click();
 });
+document.body.addEventListener('wishlistToggled', function(e) {
+    var d = e.detail || {};
+    var id = d.item_id;
+    var button = id && document.querySelector('[data-wishlist-toggle="' + id + '"]');
+    if (!button) return;
+
+    var wishlisted = !!d.wishlisted;
+    button.dataset.wishlisted = wishlisted ? '1' : '0';
+    button.setAttribute('aria-pressed', wishlisted ? 'true' : 'false');
+    button.classList.toggle('border-shelf-accent', wishlisted);
+    button.classList.toggle('bg-shelf-accent', wishlisted);
+    button.classList.toggle('text-white', wishlisted);
+    button.classList.toggle('hover:bg-shelf-accent2', wishlisted);
+    button.classList.toggle('border-shelf-border', !wishlisted);
+    button.classList.toggle('bg-shelf-bg', !wishlisted);
+    button.classList.toggle('text-shelf-accent2', !wishlisted);
+    button.classList.toggle('hover:border-shelf-accent', !wishlisted);
+    button.classList.toggle('hover:bg-shelf-accent/10', !wishlisted);
+
+    var action = wishlisted ? 'Remove from wishlist' : 'Add to wishlist';
+    button.setAttribute('title', action);
+    button.setAttribute('aria-label', action);
+    var heart = document.querySelector('[data-wishlist-heart="' + id + '"]');
+    if (heart) heart.setAttribute('fill', wishlisted ? 'currentColor' : 'none');
+});
+function setWishlistToggleLoading(button, loading) {
+    var id = button && button.getAttribute('data-wishlist-toggle');
+    var heart = id && document.querySelector('[data-wishlist-heart="' + id + '"]');
+    var spinner = id && document.querySelector('[data-wishlist-spinner="' + id + '"]');
+    if (heart) heart.classList.toggle('hidden', loading);
+    if (spinner) spinner.classList.toggle('hidden', !loading);
+}
+document.body.addEventListener('htmx:beforeRequest', function(e) {
+    var button = e.detail.elt;
+    if (button && button.matches && button.matches('[data-wishlist-toggle]')) {
+        setWishlistToggleLoading(button, true);
+    }
+});
+document.body.addEventListener('htmx:afterRequest', function(e) {
+    var button = e.detail.elt;
+    if (button && button.matches && button.matches('[data-wishlist-toggle]')) {
+        setWishlistToggleLoading(button, false);
+    }
+});
 document.body.addEventListener('htmx:beforeRequest', function(e) {
     var form = e.detail.elt;
     if (!form || !form.matches || !form.matches('[data-alternate-name-form]')) return;

@@ -979,6 +979,9 @@ async def search_items(
         show_new_label_in_collection = get_preference(
             db, request.state.user["id"], "show_new_label_in_collection", "1"
         ) == "1"
+        show_wishlist_icon_in_collection = get_preference(
+            db, request.state.user["id"], "show_wishlist_icon_in_collection", "1"
+        ) == "1"
         from app.services.user_preferences import platform_logo_map
         platform_logo_paths = platform_logo_map(db, request.state.user["id"])
         game_platforms = get_game_platforms(db)
@@ -1014,6 +1017,7 @@ async def search_items(
         "show_collector_condition_in_collection": show_collector_condition_in_collection,
         "show_region_in_collection": show_region_in_collection,
         "show_new_label_in_collection": show_new_label_in_collection,
+        "show_wishlist_icon_in_collection": show_wishlist_icon_in_collection,
         "platform_logo_paths": platform_logo_paths,
         "game_platforms": game_platforms,
     }
@@ -1198,6 +1202,47 @@ async def update_alternate_title(request: Request, item_id: int, _=Depends(requi
         headers={"HX-Trigger": json.dumps({
             "showToast": {"message": "Alternate name saved", "type": "success"},
             "alternateNameSaved": {"item_id": item_id},
+        })},
+    )
+
+
+@router.post("/items/{item_id}/wishlist")
+async def toggle_wishlist(item_id: int, _=Depends(require_role("editor"))):
+    """Toggle the current item's wishlist membership from its detail page."""
+    try:
+        with get_db() as db:
+            item = db.execute(
+                f"SELECT i.id, i.owned, {lists.WISHLISTED_SQL} AS wishlisted "
+                "FROM items_live i WHERE i.id = ?",
+                (item_id,),
+            ).fetchone()
+            if item is None:
+                return JSONResponse(
+                    {"ok": False, "message": "Item not found"}, status_code=404,
+                    headers={"HX-Trigger": items_common._toast_header("Item not found", "error")},
+                )
+
+            wishlisted = not bool(item["wishlisted"])
+            # Wishlist membership deliberately cannot coexist with ownership.
+            # Keep that invariant here instead of silently changing ownership.
+            if wishlisted and item["owned"]:
+                return JSONResponse(
+                    {"ok": False, "message": "An item you own can't also be on your wishlist."}, status_code=400,
+                    headers={"HX-Trigger": items_common._toast_header("An item you own can't also be on your wishlist.", "error")},
+                )
+            update_item_fields(db, item_id, {"wishlisted": wishlisted})
+    except (ItemValueError, ValueError) as exc:
+        return JSONResponse(
+            {"ok": False, "message": str(exc) or "Wishlist could not be updated"}, status_code=400,
+            headers={"HX-Trigger": items_common._toast_header(str(exc) or "Wishlist could not be updated", "error")},
+        )
+
+    label = "Added to wishlist" if wishlisted else "Removed from wishlist"
+    return JSONResponse(
+        {"ok": True, "wishlisted": wishlisted},
+        headers={"HX-Trigger": json.dumps({
+            "wishlistToggled": {"item_id": item_id, "wishlisted": wishlisted},
+            "showToast": {"message": label, "type": "success"},
         })},
     )
 

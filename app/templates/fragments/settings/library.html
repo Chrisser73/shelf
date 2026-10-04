@@ -78,10 +78,17 @@
                 <span><span class="block text-sm font-medium">Show region in collection</span><span class="block text-xs text-shelf-muted mt-1">Show PAL, NTSC, NTSC-J, or PAL-M on matching game cards.</span></span>
             </label>
             <label class="flex items-start gap-3 cursor-pointer">
+                <input type="hidden" name="show_new_label_in_collection" value="0">
                 <input type="checkbox" name="show_new_label_in_collection" value="1"
                        {% if settings.get('show_new_label_in_collection', '1') == '1' %}checked{% endif %}
                        class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
                 <span><span class="block text-sm font-medium">Show “New” label on items</span><span class="block text-xs text-shelf-muted mt-1">Show the New badge on recently added collection cards and rows.</span></span>
+            </label>
+            <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" name="show_wishlist_icon_in_collection" value="1"
+                       {% if settings.get('show_wishlist_icon_in_collection', '1') == '1' %}checked{% endif %}
+                       class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                <span><span class="block text-sm font-medium">Show icon on wishlisted items</span><span class="block text-xs text-shelf-muted mt-1">Show the filled heart in collection grid and list views.</span></span>
             </label>
             <div class="border-t border-shelf-border pt-4 space-y-2">
                 <p class="text-sm font-medium">Home</p>

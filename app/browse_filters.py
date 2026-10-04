@@ -170,6 +170,7 @@ def _missing_game_metadata(value):
 # One negative metadata control is clearer than several misleading "Unknown"
 # values: an unset value is not necessarily the literal value "unknown".
 MISSING_VALUE_OPTIONS = {
+    "cover": "Missing cover",
     "title": "Missing name",
     "alternate_title": "Missing alternate name",
     "authors": "Missing developer",
@@ -182,9 +183,9 @@ MISSING_VALUE_OPTIONS = {
 }
 
 
-def _missing_value(value):
-    if value not in MISSING_VALUE_OPTIONS:
-        return _NEVER
+def _missing_value_clause(value):
+    if value == "cover":
+        return _missing_cover("1")[0]
     condition = (
         f"(i.{value} IS NULL OR TRIM(i.{value}) = '')"
         if value != "publish_year" else "i.publish_year IS NULL"
@@ -195,7 +196,17 @@ def _missing_value(value):
         condition = "i.media_type = 'video_game' AND " + condition
     elif value == "collector_condition":
         condition = "i.media_type != 'book' AND " + condition
-    return condition, []
+    return condition
+
+
+def _missing_value(value):
+    # Comma-separated values come from the checkbox menu. Missing any selected
+    # field is useful maintenance work, so the clauses are deliberately ORed.
+    selected = list(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
+    selected = [value for value in selected if value in MISSING_VALUE_OPTIONS]
+    if not selected:
+        return _NEVER
+    return "(" + " OR ".join(_missing_value_clause(value) for value in selected) + ")", []
 
 
 def _collector_condition(value):
@@ -359,7 +370,13 @@ def values_from(query_params: Mapping[str, str]) -> dict:
     without `.get()` and a new filter needs no route-signature change. Values
     stay raw strings — parsing belongs to each filter's condition builder.
     """
-    return {f.name: query_params.get(f.name, f.default) or f.default for f in FILTERS}
+    values = {f.name: query_params.get(f.name, f.default) or f.default for f in FILTERS}
+    # Keep pre-1.2.3 Missing-cover links functional while rendering them in
+    # the consolidated Missing dropdown.
+    if values["cover_missing"] == "1" and not values["missing_value"]:
+        values["cover_missing"] = ""
+        values["missing_value"] = "cover"
+    return values
 
 
 def has_active_filters(values: Mapping[str, str]) -> bool:

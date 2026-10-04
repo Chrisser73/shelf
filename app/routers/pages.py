@@ -177,6 +177,9 @@ async def browse(
         show_new_label_in_collection = get_preference(
             db, request.state.user["id"], "show_new_label_in_collection", "1"
         ) == "1"
+        show_wishlist_icon_in_collection = get_preference(
+            db, request.state.user["id"], "show_wishlist_icon_in_collection", "1"
+        ) == "1"
         from app.services.user_preferences import platform_logo_map
         platform_logo_paths = platform_logo_map(db, request.state.user["id"])
         game_platforms = get_game_platforms(db)
@@ -202,6 +205,7 @@ async def browse(
         "item_languages": item_languages,
         "item_regions": item_regions,
         "missing_value_options": browse_filters.MISSING_VALUE_OPTIONS,
+        "configured_missing_fields": missing_fields,
         "has_more": has_more,
         "has_filters": browse_filters.has_active_filters(values),
         "load_more_url": load_more_url,
@@ -215,6 +219,7 @@ async def browse(
         "show_collector_condition_in_collection": show_collector_condition_in_collection,
         "show_region_in_collection": show_region_in_collection,
         "show_new_label_in_collection": show_new_label_in_collection,
+        "show_wishlist_icon_in_collection": show_wishlist_icon_in_collection,
         "platform_logo_paths": platform_logo_paths,
         "game_platforms": game_platforms,
     }
@@ -790,6 +795,12 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
         )
         settings["show_region_in_collection"] = get_preference(
             db, request.state.user["id"], "show_region_in_collection"
+        )
+        settings["show_new_label_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_new_label_in_collection", "1"
+        )
+        settings["show_wishlist_icon_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_wishlist_icon_in_collection", "1"
         )
         settings["default_location_id"] = get_preference(
             db, request.state.user["id"], "default_location_id"

@@ -41,6 +41,22 @@ only added or changed fork-specific features.
 - **Maintenance links land in the right place.** Reviewing missing game
   metadata now opens the Library settings tab and scrolls directly to its
   configuration section.
+- **Browse filter choices now persist after every result refresh.** Missing
+  cover is part of the central Missing filter, and the Home tile opens that
+  same filter instead of a separate control.
+- **Missing values can be combined.** The Missing filter is now a checkbox
+  menu, so one Browse view can include several empty metadata fields at once.
+  Opening it from the Missing game metadata tile preselects the configured
+  fields in that menu.
+- **The Missing menu behaves like the other custom menus.** It has a Lucide
+  chevron that rotates with its state and closes when clicking outside it.
+- **List sorting uses consistent Lucide controls.** Neutral, ascending and
+  descending sort states use the same icon set as the Browse toolbar.
+  Those icons now also render after asynchronous sorting and filtering.
+- **Wishlist status is clearer in the collection.** Wishlisted items use a
+  filled primary-colour heart beside the list cover and before the collector
+  state on grid cards. Their detail page now has a direct add/remove button.
+  Appearance settings can hide those collection hearts per user.
 
 ## V1.2.2 — Upgrade V1.2.2
 
