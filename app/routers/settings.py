@@ -432,12 +432,14 @@ async def update_appearance_settings(request: Request):
     show_platform_logo = "1" if form.get("show_platform_logo_in_collection") in ("1", "on", "true") else "0"
     show_collector_condition = "1" if form.get("show_collector_condition_in_collection") in ("1", "on", "true") else "0"
     show_region = "1" if form.get("show_region_in_collection") in ("1", "on", "true") else "0"
+    show_new_label = "1" if form.get("show_new_label_in_collection") in ("1", "on", "true") else "0"
     with get_db() as db:
         from app.services.user_preferences import set_preference
         set_preference(db, request.state.user["id"], "always_show_game_title", always_show)
         set_preference(db, request.state.user["id"], "show_platform_logo_in_collection", show_platform_logo)
         set_preference(db, request.state.user["id"], "show_collector_condition_in_collection", show_collector_condition)
         set_preference(db, request.state.user["id"], "show_region_in_collection", show_region)
+        set_preference(db, request.state.user["id"], "show_new_label_in_collection", show_new_label)
         for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types"):
             set_preference(db, request.state.user["id"], f"home_tile:{key}",
                            "1" if form.get(f"home_tile_{key}") in ("1", "on", "true") else "0")

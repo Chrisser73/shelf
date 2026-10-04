@@ -101,10 +101,15 @@ document.addEventListener('alpine:init', function () {
             init() {
                 var requested = new URLSearchParams(window.location.search).get('tab');
                 this.tab = requested || localStorage.getItem('shelf_settings_tab') || 'library';
-                if (window.location.hash === '#photo-intake-vision') {
-                    this.tab = 'integrations';
+                var hashTargets = {
+                    '#photo-intake-vision': 'integrations',
+                    '#missing-game-metadata': 'library'
+                };
+                var hashTab = hashTargets[window.location.hash];
+                if (hashTab) {
+                    this.tab = hashTab;
                     this.$nextTick(function() {
-                        var target = document.getElementById('photo-intake-vision');
+                        var target = document.getElementById(window.location.hash.slice(1));
                         if (target) target.scrollIntoView({ block: 'start' });
                     });
                 }
