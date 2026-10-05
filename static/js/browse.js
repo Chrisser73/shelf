@@ -418,7 +418,12 @@ function browsePage() {
             this.ensureSortOption(saved);
             this.setControlValue('sort', saved);
             this.listSort = saved;
-            this.runSearch(new URLSearchParams({sort: saved}));
+            // Keep filters supplied by a Home tile or shared link. Applying a
+            // stored sort must supplement the current query, never replace it
+            // (for example, /browse?owned=0 must remain the wishlist view).
+            var params = new URLSearchParams(window.location.search);
+            params.set('sort', saved);
+            this.runSearch(params);
         },
 
         // Shared by restoreSort() and restoreFilters(). `view` is mandatory:
