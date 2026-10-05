@@ -4,6 +4,20 @@ This file is the central record of customizations in this fork. The upstream
 [`README.md`](README.md) continues to document Shelf itself; this file covers
 only added or changed fork-specific features.
 
+## V1.2.4 — Upgrade V1.2.4
+
+- **Wishlist additions now retain their chosen mode.** Adding a title-search
+  result from Add to Wishlist creates a wishlist item rather than an owned
+  item; the owned/wishlist transition on item pages is clearer and centered.
+- **Item details are quicker to correct.** Title and Platform can now be
+  edited inline, and Language no longer lists Unknown twice.
+- **Home and collection cards are more configurable.** Collection mix and
+  Useful places can be independently hidden per user. Platform cards have
+  tighter, centered layouts, and Recently added now uses the same hover
+  treatment as Browse.
+- **Photo Intake better recognizes physical media.** Bare cartridges and
+  optical discs are classified as Loose instead of Boxed.
+
 ## V1.2.3 — Upgrade V1.2.3
 
 - **Game metadata is configurable where it matters.** Settings now lets an
