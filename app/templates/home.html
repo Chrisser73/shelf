@@ -25,25 +25,25 @@
     {% set lending_tile = feature_on('lending') %}
     <div class="grid grid-cols-2 sm:grid-cols-3 {{ 'lg:grid-cols-6' if lending_tile else 'lg:grid-cols-5' }} gap-4 mb-8" data-testid="home-summary">
         {% if home_tiles.catalogue %}<a href="/browse" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
-            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="layers-2" class="w-4 h-4" aria-hidden="true"></i>Catalogue</p>
-            <p class="text-3xl font-bold">{{ total_count }}</p>
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="layers-2" class="w-4 h-4 shrink-0" aria-hidden="true"></i>Catalogue</p>
+            <p class="text-3xl font-bold text-center my-2">{{ total_count }}</p>
         </a>{% endif %}
         {% if home_tiles.owned %}<a href="/browse?owned=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
-            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="package-plus" class="w-4 h-4" aria-hidden="true"></i>Owned</p>
-            <p class="text-3xl font-bold">{{ owned_count }}</p>
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="package-plus" class="w-4 h-4 shrink-0" aria-hidden="true"></i>Owned</p>
+            <p class="text-3xl font-bold text-center my-2">{{ owned_count }}</p>
         </a>{% endif %}
         {% if home_tiles.wishlist %}<a href="/browse?owned=0" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
-            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="heart" class="w-4 h-4" aria-hidden="true"></i>Wishlist</p>
-            <p class="text-3xl font-bold">{{ wishlist_count }}</p>
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="heart" class="w-4 h-4 shrink-0" aria-hidden="true"></i>Wishlist</p>
+            <p class="text-3xl font-bold text-center my-2">{{ wishlist_count }}</p>
         </a>{% endif %}
         {% if lending_tile and home_tiles.lent_out %}<a href="/browse?lent_out=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors" data-testid="home-lent-out">
-            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="compass" class="w-4 h-4" aria-hidden="true"></i>Lent out</p>
-            <p class="text-3xl font-bold">{{ lent_out_count }}</p>
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="compass" class="w-4 h-4 shrink-0" aria-hidden="true"></i>Lent out</p>
+            <p class="text-3xl font-bold text-center my-2">{{ lent_out_count }}</p>
         </a>{% endif %}
         {% if home_tiles.missing_covers %}<div class="relative bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
             <a href="/browse?missing_value=cover" class="block pr-8">
-                <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="camera" class="w-4 h-4" aria-hidden="true"></i>Missing covers</p>
-                <p class="text-3xl font-bold">{{ missing_cover_count }}</p>
+                <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="camera" class="w-4 h-4 shrink-0" aria-hidden="true"></i>Missing covers</p>
+                <p class="text-3xl font-bold text-center my-2">{{ missing_cover_count }}</p>
             </a>
             {% if user and user.role == 'admin' and missing_cover_count %}
             <button type="button" data-retry-missing-covers title="Retry missing covers"
@@ -54,8 +54,8 @@
         </div>{% endif %}
         {% if home_tiles.missing_game_metadata and missing_game_metadata_count %}<div class="relative bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors">
             <a href="/browse?missing_game_metadata=1" class="block pr-8">
-                <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="database-zap" class="w-4 h-4" aria-hidden="true"></i>Missing game metadata</p>
-                <p class="text-3xl font-bold">{{ missing_game_metadata_count }}</p>
+                <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="database-zap" class="w-4 h-4 shrink-0" aria-hidden="true"></i>Missing game metadata</p>
+                <p class="text-3xl font-bold text-center my-2">{{ missing_game_metadata_count }}</p>
                 <p class="text-xs text-shelf-muted mt-1">{{ missing_game_metadata_labels|join(', ') or 'No fields selected' }}</p>
             </a>
             {% if user and user.role == 'admin' %}
@@ -64,8 +64,8 @@
             {% endif %}
         </div>{% endif %}
         {% if home_tiles.media_types %}<div class="bg-shelf-card border border-shelf-border rounded-lg p-5 {{ '' if lending_tile else 'col-span-2 lg:col-span-1' }}" data-testid="home-media-types">
-            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="book-open" class="w-4 h-4" aria-hidden="true"></i>Media types</p>
-            <p class="text-3xl font-bold">{{ media_types|length }}</p>
+            <p class="text-shelf-muted text-sm flex items-center gap-2"><i data-lucide="book-open" class="w-4 h-4 shrink-0" aria-hidden="true"></i>Media types</p>
+            <p class="text-3xl font-bold text-center my-2">{{ media_types|length }}</p>
         </div>{% endif %}
     </div>
 
@@ -80,7 +80,7 @@
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
             {% for platform in platforms %}
-            <a href="/browse?platform_filter={{ platform.slug }}" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors text-center gap-4 grid">
+            <a href="/browse?platform_filter={{ platform.slug }}" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors text-center grid items-center gap-4 gap-y-2">
                 <p class="text-shelf-muted text-sm truncate">{{ platform.name }}</p>
                 {% if platform.logo_path %}
                 <img src="/static/{{ platform.logo_path }}" alt="" class="max-h-6 w-full object-contain" style="max-height: 84px">
@@ -90,7 +90,7 @@
 <!--                <p class="text-xs text-shelf-muted mt-1">{{ 'game' if platform.item_count == 1 else 'games' }}</p>-->
             </a>
             {% endfor %}
-            {% if unknown_platform_count %}<a href="/browse?unknown_platform=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors text-center gap-4 grid" data-testid="home-platform-unknown">
+            {% if unknown_platform_count %}<a href="/browse?unknown_platform=1" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors text-center grid items-center gap-4 gap-y-2" data-testid="home-platform-unknown">
                 <p class="text-shelf-muted text-sm truncate">Unknown platform</p>
                 <p class="text-3xl font-bold">{{ unknown_platform_count }}</p>
             </a>
@@ -99,7 +99,9 @@
     </section>
     {% endif %}
 
+    {% if collection_appearance.show_home_collection_mix or collection_appearance.show_home_useful_places %}
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {% if collection_appearance.show_home_collection_mix %}
         <section class="bg-shelf-card border border-shelf-border rounded-lg p-5">
             <div class="flex items-center justify-between gap-4 mb-4">
                 <h2 class="text-lg font-semibold">Collection mix</h2>
@@ -123,7 +125,9 @@
             <p class="text-sm text-shelf-muted">Your collection is empty.</p>
             {% endif %}
         </section>
+        {% endif %}
 
+        {% if collection_appearance.show_home_useful_places %}
         <section class="bg-shelf-card border border-shelf-border rounded-lg p-5">
             <h2 class="text-lg font-semibold mb-4">Useful places</h2>
             <div class="space-y-3">
@@ -145,7 +149,9 @@
                 {% endif %}
             </div>
         </section>
+        {% endif %}
     </div>
+    {% endif %}
 
     <section>
         <div class="flex items-center justify-between gap-4 mb-4">
@@ -179,9 +185,10 @@
                     </div>
                     {% endif %}
                 </div>
-                <div class="absolute inset-0 bg-linear-to-t from-black/80 via-transparent to-transparent rounded-lg transition-opacity flex items-end p-3 group-hover:ring-2 group-hover:ring-inset group-hover:ring-shelf-accent {% if not collection_appearance.always_show_game_title %}opacity-0 group-hover:opacity-100{% endif %}"
-                     style="--tw-gradient-stops: to top, rgb(0 0 0 / 0.85) 0%, rgb(0 0 0 / 0.70) 30%, rgb(0 0 0 / 0.08) 48%, transparent 100%;">
-                    <div class="min-w-0 w-full">
+                <div class="absolute inset-0 rounded-lg transition-opacity flex items-end p-3 group-hover:ring-2 group-hover:ring-inset group-hover:ring-shelf-accent {% if not collection_appearance.always_show_game_title %}opacity-0 group-hover:opacity-100{% endif %}">
+                    <div class="absolute inset-0 rounded-lg bg-linear-to-t from-black/80 via-transparent to-transparent opacity-100 transition-opacity duration-150 group-hover:opacity-0"
+                         style="--tw-gradient-stops: to top, rgb(0 0 0 / 0.85) 0%, rgb(0 0 0 / 0.70) 30%, rgb(0 0 0 / 0.08) 48%, transparent 100%;"></div>
+                    <div class="relative z-10 min-w-0 w-full">
                         <p class="text-white text-sm font-medium truncate">{{ item.title }}</p>
                         {% if item.authors %}<p class="text-gray-300 text-xs truncate">{{ item.authors }}</p>{% endif %}
                         {% if (collection_appearance.show_collector_condition and item.collector_condition) or (collection_appearance.show_region and item.region) %}

@@ -51,13 +51,16 @@
             <div class="relative z-10 min-w-0 w-full">
                 <p class="text-white text-sm font-medium truncate">{{ item.title|highlight_search(search_query) }}</p>
                 {% if item.authors %}<p class="text-gray-300 text-xs truncate">{{ item.authors }}</p>{% endif %}
-                {% if (show_wishlist_icon_in_collection and item.wishlisted) or (show_collector_condition_in_collection and item.collector_condition) or
+                {% if (show_wishlist_icon_in_collection and item.wishlisted) or (show_collector_condition_in_collection
+                and item.collector_condition) or
                 (show_region_in_collection and item.region) %}
                 <div class="mt-2 flex items-center justify-between gap-2">
                     <div class="flex min-w-0 items-center gap-1">
                         {% if show_wishlist_icon_in_collection and item.wishlisted %}<i data-lucide="heart"
-                                                   class="w-5 h-5 shrink-0 text-shelf-text p-1 rounded bg-shelf-card/80 shadow"
-                                                   fill="currentColor" aria-label="Wishlisted" title="Wishlisted"></i>{%
+                                                                                        class="w-5 h-5 shrink-0 text-shelf-text p-1 rounded bg-shelf-warning/90 shadow"
+                                                                                        fill="currentColor"
+                                                                                        aria-label="Wishlisted"
+                                                                                        title="Wishlisted"></i>{%
                         endif %}
                         {% if show_collector_condition_in_collection and item.collector_condition %}<span
                             class="text-xs truncate px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-card/80 text-white shadow">{{ item.collector_condition|upper }}</span>{%

@@ -93,7 +93,7 @@ PROMPT = (
     "For a game, put its developer in authors and its publisher in publisher when confidently identified. Preserve every visible part of a cover title, including Japanese and Latin logo text such as DX; never shorten a title merely because its artwork is familiar. The alternate_title must be the official international/searchable name of this exact pictured edition only — never merge paired releases or add a related game after a slash. For example, a cover for Pokémon Shining Pearl must return alternate_title exactly Pokémon Shining Pearl, never Pokémon Brilliant Diamond / Pokémon Shining Pearl; the paired release is not the title of that individual item. "
     "For films use publisher for the studio or distributor, "
     "for music use the label, and for books use the publisher. Use authors for the appropriate creator, artist, or director. "
-    "A photographed game box is at least boxed. Use cib only when box, cartridge/disc and manual/inserts are visibly present together; use loose only when the bare cartridge/disc is visible without a box. "
+    "Classify collector_condition from the pictured physical item, never from the game label or cover art. A bare cartridge or bare optical disc is always loose: this includes the grey NES cartridge, SNES cartridge, Game Boy/Game Boy Color/Game Boy Advance cartridge, Nintendo DS card, Nintendo 3DS card, and PlayStation, Xbox, GameCube, Wii, DVD or Blu-ray discs shown without their original case. These items are not boxed merely because they have a printed label. Use boxed only when the original retail box/case is visibly present with the game; use cib only when box/case, cartridge/disc and manual or inserts are visibly present together. A photographed game box without its cartridge/disc is at least boxed. If the packaging is not visible clearly enough, leave collector_condition empty rather than guessing boxed. "
     "(5) The response property is named books for backward compatibility, but "
     "it must contain every catalog item, not only books. "
     "(6) Skip objects that are not catalog items."
@@ -154,7 +154,11 @@ BOOKS_SCHEMA = {
                     # Anthropic structured output rejects mixed null/string
                     # enums. The property is optional, so absence cleanly
                     # represents an unknown condition for every provider.
-                    "collector_condition": {"type": "string", "enum": ["cib", "boxed", "loose"]},
+                    "collector_condition": {
+                        "type": "string",
+                        "enum": ["cib", "boxed", "loose"],
+                        "description": "Physical state only: bare cartridges or discs are loose; boxed and cib require visible original packaging.",
+                    },
                     "source": {"type": "string", "enum": ["read", "recognized"]},
                 },
                 "required": ["title", "authors", "isbn", "media_type", "source"],

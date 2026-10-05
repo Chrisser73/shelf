@@ -57,6 +57,17 @@ only added or changed fork-specific features.
   filled primary-colour heart beside the list cover and before the collector
   state on grid cards. Their detail page now has a direct add/remove button.
   Appearance settings can hide those collection hearts per user.
+- **Wishlist actions now match collection state.** Manual additions in
+  Wishlist mode stay out of Owned. The item-page heart moves an owned item
+  to the wishlist, while removing it asks whether it should become owned
+  again or remain in neither list.
+- **Loose media is classified more accurately.** Photo Intake now treats
+  visible NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, DS and 3DS
+  cartridges — and bare PlayStation, Xbox, GameCube, Wii, DVD and Blu-ray
+  discs — as Loose; Boxed and CIB require their original packaging to be
+  visible. Home-summary icons also keep their intended size on small screens.
+- **Home overview cards are optional per user.** Appearance now controls the
+  Collection mix and Useful places cards independently, both enabled by default.
 
 ## V1.2.2 — Upgrade V1.2.2
 
