@@ -210,6 +210,18 @@ document.body.addEventListener('wishlistToggled', function(e) {
     var heart = document.querySelector('[data-wishlist-heart="' + id + '"]');
     if (heart) heart.setAttribute('fill', wishlisted ? 'currentColor' : 'none');
 });
+document.addEventListener('click', function(e) {
+    var remove = e.target.closest && e.target.closest('[data-wishlist-remove]');
+    if (remove) {
+        var dialog = document.getElementById('wishlist-owned-dialog-' + remove.getAttribute('data-wishlist-remove'));
+        if (dialog && dialog.showModal) dialog.showModal();
+        return;
+    }
+    var dialogButton = e.target.closest && e.target.closest('[data-wishlist-dialog-confirm]');
+    if (!dialogButton) return;
+    var parentDialog = dialogButton.closest('dialog');
+    if (parentDialog && parentDialog.open) parentDialog.close();
+});
 function setWishlistToggleLoading(button, loading) {
     var id = button && button.getAttribute('data-wishlist-toggle');
     var heart = id && document.querySelector('[data-wishlist-heart="' + id + '"]');
@@ -452,6 +464,13 @@ document.body.addEventListener('htmx:configRequest', function (evt) {
     var el = evt.detail.elt;
     if (el && el.getAttribute && el.getAttribute('data-vals-scan-mode') !== null) {
         evt.detail.parameters.mode = localStorage.getItem('shelf_scan_mode') || 'add';
+    }
+    // Manual forms are nested in their own Alpine component. Read the live
+    // scan-mode input from the page scope at submission time, so choosing
+    // Wishlist cannot silently fall back to the route's Add default.
+    if (el && el.matches && el.matches('[data-scan-mode-submit]')) {
+        var mode = document.getElementById('scan-mode');
+        evt.detail.parameters.mode = (mode && mode.value === 'wishlist') ? 'wishlist' : 'add';
     }
 });
 

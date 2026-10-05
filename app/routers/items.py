@@ -682,7 +682,7 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
     # Defaulted to "add" to match /api/scan's own Form("add") at :233 — the
     # value reaches scan_log.mode, so an absent field must log what the scan
     # route would log for the same submission.
-    mode = form.get("mode", "add")
+    mode = "wishlist" if form.get("mode") == "wishlist" else "add"
 
     # A UPC belongs in items.upc, never in items.isbn (#20). to_isbn13()
     # will happily zero-pad a 12-digit UPC-A into something ISBN-shaped, so
@@ -1207,8 +1207,10 @@ async def update_alternate_title(request: Request, item_id: int, _=Depends(requi
 
 
 @router.post("/items/{item_id}/wishlist")
-async def toggle_wishlist(item_id: int, _=Depends(require_role("editor"))):
-    """Toggle the current item's wishlist membership from its detail page."""
+async def toggle_wishlist(request: Request, item_id: int, _=Depends(require_role("editor"))):
+    """Move an item between owned, wishlist, or neither from its detail page."""
+    form = await request.form()
+    mark_owned = form.get("mark_owned") == "1"
     try:
         with get_db() as db:
             item = db.execute(
@@ -1222,26 +1224,33 @@ async def toggle_wishlist(item_id: int, _=Depends(require_role("editor"))):
                     headers={"HX-Trigger": items_common._toast_header("Item not found", "error")},
                 )
 
-            wishlisted = not bool(item["wishlisted"])
-            # Wishlist membership deliberately cannot coexist with ownership.
-            # Keep that invariant here instead of silently changing ownership.
-            if wishlisted and item["owned"]:
-                return JSONResponse(
-                    {"ok": False, "message": "An item you own can't also be on your wishlist."}, status_code=400,
-                    headers={"HX-Trigger": items_common._toast_header("An item you own can't also be on your wishlist.", "error")},
-                )
-            update_item_fields(db, item_id, {"wishlisted": wishlisted})
+            if item["wishlisted"]:
+                # Removing a wishlist entry leaves it in neither list unless
+                # the user explicitly chooses to mark it owned again.
+                updates = {"owned": 1, "wishlisted": False} if mark_owned else {
+                    "owned": 0, "wishlisted": False,
+                }
+                label = "Marked as owned" if mark_owned else "Removed from wishlist"
+            else:
+                # Wishlist is exclusive: heart-clicking an owned item moves
+                # it from Owned to Wishlist in one validated write.
+                updates = {"owned": 0, "wishlisted": True}
+                label = "Moved to wishlist"
+            update_item_fields(db, item_id, updates)
     except (ItemValueError, ValueError) as exc:
         return JSONResponse(
             {"ok": False, "message": str(exc) or "Wishlist could not be updated"}, status_code=400,
             headers={"HX-Trigger": items_common._toast_header(str(exc) or "Wishlist could not be updated", "error")},
         )
 
-    label = "Added to wishlist" if wishlisted else "Removed from wishlist"
     return JSONResponse(
-        {"ok": True, "wishlisted": wishlisted},
+        {"ok": True, "wishlisted": bool(updates["wishlisted"]), "owned": bool(updates["owned"])},
         headers={"HX-Trigger": json.dumps({
-            "wishlistToggled": {"item_id": item_id, "wishlisted": wishlisted},
+            "wishlistToggled": {
+                "item_id": item_id,
+                "wishlisted": bool(updates["wishlisted"]),
+                "owned": bool(updates["owned"]),
+            },
             "showToast": {"message": label, "type": "success"},
         })},
     )

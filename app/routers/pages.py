@@ -56,6 +56,8 @@ async def index(
             "show_collector_condition": get_preference(db, request.state.user["id"], "show_collector_condition_in_collection") == "1",
             "show_region": get_preference(db, request.state.user["id"], "show_region_in_collection") == "1",
             "show_new_label": get_preference(db, request.state.user["id"], "show_new_label_in_collection", "1") == "1",
+            "show_home_collection_mix": get_preference(db, request.state.user["id"], "show_home_collection_mix", "1") == "1",
+            "show_home_useful_places": get_preference(db, request.state.user["id"], "show_home_useful_places", "1") == "1",
         }
 
     return request.app.state.templates.TemplateResponse(
@@ -801,6 +803,12 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
         )
         settings["show_wishlist_icon_in_collection"] = get_preference(
             db, request.state.user["id"], "show_wishlist_icon_in_collection", "1"
+        )
+        settings["show_home_collection_mix"] = get_preference(
+            db, request.state.user["id"], "show_home_collection_mix", "1"
+        )
+        settings["show_home_useful_places"] = get_preference(
+            db, request.state.user["id"], "show_home_useful_places", "1"
         )
         settings["default_location_id"] = get_preference(
             db, request.state.user["id"], "default_location_id"

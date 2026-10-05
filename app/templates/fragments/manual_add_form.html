@@ -26,11 +26,11 @@
         {% if manual_host == 'panel' %}
         <form hx-post="/api/items/manual" hx-target="#scan-results" hx-swap="afterbegin"
               hx-include="#scan-mode, #default-tags" enctype="multipart/form-data"
-              class="space-y-3">
+              data-scan-mode-submit class="space-y-3">
         {% else %}
         <form hx-post="/api/items/manual" hx-target="closest .scan-result" hx-swap="outerHTML"
-              hx-include="#default-tags" enctype="multipart/form-data"
-              class="border-t border-shelf-border pt-3 space-y-3">
+              hx-include="#scan-mode, #default-tags" enctype="multipart/form-data"
+              data-scan-mode-submit class="border-t border-shelf-border pt-3 space-y-3">
         {% endif %}
             {% if manual_host == 'panel' %}
             {# Both are the user's to choose here, so both are visible. The

@@ -12,7 +12,7 @@
 {% macro inline_text(field, label, value, input_type='text', raw_value=None) -%}
 <div x-data='{ "editing": false }'>
     <span x-show="!editing"><span class="text-shelf-muted">{{ label }}:</span> <span data-inline-display="{{ item.id }}-{{ field }}">{{ value or '—' }}</span>{% if user and user.role in ('admin', 'editor') %} <button type="button" @click="editing = true" class="ml-1 text-xs text-shelf-accent2 hover:text-shelf-accent">Edit</button>{% endif %}</span>
-    {% if user and user.role in ('admin', 'editor') %}<form x-show="editing" x-cloak hx-post="/api/items/{{ item.id }}/quick-metadata" hx-swap="none" data-inline-field-form="{{ item.id }}-{{ field }}" class="flex items-center gap-2"><input type="hidden" name="field" value="{{ field }}">{% if field == 'language' %}<select name="value" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text"><option value="">Unknown</option>{% for key, text in search_langs.items() %}<option value="{{ key }}" {% if raw_value == key %}selected{% endif %}>{{ text }}</option>{% endfor %}</select>{% elif field == 'region' %}<select name="value" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text"><option value="">Not specified</option>{% for option in ['unknown', 'PAL', 'NTSC', 'NTSC-J', 'PAL-M'] %}<option value="{{ option }}" {% if raw_value == option %}selected{% endif %}>{{ option|upper }}</option>{% endfor %}</select>{% else %}<input name="value" type="{{ input_type }}" value="{{ raw_value if raw_value is not none else value or '' }}" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">{% endif %}<button type="submit" class="inline-flex items-center justify-center w-8 h-8 rounded bg-shelf-accent text-white hover:bg-shelf-accent2 transition-colors" title="Save {{ label }}" aria-label="Save {{ label }}"><i data-lucide="save" class="w-4 h-4"></i></button><button type="button" @click="editing = false" data-inline-field-cancel="{{ item.id }}-{{ field }}" class="text-xs text-shelf-muted">Cancel</button></form>{% endif %}
+    {% if user and user.role in ('admin', 'editor') %}<form x-show="editing" x-cloak hx-post="/api/items/{{ item.id }}/quick-metadata" hx-swap="none" data-inline-field-form="{{ item.id }}-{{ field }}" class="flex items-center gap-2"><input type="hidden" name="field" value="{{ field }}">{% if field == 'language' %}<select name="value" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">{% for key, text in search_langs.items() %}<option value="{{ key }}" {% if raw_value == key %}selected{% endif %}>{{ text }}</option>{% endfor %}</select>{% elif field == 'platform' %}<select name="value" class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-xs text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none"><option value="">Unknown</option>{% for key, text in game_platforms.items() %}<option value="{{ key }}" {% if raw_value == key %}selected{% endif %}>{{ text }}</option>{% endfor %}</select>{% elif field == 'region' %}<select name="value" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text"><option value="">Not specified</option>{% for option in ['unknown', 'PAL', 'NTSC', 'NTSC-J', 'PAL-M'] %}<option value="{{ option }}" {% if raw_value == option %}selected{% endif %}>{{ option|upper }}</option>{% endfor %}</select>{% else %}<input name="value" type="{{ input_type }}" value="{{ raw_value if raw_value is not none else value or '' }}" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text">{% endif %}<button type="submit" class="inline-flex items-center justify-center w-8 h-8 rounded bg-shelf-accent text-white hover:bg-shelf-accent2 transition-colors" title="Save {{ label }}" aria-label="Save {{ label }}"><i data-lucide="save" class="w-4 h-4"></i></button><button type="button" @click="editing = false" data-inline-field-cancel="{{ item.id }}-{{ field }}" class="text-xs text-shelf-muted">Cancel</button></form>{% endif %}
 </div>
 {%- endmacro %}
 <div class="max-w-4xl mx-auto">
@@ -60,18 +60,40 @@
             <!-- Metadata -->
             <div class="flex-1 min-w-0">
                 <div class="mb-2 flex flex-wrap items-center justify-between gap-3">
-                    <h1 class="text-2xl font-bold min-w-0">{{ item.title }}</h1>
+                    <div x-data='{ "editing": false }' class="flex min-w-0 flex-1 items-center gap-2">
+                        <h1 x-show="!editing" class="min-w-0 text-2xl font-bold"><span data-inline-display="{{ item.id }}-title">{{ item.title }}</span>{% if user and user.role in ('admin', 'editor') %} <button type="button" @click="editing = true" class="ml-1 align-middle text-xs font-normal text-shelf-accent2 hover:text-shelf-accent">Edit</button>{% endif %}</h1>
+                        {% if user and user.role in ('admin', 'editor') %}
+                        <form x-show="editing" x-cloak hx-post="/api/items/{{ item.id }}/quick-metadata" hx-swap="none" data-inline-field-form="{{ item.id }}-title" class="flex min-w-0 flex-1 items-center gap-2">
+                            <input type="hidden" name="field" value="title">
+                            <label class="sr-only" for="item-title-{{ item.id }}">Title</label>
+                            <input id="item-title-{{ item.id }}" name="value" value="{{ item.title }}" required class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-2xl font-bold text-shelf-text">
+                            <button type="submit" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded bg-shelf-accent text-white hover:bg-shelf-accent2 transition-colors" title="Save title" aria-label="Save title"><i data-lucide="save" class="h-4 w-4" aria-hidden="true"></i></button>
+                            <button type="button" @click="editing = false" data-inline-field-cancel="{{ item.id }}-title" class="text-xs text-shelf-muted hover:text-shelf-text">Cancel</button>
+                        </form>
+                        {% endif %}
+                    </div>
                     {% if user and user.role in ('admin', 'editor') %}
-                    <button type="button" hx-post="/api/items/{{ item.id }}/wishlist" hx-swap="none"
+                    <button type="button"{% if item.wishlisted %} data-wishlist-remove="{{ item.id }}"{% else %} hx-post="/api/items/{{ item.id }}/wishlist" hx-swap="none" data-after-request="reload"{% endif %}
                             data-wishlist-toggle="{{ item.id }}" data-wishlisted="{{ '1' if item.wishlisted else '0' }}"
-                            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors {% if item.wishlisted %}border-shelf-accent bg-shelf-accent text-white hover:bg-shelf-accent2{% elif item.owned %}cursor-not-allowed border-shelf-border bg-shelf-hover text-shelf-muted opacity-60{% else %}border-shelf-border bg-shelf-bg text-shelf-accent2 hover:border-shelf-accent hover:bg-shelf-accent/10{% endif %}"
+                            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors {% if item.wishlisted %}border-shelf-accent bg-shelf-accent text-white hover:bg-shelf-accent2{% else %}border-shelf-border bg-shelf-bg text-shelf-accent2 hover:border-shelf-accent hover:bg-shelf-accent/10{% endif %}"
                             aria-pressed="{{ 'true' if item.wishlisted else 'false' }}"
-                            aria-label="{% if item.wishlisted %}Remove from wishlist{% elif item.owned %}Owned items can't be wishlisted{% else %}Add to wishlist{% endif %}"
-                            title="{% if item.wishlisted %}Remove from wishlist{% elif item.owned %}Owned items can't be wishlisted{% else %}Add to wishlist{% endif %}"
-                            {% if item.owned and not item.wishlisted %}disabled{% endif %}>
+                            aria-label="{% if item.wishlisted %}Remove from wishlist{% elif item.owned %}Move from owned to wishlist{% else %}Add to wishlist{% endif %}"
+                            title="{% if item.wishlisted %}Remove from wishlist{% elif item.owned %}Move from owned to wishlist{% else %}Add to wishlist{% endif %}">
                         <i data-lucide="heart" data-wishlist-heart="{{ item.id }}" class="w-5 h-5" fill="{{ 'currentColor' if item.wishlisted else 'none' }}" aria-hidden="true"></i>
-                        <svg data-wishlist-spinner="{{ item.id }}" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"/><path class="opacity-90" fill="currentColor" d="M21 12a9 9 0 0 0-9-9v3a6 0 0 1 6 6z"/></svg>
+                        <svg data-wishlist-spinner="{{ item.id }}" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"/><path class="opacity-90" fill="currentColor" d="M21 12a9 9 0 0 0-9-9v3a6 6 0 0 1 6 6z"/></svg>
                     </button>
+                    {% if item.wishlisted %}
+                    <dialog id="wishlist-owned-dialog-{{ item.id }}" class="fixed inset-0 m-auto w-11/12 max-w-sm rounded-xl border border-shelf-border bg-shelf-card p-0 text-shelf-text shadow-2xl backdrop:bg-black/70">
+                        <div class="p-5">
+                            <h2 class="text-lg font-semibold">Mark item as owned?</h2>
+                            <p class="mt-2 text-sm text-shelf-muted">Removing it from your wishlist can also mark it as owned again.</p>
+                            <div class="mt-5 flex justify-end gap-2">
+                                <button type="button" hx-post="/api/items/{{ item.id }}/wishlist" hx-vals='{"mark_owned":"0"}' hx-swap="none" data-after-request="reload" data-wishlist-dialog-confirm class="rounded-lg border border-shelf-border px-3 py-2 text-sm hover:bg-shelf-hover">No</button>
+                                <button type="button" hx-post="/api/items/{{ item.id }}/wishlist" hx-vals='{"mark_owned":"1"}' hx-swap="none" data-after-request="reload" data-wishlist-dialog-confirm class="rounded-lg bg-shelf-accent px-3 py-2 text-sm text-white hover:bg-shelf-accent2">Yes</button>
+                            </div>
+                        </div>
+                    </dialog>
+                    {% endif %}
                     {% endif %}
                 </div>
                 <div x-data='{"editing": false}'
@@ -112,7 +134,7 @@
                     {% endif %}
                     <div>{{ inline_text('authors', 'Developer', item.authors) }}</div>
                     <div>{{ inline_text('language', 'Language', search_langs.get(item.language, item.language), raw_value=item.language) }}</div>
-                    {% if item.platform %}<div><span class="text-shelf-muted">Platform:</span> {{ game_platforms.get(item.platform, item.platform) }}</div>{% endif %}
+                    <div>{{ inline_text('platform', 'Platform', game_platforms.get(item.platform, item.platform), raw_value=item.platform) }}</div>
                     <div>{{ inline_text('publisher', 'Publisher', item.publisher) }}</div>
                     <div>{{ inline_text('publish_year', 'Year', item.publish_year, 'number') }}</div>
                     {% if item.page_count %}

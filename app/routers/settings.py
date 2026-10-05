@@ -437,6 +437,11 @@ async def update_appearance_settings(request: Request):
     # and works even if a browser preserves a stale form control.
     show_new_label = "1" if "1" in form.getlist("show_new_label_in_collection") else "0"
     show_wishlist_icon = "1" if form.get("show_wishlist_icon_in_collection") in ("1", "on", "true") else "0"
+    # Unlike the legacy New-label checkbox, these controls do not need a
+    # hidden fallback: an unchecked HTML checkbox is absent from the form.
+    # Treat that absence explicitly as disabled.
+    show_home_collection_mix = "1" if form.get("show_home_collection_mix") in ("1", "on", "true") else "0"
+    show_home_useful_places = "1" if form.get("show_home_useful_places") in ("1", "on", "true") else "0"
     with get_db() as db:
         from app.services.user_preferences import set_preference
         set_preference(db, request.state.user["id"], "always_show_game_title", always_show)
@@ -445,6 +450,8 @@ async def update_appearance_settings(request: Request):
         set_preference(db, request.state.user["id"], "show_region_in_collection", show_region)
         set_preference(db, request.state.user["id"], "show_new_label_in_collection", show_new_label)
         set_preference(db, request.state.user["id"], "show_wishlist_icon_in_collection", show_wishlist_icon)
+        set_preference(db, request.state.user["id"], "show_home_collection_mix", show_home_collection_mix)
+        set_preference(db, request.state.user["id"], "show_home_useful_places", show_home_useful_places)
         for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types"):
             set_preference(db, request.state.user["id"], f"home_tile:{key}",
                            "1" if form.get(f"home_tile_{key}") in ("1", "on", "true") else "0")
