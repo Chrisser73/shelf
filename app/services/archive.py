@@ -842,7 +842,7 @@ _NAME_TABLES = {"locations", "tags", "borrowers"}
 
 def _present(value) -> bool:
     """The CSV import's only-overwrite-with-a-nonempty-value discipline
-    (items.py:_update_from_csv_row), generalized to non-string columns:
+    (csv_import.update_from_row), generalized to non-string columns:
     None and blank/whitespace-only strings don't count as "present"; 0,
     False, and other falsy-but-real values do."""
     if value is None:
@@ -901,7 +901,7 @@ def _merge_series(db, series_list: list[dict]) -> None:
 def _apply_item_update(db, item_id: int, item: dict, loc_name: str | None,
                        get_location_id) -> None:
     """Refresh an existing item's metadata columns from an archive item,
-    mirroring _update_from_csv_row's only-overwrite-with-a-nonempty-value
+    mirroring csv_import.update_from_row's only-overwrite-with-a-nonempty-value
     discipline (app/routers/items.py), extended to the archive's wider
     column set. created_at is never touched here; updated_at always stamps
     to now, even when nothing else changed (update_item_fields does that

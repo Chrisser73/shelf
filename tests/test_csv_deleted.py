@@ -1,7 +1,8 @@
 """CSV import reads the `deleted` column (T6 of plan-soft-delete-export).
 
-The export side (T3) already writes `deleted` as the 17th/16th-from-front
-column, between `wishlisted` and `tags` — a Shelf export is 17 columns wide.
+The export side (T3) writes `deleted` as the second-from-last column, between
+`wishlisted` and `tags` — a Shelf export is 19 columns wide (17 before #145
+added `language` and `series_position`).
 This file covers the read side: the "One rule for both importers" table from
 the design plan, applied by `normalize_generic`'s new `deleted` key
 (`app/services/reading_imports.py`) and `import_csv`'s `incoming_deleted`
@@ -170,7 +171,7 @@ class TestOldFileImportsLive:
 
 
 class TestRoundTrip:
-    def test_seventeen_column_export_preserves_deleted_state(self, admin_client, db):
+    def test_nineteen_column_export_preserves_deleted_state(self, admin_client, db):
         live_id = _insert_item(db, title="Round Trip Live", isbn=ISBN_A, media_type="book")
         trashed_id = _insert_item(db, title="Round Trip Trashed", isbn=ISBN_B,
                                   media_type="book")
@@ -180,7 +181,7 @@ class TestRoundTrip:
 
         exported = _export(admin_client)
         header = exported.splitlines()[0].split(",")
-        assert len(header) == 17
+        assert len(header) == 19
 
         db.execute("DELETE FROM list_items")
         db.execute("DELETE FROM items")

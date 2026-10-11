@@ -17,7 +17,7 @@ from starlette.responses import Response
 from app.auth import require_role
 from app.database import get_db
 from app.routers import items_common
-from app.services import cover_queue
+from app.services import cover_queue, csv_import
 from app.services import isbn as isbn_svc
 from app.services import item_copies, item_write
 from app.services import lists
@@ -42,7 +42,7 @@ async def export_csv(user=Depends(require_role("viewer"))):
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value", "owned", "wishlisted", "deleted", "tags"])
+    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "language", "series_name", "series_position", "location", "source", "estimated_value", "manual_value", "owned", "wishlisted", "deleted", "tags"])
 
     # editor/admin exports carry Trash; the Trash page itself is editor+, so
     # a viewer export must not become the one place a viewer sees a trashed
@@ -70,7 +70,8 @@ async def export_csv(user=Depends(require_role("viewer"))):
         writer.writerow([
             row["title"], row["authors"], row["isbn"], row["media_type"],
             row["platform"], row["publisher"], row["publish_year"], row["page_count"],
-            row["series_name"], row["location_name"], row["source"],
+            row["language"], row["series_name"], row["series_position"],
+            row["location_name"], row["source"],
             row["estimated_value"], row["manual_value"],
             row["owned"], 1 if row["wishlisted"] else 0,
             1 if row["deleted_at"] else 0,
@@ -159,6 +160,7 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
     _CSV_MAX_TEXT = 1000
 
     with get_db() as db:
+        locs = csv_import.RowLocations(db)
         for i, row in enumerate(reader, start=2):
             try:
                 # DictReader files overflow fields under the key None.
@@ -171,7 +173,7 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 # LibraryThing acquisition columns that held data on this row
                 # — they land only on a newly created item's copy.
                 acq_given = [
-                    c for c in _LT_ACQUISITION_COLUMNS if (row.get(c) or "").strip()
+                    c for c in csv_import.LT_ACQUISITION_COLUMNS if (row.get(c) or "").strip()
                 ] if fmt == reading_imports.LIBRARYTHING else []
 
                 title = norm["title"]
@@ -212,8 +214,14 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
 
                 isbn_val = norm["isbn"]
                 media = norm["media_type"]
+                # Refuse now whatever a later write would (G85): the location
+                # is created before the insert, and update mode applies the
+                # platform after restore_item.
+                csv_import.precheck_row(db, norm, isbn_val, media)
+                if norm.get("location"):
+                    locs.check(norm["location"])
 
-                owned, wishlisted, owned_given, wishlisted_given = _resolve_state(
+                owned, wishlisted, owned_given, wishlisted_given = csv_import.resolve_state(
                     norm, to_read_wishlist, tracker=fmt != reading_imports.GENERIC
                 )
 
@@ -344,7 +352,11 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     # mode == update: refresh metadata, and reading state
                     # for reading-tracker imports — identical path for a
                     # live hit and a just-restored one.
-                    _update_from_csv_row(db, existing["id"], norm)
+                    loc_id = locs.ensure(norm["location"]) if norm.get("location") else None
+                    csv_import.update_from_row(
+                        db, existing["id"], norm,
+                        generic=fmt == reading_imports.GENERIC, location_id=loc_id,
+                    )
                     # Additive only — import never removes a tag. An absent
                     # `tags` column and an empty `tags` cell are deliberately
                     # the *same* answer here (contrast the owned/wishlisted
@@ -382,6 +394,15 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 pub_year = norm["publish_year"]
                 page_count = norm["page_count"]
 
+                # Only keys with a value: a None would bypass the SCHEMA
+                # default, and location_id=None would still call the seam.
+                extra = {k: norm[k] for k in ("language", "platform", "manual_value",
+                                              "estimated_value") if norm.get(k) is not None}
+                if norm.get("location"):
+                    # Created only now, after every pre-check passed (G85). A
+                    # trashed twin insert_item restores ignores location_id;
+                    # the location is still created and reported.
+                    extra["location_id"] = locs.ensure(norm["location"])
                 new_id = insert_item(
                     db,
                     title=title,
@@ -404,6 +425,7 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     # trashed twin that this row's own dedup keys somehow
                     # missed is refused, not restored, on this path.
                     restore_trashed=not incoming_deleted,
+                    **extra,
                 )
                 if norm.get("tags"):  # additive only — see the update path's comment
                     tags_svc.attach_tags(db, new_id, norm["tags"])
@@ -481,67 +503,6 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
         # row that matched an item already in Shelf), `game_platform` (a
         # Libib game's `creators`).
         "dropped": [{"column": c, "reason": r} for c, r in dropped],
+        # Locations a `location` cell named that did not exist, each once.
+        "locations_created": locs.created,
     }
-
-# LibraryThing columns that land on a new item's copy (normalize_librarything's
-# `copy`), and are reported as `existing_item` on any other row.
-_LT_ACQUISITION_COLUMNS = (
-    "acquired", "date_acquired", "from_where", "purchase_price", "condition",
-)
-
-
-def _resolve_state(norm: dict, to_read_wishlist: bool,
-                   tracker: bool) -> tuple[bool, bool, bool, bool]:
-    """Resolve a row's (owned, wishlisted) once, and whether it states each.
-
-    `owned` comes from the normaliser untouched. A generic row with no
-    `owned` value is one of two things: a 0.41.1-era export, where
-    `wishlisted=1` meant not owned, or any other file, where the historical
-    default is owned (applied on insert; an update leaves the row alone).
-
-    `wishlisted`, in order: an owned row is never on the wishlist (the funnel
-    would refuse the pair, and an import must not fail a row that only says
-    "I have it" — G96); else the file's own `wishlisted` column; else the
-    to-read option. A present `wishlisted=0` is honoured, not replaced by the
-    option (G87).
-    """
-    owned = norm["owned"]
-    column_wish = norm["wishlisted"]
-    if owned is None and column_wish:
-        owned = False
-    owned_given = owned is not None
-    if owned is None:
-        owned = True
-
-    if owned:
-        wishlisted = False
-    elif column_wish is not None:
-        wishlisted = column_wish
-    else:
-        wishlisted = to_read_wishlist and norm["reading_status"] == "want_to_read"
-
-    # A reading-tracker row states both flags. A generic row states
-    # `wishlisted` only through its column, or by being owned (rule 1).
-    wishlisted_given = tracker or column_wish is not None or (owned_given and owned)
-    return owned, wishlisted, owned_given, wishlisted_given
-
-
-def _update_from_csv_row(db, item_id: int, row: dict):
-    """Update an existing item from CSV row data (non-empty fields only)."""
-    field_map = {
-        "authors": "authors", "author": "authors",
-        "publisher": "publisher",
-        "publish_year": "publish_year", "year": "publish_year",
-        "page_count": "page_count", "pages": "page_count",
-        "series_name": "series_name", "series": "series_name",
-    }
-    updates = {}
-    for csv_key, db_key in field_map.items():
-        val = (row.get(csv_key) or "").strip()
-        if val and db_key not in updates:
-            if db_key in ("publish_year", "page_count"):
-                updates[db_key] = int(val) if val.isdigit() else None
-            else:
-                updates[db_key] = val
-    if updates:
-        update_item_fields(db, item_id, updates)

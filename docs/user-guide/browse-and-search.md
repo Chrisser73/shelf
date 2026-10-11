@@ -128,13 +128,15 @@ bar appears with actions:
 - **Set status** — Want to / In progress / Finished, or clear it
 - **Add to / remove from wishlist**
 - **Set series** (or clear it)
+- **Set language** (or clear it) — pick from the same list as the item edit
+  page
 - **Add tag** / **Remove tag** — type a tag name or pick one, then choose the
   button. Removing a tag from the last item that carries it deletes the tag.
 - **Delete Selected** — moves the items to Trash
 
 Anyone can use **Select**; what happens next depends on your role. Move,
-Change type, Set status, the wishlist action and Set series are
-**admin** only. Add tag and Remove tag are for **editors and admins** — a
+Change type, Set status, the wishlist action, Set series and Set language
+are **admin** only — and only an admin sees Set language at all. Add tag and Remove tag are for **editors and admins** — a
 viewer does not see them. Delete Selected moves items to Trash and needs an
 **editor** or admin. Bulk actions are immediate — filter carefully first.
 Only Delete is undoable (restore from Trash); a tag you added by mistake is

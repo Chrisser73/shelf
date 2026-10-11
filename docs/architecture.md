@@ -1225,7 +1225,8 @@ typed by hand (see `docs/development.md` § Service worker versioning).
 The item routes are four modules sharing the `/api` prefix: `items.py` (scan,
 CRUD, search, bulk operations), `items_covers.py` (status polling, retry,
 manual search and selection, upload, removal, bulk sweeps), `items_csv.py`
-(export and import) and `items_catalog.py` (search-a-provider-then-add for
+(export and import; the import's row mapping, write pre-checks and per-request
+location cache live in `services/csv_import.py`) and `items_catalog.py` (search-a-provider-then-add for
 video games, books and DVDs). Helpers more than one of them needs — metadata
 lookup, the save path, cover resolution, the scan log, UPC scanning — live in
 `items_common.py`, which other packages also import (`pages.py` for

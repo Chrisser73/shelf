@@ -20,8 +20,11 @@ Trash, and **an import never moves a live item to Trash** — see
 **Import / Export → Export CSV** writes one row per item:
 
 `title, authors, isbn, media_type, platform, publisher, publish_year,
-page_count, series_name, location, source, estimated_value, manual_value,
-owned, wishlisted, deleted, tags`
+page_count, language, series_name, series_position, location, source,
+estimated_value, manual_value, owned, wishlisted, deleted, tags`
+
+`location` is the location's full path, such as `Office / Shelf 2`.
+`language` is the stored code, such as `ja`.
 
 `owned` and `wishlisted` are each `1` or `0`, so the file records all three
 states: owned (`1`, `0`), on your wishlist (`0`, `1`) and neither (`0`, `0`).
@@ -58,6 +61,35 @@ items that also lack one: it will not be folded into an edition you own that
 `978-0-441-17271-9` are the same book, so a file carrying any of them matches
 the copy you already own — whichever form Shelf stored it under.
 
+**Everything the export writes, the import reads** — except `source`, which
+records where an item came from and is always set to the import itself. A
+library rebuilt from its own export gets its platforms, languages, series
+numbers, locations and values back.
+
+- **`series_position`** — a plain number, such as `3` or `3.5`.
+- **`manual_value`** and **`estimated_value`** — a price. A currency symbol
+  and a three-letter code are allowed (`$12.50`, `12.50 USD`); anything else
+  in the cell is not.
+- **`language`** — a code (`ja`, `ja-JP`, `jpn`) or a name from the
+  language list on the item edit page (`Japanese`), in any case. A value
+  Shelf does not recognise is stored in lower case, as typed.
+- **`platform`** — one of your game platforms.
+- **`location`** — matched against your locations' full paths, ignoring
+  case. A name that matches nothing **creates a new top-level location**,
+  and the summary lists it under **Created locations**. A cell containing
+  ` / ` that matches nothing is a row error: Shelf does not build a nested
+  location from a CSV, so create it under Settings → Locations first.
+
+A cell in one of these columns that Shelf cannot read — `vol. 3` as a series
+number, `£5 (2 for 1)` as a value, a negative value, an unknown platform —
+is a **row error**. That row is not imported, and nothing it named is
+created; the rest of the file still imports.
+
+**An empty cell leaves a field alone.** For these columns an empty cell and a
+missing column mean the same thing, so a CSV cannot clear a location, a
+language, a series number or a value. Use the item edit page for that. A
+file written before these columns existed imports exactly as it did.
+
 **Tags.** Import is **additive**: a `tags` cell adds tags, and never removes
 one the item already has. A file with no `tags` column and a row with an
 empty `tags` cell are the same thing — both leave existing tags alone, so
@@ -87,7 +119,10 @@ not owned, and every other new row arrives owned.
 - **Update** — the matched item's metadata is refreshed from the row. Owned
   and wishlist state change only where the file has a value for them: a
   file without an `owned` or `wishlisted` column leaves that part of every
-  matched item as it was.
+  matched item as it was. A non-empty `location` **moves the item's primary
+  copy** there; any other copies stay where they are. `estimated_value` is
+  **never** overwritten on an existing item — the valuation report owns it —
+  so it is restored only on items the import creates.
 
 **A row that matches an item in Trash restores it** — it comes back as it
 was, is counted as restored in the summary, and then Skip or Update applies to
@@ -116,15 +151,14 @@ Options:
   owned nor wishlisted. It never changes whether a row is owned.
 
 Errors are reported per row (missing title, over-long fields, an ISBN whose
-check digit doesn't add up, a media type Shelf doesn't know); the rest of
+check digit doesn't add up, a media type Shelf doesn't know, a series number,
+value or location Shelf cannot read); the rest of
 the file still imports. An ISBN-10 in the file stores both forms.
 
 **Not imported.** Under the counts, the summary lists every column that held
 data in at least one row and that Shelf did not import — a rating, a review,
 a price column Shelf has no place for. A column that was blank in every row
-is not listed. Re-importing Shelf's own export lists `estimated_value`,
-`location`, `manual_value`, `platform` and `source`: those are written for
-your spreadsheet, and the import does not read them back.
+is not listed. Re-importing Shelf's own export lists only `source`.
 
 ## Reading trackers and catalogue apps
 

@@ -36,9 +36,9 @@ from tests.test_reading_imports import GOODREADS_HEADER, STORYGRAPH_HEADER, _pos
 # as-is.
 GENERIC_HEADER = [
     "title", "authors", "isbn", "media_type", "platform", "publisher",
-    "publish_year", "page_count", "series_name", "location", "source",
-    "estimated_value", "manual_value", "owned", "wishlisted", "deleted",
-    "tags",
+    "publish_year", "page_count", "language", "series_name", "series_position",
+    "location", "source", "estimated_value", "manual_value", "owned",
+    "wishlisted", "deleted", "tags",
 ]
 
 SENTINEL = "ZzQ9xSentinelValueZz"
@@ -110,6 +110,8 @@ class TestConsumedColumnsPins:
             "title", "authors", "author", "isbn", "media_type", "publisher",
             "publish_year", "year", "page_count", "pages", "series_name",
             "series", "owned", "wishlisted", "deleted", "tags",
+            "series_position", "manual_value", "estimated_value", "language",
+            "platform", "location",
         })
         row = {
             "title": "Dune",
@@ -124,14 +126,23 @@ class TestConsumedColumnsPins:
             "wishlisted": "0",
             "deleted": "0",
             "tags": "sci-fi; space opera",
-            # Present in Shelf's export header but not read by normalize_generic.
-            "platform": SENTINEL,
-            "location": SENTINEL,
+            # The one Shelf export column normalize_generic still does not read.
             "source": SENTINEL,
-            "estimated_value": SENTINEL,
-            "manual_value": SENTINEL,
         }
         _assert_no_sentinel_leak(normalize_generic(row))
+
+    def test_generic_round_trip_columns_land_in_output(self):
+        norm = normalize_generic({
+            "title": "Dune", "platform": "Switch", "location": "Den > Shelf 1",
+            "estimated_value": "12.50", "manual_value": "$20", "language": "Japanese",
+            "series_position": "3",
+        })
+        assert norm["platform"] == "Switch"
+        assert norm["location"] == "Den > Shelf 1"
+        assert norm["estimated_value"] == 12.5
+        assert norm["manual_value"] == 20.0
+        assert norm["language"] == "ja"
+        assert norm["series_position"] == 3.0
 
     def test_goodreads_consumed_columns(self):
         assert CONSUMED_COLUMNS[GOODREADS] == frozenset({

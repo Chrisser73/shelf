@@ -1015,7 +1015,7 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
     except (ValueError, TypeError):
         return {"ok": False, "message": "Invalid item IDs"}
 
-    allowed = {"media_type", "location_id", "reading_status", "owned", "wishlisted", "series_name"}
+    allowed = {"media_type", "location_id", "reading_status", "owned", "wishlisted", "series_name", "language"}
     filtered = {k: v for k, v in updates.items() if k in allowed}
     if not filtered:
         return {"ok": False, "message": "No valid fields to update"}
@@ -1025,6 +1025,10 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
             filtered["series_name"] = None
         elif not str(filtered["series_name"]).strip():
             return {"ok": False, "message": "Series name cannot be empty"}
+
+    if "language" in filtered:
+        lang = str(filtered["language"] or "").strip()
+        filtered["language"] = None if lang in ("", "__clear__") else lang
 
     placeholders = ",".join("?" for _ in item_ids)
 

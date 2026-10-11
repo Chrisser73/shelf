@@ -206,3 +206,52 @@ def test_librarything_import_shows_beta_and_unimported(live_server, authed_page)
 
     dropped = result_block.locator("[data-testid='csv-import-dropped']")
     expect(dropped).to_contain_text("rating")
+
+
+def test_import_card_lists_created_locations(live_server, authed_page):
+    """A generic CSV whose `location` cell names no existing location creates
+    it, and the import card says so (#145)."""
+    import sqlite3
+    import uuid
+
+    tag = uuid.uuid4().hex[:8]
+    loc_name = f"E2E Attic {tag}"
+    title = f"E2E Located Book {tag}"
+    csv_content = f"title,location\n{title},{loc_name}\n"
+
+    authed_page.goto(f"{live_server['url']}/settings")
+    authed_page.wait_for_load_state("networkidle")
+    authed_page.locator("button:has-text('Data')").click()
+
+    file_input = authed_page.locator("input[type=file][accept*='.csv']")
+    expect(file_input).to_be_visible()
+    file_input.set_input_files({
+        "name": "located.csv",
+        "mimeType": "text/csv",
+        "buffer": csv_content.encode(),
+    })
+
+    try:
+        form = file_input.locator("xpath=ancestor::form")
+        with authed_page.expect_response(
+                lambda r: "/api/import/csv" in r.url and r.request.method == "POST") as resp_info:
+            form.locator("button[type=submit]").first.click()
+        result = resp_info.value.json()
+        assert result["imported"] == 1, result
+        assert result["locations_created"] == [loc_name], result
+
+        created = authed_page.locator(
+            "[data-testid='csv-import-result'] [data-testid='csv-import-locations-created']")
+        expect(created).to_contain_text(f"Created locations: {loc_name}")
+    finally:
+        # The session server's DB is shared with later tests (G126).
+        conn = sqlite3.connect(str(live_server["data_dir"] / "shelf.db"))
+        try:
+            # The location gave the item a primary copy; remove it first.
+            conn.execute("DELETE FROM item_copies WHERE item_id IN "
+                         "(SELECT id FROM items WHERE title = ?)", (title,))
+            conn.execute("DELETE FROM items WHERE title = ?", (title,))
+            conn.execute("DELETE FROM locations WHERE name = ?", (loc_name,))
+            conn.commit()
+        finally:
+            conn.close()

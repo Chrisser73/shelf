@@ -176,3 +176,85 @@ def test_shortcut_help_button_opens_and_modal_controls_close(live_server, authed
     expect(modal).to_be_visible()
     modal.click(position={"x": 5, "y": 5})
     expect(modal).to_be_hidden()
+
+
+def _language(data_dir, item_id: int):
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        return conn.execute("SELECT language FROM items WHERE id = ?", (item_id,)).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_bulk_language_apply_then_clear(live_server, authed_page):
+    """Admin picks a language in the bulk bar and Apply sets it; Clear nulls it."""
+    data_dir = live_server["data_dir"]
+    item_id = insert_item(
+        data_dir, title="Bulk Language Probe", isbn="9780009994050", language="en"
+    )
+
+    authed_page.goto(f"{live_server['url']}/browse")
+    authed_page.wait_for_load_state("networkidle")
+    authed_page.locator("[data-testid='view-list']").click()
+    row = authed_page.locator(f"tr[data-item-id='{item_id}']")
+    expect(row).to_be_visible()
+
+    def select_item():
+        authed_page.get_by_role("button", name="Select", exact=True).click()
+        row.click()
+        expect(authed_page.get_by_text("1 selected", exact=True)).to_be_visible()
+
+    def is_bulk_update(r):
+        return "/api/items/bulk-update" in r.url and r.request.method == "POST"
+
+    try:
+        select_item()
+        apply_button = authed_page.locator("[data-testid='bulk-language-apply']")
+        expect(apply_button).to_be_disabled()
+        authed_page.locator("#bulk-language-select").select_option("ja")
+        expect(apply_button).to_be_enabled()
+        with authed_page.expect_response(is_bulk_update):
+            apply_button.click()
+        assert _language(data_dir, item_id) == "ja"
+
+        authed_page.wait_for_load_state("networkidle")
+        authed_page.locator("[data-testid='view-list']").click()
+        expect(row).to_be_visible()
+        select_item()
+        with authed_page.expect_response(is_bulk_update):
+            authed_page.locator("[data-testid='bulk-language-clear']").click()
+        assert _language(data_dir, item_id) is None
+    finally:
+        conn = sqlite3.connect(str(data_dir / "shelf.db"))
+        try:
+            conn.execute("UPDATE items SET language = 'en' WHERE id = ?", (item_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+@pytest.mark.parametrize("width", [320, 390])
+def test_bulk_language_group_stays_in_viewport(live_server, authed_page, width):
+    """The bulk bar is position: fixed, so a child can overflow without
+    widening the document (G43) -- measure element boxes, not scrollWidth."""
+    item_id = insert_item(
+        live_server["data_dir"], title=f"Bulk Language Box {width}", isbn=f"97800099941{width % 100:02d}"
+    )
+    authed_page.set_viewport_size({"width": width, "height": 800})
+    authed_page.goto(f"{live_server['url']}/browse")
+    authed_page.wait_for_load_state("networkidle")
+    authed_page.locator("[data-testid='view-list']").click()
+    row = authed_page.locator(f"tr[data-item-id='{item_id}']")
+    expect(row).to_be_visible()
+    authed_page.get_by_role("button", name="Select", exact=True).click()
+    row.click()
+    group = authed_page.locator("[data-testid='bulk-language']")
+    expect(group).to_be_visible()
+    rights = authed_page.evaluate(
+        """() => [...document.querySelectorAll(
+            "[data-testid='bulk-language'], [data-testid='bulk-language'] *")]
+            .map(e => [e.getAttribute('data-testid') || e.tagName, e.getBoundingClientRect().right,
+                       window.innerWidth])"""
+    )
+    for name, right, inner in rights:
+        assert right <= inner, (name, right, inner)

@@ -8,6 +8,7 @@ function browsePage() {
         bulkStatusVal: '',
         bulkWishlistVal: '',
         bulkSeriesVal: '',
+        bulkLanguageVal: '',
         bulkTagVal: '',
         filterPills: [],
         viewMode: localStorage.getItem('shelf-view') || 'grid',

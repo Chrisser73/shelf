@@ -41,8 +41,10 @@ import re
 import unicodedata
 
 from app import config
+from app.services import bib_normalize
 from app.services import tags as tags_svc
 from app.services import upc as upc_svc
+from app.services.national import SEARCH_LANGS
 
 GOODREADS = "goodreads"
 STORYGRAPH = "storygraph"
@@ -236,6 +238,41 @@ def normalize_storygraph(row: dict) -> dict:
     }
 
 
+_SERIES_POSITION_RE = re.compile(r"^-?\d+(\.\d+)?$")
+_LANG_BY_NAME = {name.casefold(): code for code, name in SEARCH_LANGS.items()}
+
+
+def _generic_series_position(row: dict) -> float | None:
+    raw = (row.get("series_position") or "").strip()
+    if not raw:
+        return None
+    if _SERIES_POSITION_RE.match(raw):
+        try:
+            f = float(raw)
+        except ValueError:
+            f = math.nan
+        if math.isfinite(f):
+            return f
+    raise ValueError(f'series_position "{raw}" is not a number')
+
+
+def _generic_price(row: dict, column: str) -> float | None:
+    raw = (row.get(column) or "").strip()
+    if not raw:
+        return None
+    price = parse_price(raw)
+    if price is None:
+        raise ValueError(f'{column} "{raw}" is not a price')
+    return price
+
+
+def _generic_language(row: dict) -> str | None:
+    raw = (row.get("language") or "").strip()
+    if not raw:
+        return None
+    return _LANG_BY_NAME.get(raw.casefold()) or bib_normalize.to_iso639_1(raw) or raw.lower()
+
+
 def normalize_generic(row: dict) -> dict:
     """Shelf's own CSV format — mirrors the pre-existing import behavior."""
     raw_media = (row.get("media_type") or "book").strip()
@@ -250,6 +287,11 @@ def normalize_generic(row: dict) -> dict:
         # this only fires for a value the row itself actually carried.
         if not any(t.casefold() == "kids" for t in tags):
             tags.append("Kids")
+    # Every parse happens here, before any write (G85).
+    series_position = _generic_series_position(row)
+    manual_value = _generic_price(row, "manual_value")
+    estimated_value = _generic_price(row, "estimated_value")
+    language = _generic_language(row)
     return {
         "title": (row.get("title") or "").strip(),
         "authors": (row.get("authors") or row.get("author") or "").strip() or None,
@@ -259,7 +301,16 @@ def normalize_generic(row: dict) -> dict:
         "publish_year": (row.get("publish_year") or row.get("year") or "").strip() or None,
         "page_count": (row.get("page_count") or row.get("pages") or "").strip() or None,
         "series_name": (row.get("series_name") or row.get("series") or "").strip() or None,
-        "series_position": None,
+        # Round-trip columns (#145). An empty cell and an absent column are the
+        # SAME answer for these six: None, "no opinion" (the tags rule, not
+        # G87's state-flag rule). A file written before these columns existed
+        # therefore imports exactly as it always did (G101's old-file rule).
+        "series_position": series_position,
+        "manual_value": manual_value,
+        "estimated_value": estimated_value,
+        "language": language,
+        "platform": (row.get("platform") or "").strip() or None,
+        "location": (row.get("location") or "").strip() or None,
         "reading_status": None,
         "date_finished": None,
         # Both state columns are Shelf's own export (#125). None means the
@@ -394,7 +445,7 @@ def _lt_media_type(value: str | None) -> str:
     return _media_type_from(value)
 
 
-def _lt_price(value: str | None) -> float | None:
+def parse_price(value: str | None) -> float | None:
     """Currency symbols and spaces removed. One comma followed by exactly
     two trailing digits and no '.' is a decimal comma (E12,50 -> 12.5); any
     other comma is a thousands separator ($1,250.00 -> 1250.0). Kept only
@@ -444,7 +495,7 @@ def _lt_copy(row: dict) -> dict | None:
     from_where = raw_from_where.strip()
     if from_where and len(from_where) <= _CSV_MAX_TEXT:
         copy["acquisition_source"] = from_where
-    price = _lt_price(raw_price)
+    price = parse_price(raw_price)
     if price is not None:
         copy["acquisition_price"] = price
     condition = raw_condition.strip()
@@ -620,6 +671,8 @@ CONSUMED_COLUMNS: dict[str, frozenset[str]] = {
         "title", "authors", "author", "isbn", "media_type", "publisher",
         "publish_year", "year", "page_count", "pages", "series_name",
         "series", "owned", "wishlisted", "deleted", "tags",
+        "series_position", "manual_value", "estimated_value", "language",
+        "platform", "location",
     }),
     GOODREADS: frozenset({
         "title", "author", "additional_authors", "exclusive_shelf", "isbn13",

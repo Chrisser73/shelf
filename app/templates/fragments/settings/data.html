@@ -218,6 +218,16 @@
                                success guard rather than repeating it: a second top-level
                                x-if would have to chain importResult two levels, which the
                                CSP build evaluates eagerly (G5). #}
+                            <template x-if="importResult.locations_created && importResult.locations_created.length">
+                                <p class="mt-1 text-xs text-shelf-muted" data-testid="csv-import-locations-created">
+                                    Created locations:
+                                    <template x-for="(name, i) in importResult.locations_created" :key="i">
+                                        <span>
+                                            <span x-text="name"></span><span x-show="i < importResult.locations_created.length - 1">, </span>
+                                        </span>
+                                    </template>
+                                </p>
+                            </template>
                             <template x-if="importResult.errors && importResult.errors.length > 0">
                                 <ul class="mt-1 space-y-0.5 text-xs text-shelf-error">
                                     <template x-for="(err, i) in importResult.errors" :key="i">

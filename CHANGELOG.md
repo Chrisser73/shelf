@@ -6,6 +6,60 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-10-11
+
+A Shelf CSV export was not a full backup of its own data. The export wrote each
+item's location, platform and values, but the import ignored those columns, so
+a library rebuilt from its own file lost them without saying so. Language and
+series position were not in the file at all. Now every column the export writes,
+the import reads. This release also carries Hungarian ISBN lookups from
+[@notAnElephant](https://github.com/notAnElephant).
+
+### Added
+
+- **A CSV export now imports back with everything in it.** The import reads
+  `platform`, `location`, `manual_value`, `estimated_value`, and two columns the
+  export now writes: `series_position` (after `series_name`) and `language`. A
+  file exported from one Shelf and imported into an empty one keeps each item's
+  shelf, language, series number and values. **Not imported** now lists only
+  `source`. Every imported item is marked as a CSV import.
+- **Locations named in a CSV are created for you, and the import says which.** A
+  location that matches an existing one by name (any capitalisation) is reused.
+  A new name becomes a new top-level location, and the result lists it under
+  **Created locations**. A name written as a path (`Attic / Box 4`) that does not
+  already exist is a row error. Shelf will not guess which part is the parent.
+- **Update mode can move items and set languages.** Importing with **Update
+  duplicates** moves an item's main copy to the file's location, and sets its
+  language, series position, value and platform. Other copies stay where they are.
+- **Set or clear the language of many items at once.** Browse's selection bar
+  has a **Language** control with Apply and Clear, beside Series. Admins only,
+  like the other bulk actions.
+- **Hungarian ISBNs are looked up in the national library catalogue.** ISBNs that
+  start 978-615 or 978-963 are looked up first in OSZK NEKTÁR, the National Széchényi
+  Library's catalogue. The result is accepted only when the record carries the
+  same ISBN. If NEKTÁR has no record, the usual sources answer as before. The
+  Docker image is about 50 MB larger, because NEKTÁR is reached through the YAZ
+  Z39.50 client. Contributed by [@notAnElephant](https://github.com/notAnElephant)
+  in [#150](https://github.com/dgahagan/shelf/pull/150).
+
+### Changed
+
+- **A bad value in one of these columns now fails that row, with a reason.** A
+  `series_position` that is not a number, or a value that is not a price, stops
+  the row: `Row 4: series_position "vol. 3" is not a number`. The row is not
+  written, and no location is created for it. The import used to ignore these
+  columns, so a file that imported cleanly before can now report row errors.
+- **An empty cell changes nothing.** An empty `location`, `language`, value or
+  `series_position` cell is "no opinion", also in update mode. A CSV cannot
+  clear a field. Use the item page, or the new bulk **Clear**, for language.
+- **`estimated_value` is read only for new items.** On update, Shelf keeps the
+  valuation it fetched and does not overwrite it with an older figure from a
+  spreadsheet. An imported valuation shows no "as of" date, because the file does
+  not say when it was fetched.
+- **Language accepts names and codes.** `Japanese`, `ja`, `ja-JP` and `JPN` all
+  store as Japanese. A value Shelf does not recognise is stored as written, in
+  lower case.
+
 ## [0.64.0] - 2026-10-09
 
 Marking a book you had just started meant scanning it and then opening its page
@@ -4946,6 +5000,7 @@ First public release.
   protection, encrypted credential storage, optional passphrase-encrypted
   backups, HTTPS out of the box, non-root container
 
+[0.65.0]: https://github.com/dgahagan/shelf/releases/tag/v0.65.0
 [0.64.0]: https://github.com/dgahagan/shelf/releases/tag/v0.64.0
 [0.63.0]: https://github.com/dgahagan/shelf/releases/tag/v0.63.0
 [0.62.1]: https://github.com/dgahagan/shelf/releases/tag/v0.62.1

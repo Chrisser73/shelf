@@ -963,3 +963,51 @@ class TestSplitSeriesTitle:
     def test_empty(self):
         assert split_series_title(None) == ("", None, None)
         assert split_series_title("") == ("", None, None)
+
+
+SIX_COLUMNS = ("series_position", "manual_value", "estimated_value",
+               "language", "platform", "location")
+
+
+class TestGenericRoundTripColumns:
+    """normalize_generic parses the six round-trip columns (#145)."""
+
+    @pytest.mark.parametrize("cell,expected", [("3", 3.0), ("3.5", 3.5), (" 2 ", 2.0)])
+    def test_series_position_numbers(self, cell, expected):
+        assert normalize_generic({"title": "X", "series_position": cell})["series_position"] == expected
+
+    @pytest.mark.parametrize("cell", ["vol. 3", "nan", "1e3", "inf"])
+    def test_series_position_rejects(self, cell):
+        with pytest.raises(ValueError) as exc:
+            normalize_generic({"title": "X", "series_position": cell})
+        assert "series_position" in str(exc.value) and cell in str(exc.value)
+
+    @pytest.mark.parametrize("column", ["manual_value", "estimated_value"])
+    @pytest.mark.parametrize("cell", ["$12.50", "12.50 USD"])
+    def test_price_parses(self, column, cell):
+        assert normalize_generic({"title": "X", column: cell})[column] == 12.5
+
+    @pytest.mark.parametrize("column", ["manual_value", "estimated_value"])
+    @pytest.mark.parametrize("cell", ["£5 (2 for 1)", "-4"])
+    def test_price_rejects(self, column, cell):
+        with pytest.raises(ValueError) as exc:
+            normalize_generic({"title": "X", column: cell})
+        assert column in str(exc.value) and cell in str(exc.value)
+
+    @pytest.mark.parametrize("cell,expected", [
+        ("Japanese", "ja"), ("japanese", "ja"), ("ja-JP", "ja"),
+        ("jpn", "ja"), ("JA", "ja"), ("Klingon", "klingon"),
+    ])
+    def test_language(self, cell, expected):
+        assert normalize_generic({"title": "X", "language": cell})["language"] == expected
+
+    @pytest.mark.parametrize("column", SIX_COLUMNS)
+    def test_empty_and_absent_are_none(self, column):
+        assert normalize_generic({"title": "X"})[column] is None
+        assert normalize_generic({"title": "X", column: ""})[column] is None
+        assert normalize_generic({"title": "X", column: "  "})[column] is None
+
+    def test_platform_and_location_strip(self):
+        norm = normalize_generic({"title": "X", "platform": " Switch ", "location": "  Den > A "})
+        assert norm["platform"] == "Switch"
+        assert norm["location"] == "Den > A"

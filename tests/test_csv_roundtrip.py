@@ -95,7 +95,7 @@ class TestDeletedColumn:
     A viewer export omits the trashed row entirely and its `deleted` cells
     are all 0 — the Trash page is editor+, and the CSV must not be the one
     place a viewer sees a trashed row (design plan-soft-delete-export,
-    Decision 1). The file shape (17 columns) is identical for every role."""
+    Decision 1). The file shape (19 columns) is identical for every role."""
 
     def _seed_live_and_trashed(self, db):
         from app.services import item_write
@@ -130,12 +130,12 @@ class TestDeletedColumn:
         assert live_row["deleted"] == "0"
         assert trashed_row["deleted"] == "1"
 
-    def test_viewer_export_omits_trashed_row_and_keeps_the_seventeen_column_header(self, viewer_client, db):
+    def test_viewer_export_omits_trashed_row_and_keeps_the_nineteen_column_header(self, viewer_client, db):
         self._seed_live_and_trashed(db)
 
         exported = _export(viewer_client)
         header = exported.splitlines()[0].split(",")
-        assert len(header) == 17
+        assert len(header) == 19
         assert header[-4:] == ["owned", "wishlisted", "deleted", "tags"]
 
         rows = list(csv.DictReader(io.StringIO(exported)))
@@ -589,3 +589,271 @@ class TestUploadReadIsBounded:
 
         assert result["imported"] == 1
         assert calls == [items_csv.MAX_CSV_UPLOAD_SIZE + 1]
+
+
+# The 19-column export header (#145), for hand-written generic files below.
+HEADER = ("title,authors,isbn,media_type,platform,publisher,publish_year,page_count,"
+          "language,series_name,series_position,location,source,estimated_value,"
+          "manual_value,owned,wishlisted,deleted,tags")
+ROUND_TRIP = ("platform", "language", "series_position", "location",
+              "estimated_value", "manual_value")
+
+
+def _csv(*rows):
+    """A generic file: each row is a dict of the cells it sets; others blank."""
+    cols = HEADER.split(",")
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(cols)
+    for row in rows:
+        writer.writerow([row.get(c, "") for c in cols])
+    return out.getvalue()
+
+
+def _item(db, title):
+    return db.execute(
+        "SELECT i.*, l.name AS location_name FROM items i "
+        "LEFT JOIN locations l ON i.location_id = l.id WHERE i.title = ?",
+        (title,),
+    ).fetchone()
+
+
+def _location_count(db):
+    return db.execute("SELECT COUNT(*) AS c FROM locations").fetchone()["c"]
+
+
+def _wipe_library(db):
+    for table in ("item_tags", "list_items", "item_copies", "items"):
+        db.execute(f"DELETE FROM {table}")
+    db.execute("DELETE FROM locations WHERE parent_id IS NOT NULL")  # children first (FK)
+    db.execute("DELETE FROM locations")
+    db.execute("COMMIT")
+
+
+def _platform(db):
+    from app.database import get_game_platforms
+    return next(iter(get_game_platforms(db)))
+
+
+class TestRoundTripFields:
+    """#145: every column the export writes, the import reads (except source)."""
+
+    def _seed(self, db, location):
+        from app.services import locations
+        loc_id = None
+        for label in location.split(" / "):
+            loc_id = locations.create_location(db, label, parent_id=loc_id)
+        item_id = _insert_item(
+            db, title="Round Trip Game", isbn=None, media_type="video_game",
+            platform=_platform(db), language="ja", series_position=3.5,
+            manual_value=40.0, estimated_value=25.5,
+        )
+        db.execute("COMMIT")
+        from app.services.item_write import update_item_fields
+        update_item_fields(db, item_id, {"location_id": loc_id})
+        db.execute("COMMIT")
+        return item_id
+
+    @staticmethod
+    def _cells(exported, title="Round Trip Game"):
+        row = next(r for r in csv.DictReader(io.StringIO(exported)) if r["title"] == title)
+        return {c: row[c] for c in ROUND_TRIP}
+
+    def test_six_fields_survive_into_a_fresh_library(self, admin_client, db):
+        self._seed(db, "Game Shelf")
+        first = _export(admin_client)
+        before = self._cells(first)
+        assert before["language"] == "ja" and before["location"] == "Game Shelf"
+        _wipe_library(db)
+
+        result = _import(admin_client, first)
+        assert (result["imported"], result["errors"]) == (1, [])
+        assert result["locations_created"] == ["Game Shelf"]
+        assert not [d for d in result["dropped"] if d["column"] != "source"]
+
+        assert self._cells(_export(admin_client)) == before
+        row = _item(db, "Round Trip Game")
+        assert (row["series_position"], row["manual_value"], row["estimated_value"]) == (3.5, 40.0, 25.5)
+        primary = db.execute(
+            "SELECT location_id FROM item_copies WHERE item_id = ? AND is_primary = 1",
+            (row["id"],),
+        ).fetchone()
+        assert primary["location_id"] == row["location_id"]
+
+    def test_nested_location_resolves_when_the_target_has_the_hierarchy(self, admin_client, db):
+        from app.services import locations
+        self._seed(db, "Office / Shelf 2")
+        exported = _export(admin_client)
+        assert self._cells(exported)["location"] == "Office / Shelf 2"
+        _wipe_library(db)
+        office = locations.create_location(db, "Office")
+        shelf = locations.create_location(db, "Shelf 2", parent_id=office)
+        db.execute("COMMIT")
+
+        result = _import(admin_client, exported)
+        assert (result["imported"], result["errors"]) == (1, [])
+        assert result["locations_created"] == []
+        assert _item(db, "Round Trip Game")["location_id"] == shelf
+
+    def test_reimporting_creates_nothing_in_either_mode(self, admin_client, db):
+        self._seed(db, "Game Shelf")
+        exported = _export(admin_client)
+        locs = _location_count(db)
+        for mode in ("skip", "update"):
+            result = _import(admin_client, exported, mode=mode)
+            assert result["errors"] == []
+            assert result["locations_created"] == []
+        assert _location_count(db) == locs
+        assert _count(db) == 1
+
+    def test_new_location_is_listed_once_across_many_rows(self, admin_client, db):
+        result = _import(admin_client, _csv(
+            {"title": "A", "location": "Attic"},
+            {"title": "B", "location": "attic"},
+            {"title": "C", "location": "Attic"},
+        ))
+        assert (result["imported"], result["errors"]) == (3, [])
+        assert result["locations_created"] == ["Attic"]
+        assert _location_count(db) == 1
+
+
+class TestRoundTripUpdateMode:
+    def test_update_relocates_the_primary_and_leaves_a_second_copy(self, admin_client, db):
+        from app.services import item_copies, locations
+        from app.services.item_write import update_item_fields
+        old = locations.create_location(db, "Old Shelf")
+        other = locations.create_location(db, "Other Shelf")
+        item_id = _insert_item(db, title="Located", isbn=None, authors="X")
+        db.execute("COMMIT")
+        update_item_fields(db, item_id, {"location_id": old})
+        second = item_copies.add_copy(db, item_id, {"location_id": other})
+        db.execute("COMMIT")
+
+        result = _import(admin_client, _csv(
+            {"title": "Located", "authors": "X", "location": "New Shelf"}), mode="update")
+        assert (result["imported"], result["errors"]) == (1, [])
+        assert result["locations_created"] == ["New Shelf"]
+        new = db.execute("SELECT id FROM locations WHERE name = 'New Shelf'").fetchone()["id"]
+        assert _item(db, "Located")["location_id"] == new
+        copies = {r["id"]: (r["is_primary"], r["location_id"]) for r in db.execute(
+            "SELECT id, is_primary, location_id FROM item_copies WHERE item_id = ?", (item_id,))}
+        assert copies[second] == (0, other)
+        assert [loc for primary, loc in copies.values() if primary] == [new]
+
+    def test_update_fills_an_unlocated_item(self, admin_client, db):
+        from app.services import locations
+        loc = locations.create_location(db, "Hall")
+        item_id = _insert_item(db, title="Unlocated", isbn=None, authors="Y")
+        db.execute("COMMIT")
+
+        result = _import(admin_client, _csv(
+            {"title": "Unlocated", "authors": "Y", "location": "hall"}), mode="update")
+        assert (result["imported"], result["errors"], result["locations_created"]) == (1, [], [])
+        assert _item(db, "Unlocated")["location_id"] == loc
+        assert db.execute(
+            "SELECT location_id FROM item_copies WHERE item_id = ? AND is_primary = 1",
+            (item_id,),
+        ).fetchone()["location_id"] == loc
+
+    def test_update_applies_values_but_never_estimated_value(self, admin_client, db):
+        plat = _platform(db)
+        _insert_item(db, title="Valued", isbn=None, authors="Z", estimated_value=10.0,
+                     media_type="video_game")
+        db.execute("COMMIT")
+
+        result = _import(admin_client, _csv({
+            "title": "Valued", "authors": "Z", "media_type": "video_game", "platform": plat,
+            "language": "Japanese", "series_position": "2", "manual_value": "$12.50",
+            "estimated_value": "99",
+        }), mode="update")
+        assert (result["imported"], result["errors"]) == (1, [])
+        row = _item(db, "Valued")
+        assert (row["platform"], row["language"], row["series_position"], row["manual_value"]) == (
+            plat, "ja", 2.0, 12.5)
+        assert row["estimated_value"] == 10.0
+
+    def test_estimated_value_is_applied_on_insert(self, admin_client, db):
+        result = _import(admin_client, _csv({"title": "Fresh", "estimated_value": "7.25"}))
+        assert result["errors"] == []
+        assert _item(db, "Fresh")["estimated_value"] == 7.25
+
+    def test_empty_cells_leave_every_field_alone(self, admin_client, db):
+        from app.services import locations
+        from app.services.item_write import update_item_fields
+        plat = _platform(db)
+        loc = locations.create_location(db, "Kept")
+        item_id = _insert_item(
+            db, title="Full", isbn=None, authors="W", media_type="video_game", platform=plat,
+            language="fr", series_position=4.0, manual_value=5.0, estimated_value=6.0,
+        )
+        db.execute("COMMIT")
+        update_item_fields(db, item_id, {"location_id": loc})
+        db.execute("COMMIT")
+
+        result = _import(admin_client, _csv(
+            {"title": "Full", "authors": "W", "media_type": "video_game"}), mode="update")
+        assert (result["imported"], result["errors"]) == (1, [])
+        row = _item(db, "Full")
+        assert (row["platform"], row["language"], row["series_position"], row["manual_value"],
+                row["estimated_value"], row["location_id"]) == (plat, "fr", 4.0, 5.0, 6.0, loc)
+
+    def test_skip_mode_hit_with_a_new_location_creates_none(self, admin_client, db):
+        _insert_item(db, title="Skipped", isbn=None, authors="V")
+        db.execute("COMMIT")
+        result = _import(admin_client, _csv(
+            {"title": "Skipped", "authors": "V", "location": "Nowhere Yet"}))
+        assert (result["skipped"], result["locations_created"]) == (1, [])
+        assert _location_count(db) == 0
+
+    def test_librarything_update_leaves_series_position_alone(self, admin_client, db):
+        _insert_item(db, title="Guards! Guards!", isbn="9780061020643", series_name="Discworld",
+                     series_position=8.0)
+        db.execute("COMMIT")
+        cols = ["Book Id", "Title", "Primary Author", "ISBN", "Series", "Media"]
+        tsv = "\t".join(cols) + "\n" + "\t".join(
+            ["1", "Guards! Guards!", "Terry Pratchett", "9780061020643", "Discworld (99)",
+             "Paperback"]) + "\n"
+        result = _import(admin_client, tsv, mode="update")
+        assert result["format"] == "librarything", result
+        assert result["errors"] == []
+        assert _item(db, "Guards! Guards!")["series_position"] == 8.0
+
+
+class TestRoundTripRowErrors:
+    """A bad cell is a row error, and the row writes nothing — no item, no
+    location (G85). Asserted on the database, not the response alone."""
+
+    def _assert_nothing_written(self, admin_client, db, row, expect):
+        items, locs = _count(db), _location_count(db)
+        result = _import(admin_client, _csv({"title": "Bad Row", **row}))
+        assert result["error_count"] == 1, result
+        assert result["errors"][0].startswith("Row 2: ") and expect in result["errors"][0]
+        assert result["locations_created"] == []
+        assert (_count(db), _location_count(db)) == (items, locs)
+
+    def test_non_numeric_series_position(self, admin_client, db):
+        self._assert_nothing_written(admin_client, db, {"series_position": "vol. 3"},
+                                     'series_position "vol. 3" is not a number')
+
+    def test_manual_value_that_is_not_a_price(self, admin_client, db):
+        self._assert_nothing_written(admin_client, db, {"manual_value": "£5 (2 for 1)"},
+                                     "is not a price")
+
+    def test_negative_value(self, admin_client, db):
+        self._assert_nothing_written(admin_client, db, {"estimated_value": "-4"},
+                                     'estimated_value "-4" is not a price')
+
+    def test_unmatched_nested_location(self, admin_client, db):
+        self._assert_nothing_written(admin_client, db, {"location": "A / B"},
+                                     'location "A / B" not found')
+
+    def test_invalid_isbn_with_a_new_location(self, admin_client, db):
+        self._assert_nothing_written(admin_client, db,
+                                     {"isbn": "9780000000000", "location": "Brand New"},
+                                     "Invalid ISBN")
+
+    def test_unknown_platform_with_a_new_location(self, admin_client, db):
+        self._assert_nothing_written(
+            admin_client, db,
+            {"media_type": "video_game", "platform": "no-such-console", "location": "Brand New"},
+            "Unknown game platform")

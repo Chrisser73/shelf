@@ -1824,7 +1824,13 @@ python -m pytest tests/e2e/test_responsive.py -m e2e -q
   the viewport without widening the document at all. On
   `feat/tags-manage-and-apply` (2026-09-23, `f10de5e`) the document reported
   no overflow at 320 px while the Series group's Apply button already ended at
-  344 px (a pre-existing overflow, not introduced there).
+  344 px (a pre-existing overflow, not introduced there). Hit again on
+  `feat/issue-145-csv-roundtrip-fields` (2026-10-09, `1f09957`): the new
+  Language group, copied from the Series group's classes, ended at 349.7 px
+  in a 320 px viewport; `flex-wrap` plus an `sm:`-only divider brought it to
+  302.8. **A new bulk-bar group is born overflowing if it copies a sibling's
+  classes** — wrap it, and assert its boxes in E2E as
+  `test_bulk_language_group_stays_in_viewport` does.
 - **Status:** gated — `tests/e2e/test_responsive.py` (in `make test-e2e` and
   in CI), *for content in a page's default state only* (see above). The gate
   catches the *consequence*; the two rules above are how you fix it once it
@@ -5687,6 +5693,13 @@ grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py test
   the Sharing card's "Copied!" span (also `text-shelf-success`) rendered for
   every later test. **An E2E test that seeds rows must remove them** — the
   `one_share_link` fixture in `tests/e2e/test_features.py` is the shape.
+  **Cleaning up through raw `sqlite3.connect` runs with foreign keys OFF**, so
+  deleting an `items` row does not cascade and does not refuse: an item that
+  gained a primary copy (any write carrying `location_id` — a CSV `location`
+  cell, the edit form, a bulk Move) leaves an orphan `item_copies` row
+  pointing at a deleted item and at the location you delete next. Delete
+  `item_copies` for the item first (`tests/e2e/test_csv.py`
+  `test_import_card_lists_created_locations`, `4a4925f`, 2026-10-09).
 - **Verify:** `grep -rn 'locator("span.text-shelf' tests/e2e/`
 - **Status:** documented. **Lint candidate:** refuse bare colour-class
   locators in `tests/e2e/` in `make check-tests`.
