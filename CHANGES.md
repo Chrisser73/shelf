@@ -4,6 +4,17 @@ This file is the central record of customizations in this fork. The upstream
 [`README.md`](README.md) continues to document Shelf itself; this file covers
 only added or changed fork-specific features.
 
+## V1.2.5 — Upgrade V1.2.5
+
+- **Accounts are easier to recognize.** Each user can choose the header's
+  standard account icon or their bold initial, and can set optional background
+  and text colours with safe hex values from Settings → Users or Account.
+- **Appearance now has a per-user theme picker.** The original dark Shelf
+  palette remains the default, with **Light**, blue/petrol **Navi**,
+  green-petrol **Ocean**, cherry-pink **Sakura**, warm **Coffee**,
+  amber **Retro**, and terminal-green **Matrix** variants. Semantic success,
+  warning and error colours remain consistent across themes.
+
 ## V1.2.4 — Upgrade V1.2.4
 
 - **Wishlist additions now retain their chosen mode.** Adding a title-search

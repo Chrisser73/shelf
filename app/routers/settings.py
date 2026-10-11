@@ -442,6 +442,9 @@ async def update_appearance_settings(request: Request):
     # Treat that absence explicitly as disabled.
     show_home_collection_mix = "1" if form.get("show_home_collection_mix") in ("1", "on", "true") else "0"
     show_home_useful_places = "1" if form.get("show_home_useful_places") in ("1", "on", "true") else "0"
+    # Keep the allow-list here so a forged form value cannot become a
+    # page-wide class. "default" deliberately maps to the original palette.
+    theme = form.get("theme") if form.get("theme") in ("light", "navi", "ocean", "sakura", "coffee", "retro", "matrix") else ""
     with get_db() as db:
         from app.services.user_preferences import set_preference
         set_preference(db, request.state.user["id"], "always_show_game_title", always_show)
@@ -452,10 +455,31 @@ async def update_appearance_settings(request: Request):
         set_preference(db, request.state.user["id"], "show_wishlist_icon_in_collection", show_wishlist_icon)
         set_preference(db, request.state.user["id"], "show_home_collection_mix", show_home_collection_mix)
         set_preference(db, request.state.user["id"], "show_home_useful_places", show_home_useful_places)
+        set_preference(db, request.state.user["id"], "theme", theme)
         for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types"):
             set_preference(db, request.state.user["id"], f"home_tile:{key}",
                            "1" if form.get(f"home_tile_{key}") in ("1", "on", "true") else "0")
     return RedirectResponse(url="/settings", status_code=303)
+
+
+@personal_router.post("/user-symbol")
+async def update_user_symbol_settings(request: Request):
+    """Save the current user's header-symbol preferences from Settings → Users."""
+    form = await request.form()
+    from app.services.user_preferences import set_user_symbol_preferences
+
+    with get_db() as db:
+        ok, _message = set_user_symbol_preferences(
+            db,
+            request.state.user["id"],
+            str(form.get("user_symbol_background") or ""),
+            str(form.get("user_symbol_text") or ""),
+            form.get("user_symbol_show_initial") in ("1", "on", "true"),
+        )
+    return RedirectResponse(
+        url="/settings?tab=users&user_symbol_error=invalid" if not ok else "/settings?tab=users",
+        status_code=303,
+    )
 
 
 @router.post("/missing-game-metadata")

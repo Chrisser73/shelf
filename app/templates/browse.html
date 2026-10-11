@@ -307,7 +307,7 @@
                     hx-get="/api/search" hx-trigger="change" hx-target="#item-grid"
                     hx-include="{{ filter_includes('owned') }}"
                     class="bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
-                <option value="" {{ 'selected' if not f.owned else '' }}>Lists (all) ({{ owned_count + wishlist_count + neither_count }})</option>
+                <option value="" {{ 'selected' if not f.owned else '' }}>All lists ({{ owned_count + wishlist_count + neither_count }})</option>
                 <option value="1" {{ 'selected' if f.owned == '1' else '' }}>Owned ({{ owned_count }})</option>
                 <option value="0" {{ 'selected' if f.owned == '0' else '' }}>Wishlist ({{ wishlist_count }})</option>
                 <option value="none" {{ 'selected' if f.owned == 'none' else '' }}>Not owned or wishlisted ({{ neither_count }})</option>

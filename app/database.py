@@ -249,31 +249,9 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
     # up without the column (G1).
     (39, "Add tags media_type scope column",
      "ALTER TABLE tags ADD COLUMN media_type TEXT DEFAULT NULL"),
-    # 40 is a new table, so it follows 33/34 rather than 37/38: the CREATE is a
-    # numbered entry *and* lives in MIGRATION_TABLES. The numbered copy runs
-    # first on an upgrade; the MIGRATION_TABLES copy runs on every boot and is
-    # the only one a fresh install ever executes. A CREATE that lived in one
-    # place only would leave one of the two bootstrap routes without the table
-    # (G1; test_schema_parity pins the pair). The index is in MIGRATION_TABLES
-    # alone, since a numbered entry is a single statement.
-    (40, "Add price history",
-     "CREATE TABLE IF NOT EXISTS price_history ("
-     " id INTEGER PRIMARY KEY AUTOINCREMENT,"
-     " item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,"
-     " price REAL,"
-     " source TEXT NOT NULL DEFAULT 'isbndb',"
-     " observed_at TEXT NOT NULL DEFAULT (datetime('now')))"),
-    # A feature with no flag row reads as on, and price_alerts is new in the
-    # same release, so an upgrade would switch it on for every install — even
-    # one that applied Standard or Minimal. Start it the way Valuation stands:
-    # off where Valuation is off (it spends the same ISBNdb key), untouched
-    # elsewhere. INSERT OR IGNORE keeps a choice already made. A fresh
-    # database has no feature rows, so this is a no-op there.
-    (41, "Start price alerts off where Valuation is off",
-     """INSERT OR IGNORE INTO settings (key, value)
-        SELECT 'feature.price_alerts', '0'
-        WHERE EXISTS (SELECT 1 FROM settings
-                      WHERE key = 'feature.valuation' AND value = '0')"""),
+    # Versions 40 and 41 are already used below by the fork's platform-logo
+    # migrations. Keep those historic ids stable for existing databases; the
+    # upstream price-history additions are appended as 48/49 below instead.
     (40, "Add game platform logo mappings",
      """CREATE TABLE IF NOT EXISTS game_platform_logos (
             platform_slug TEXT PRIMARY KEY REFERENCES game_platforms(slug) ON DELETE CASCADE,
@@ -305,6 +283,48 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
     (47, "Repair later malformed Unicode in alternate titles",
      "UPDATE items SET alternate_title = REPLACE(alternate_title, 'u00e9', 'é') "
      "WHERE alternate_title LIKE '%u00e9%'"),
+    # 48 is a new table, so it follows 33/34 rather than 37/38: the CREATE is
+    # numbered and also lives in MIGRATION_TABLES. The numbered copy upgrades
+    # existing databases; MIGRATION_TABLES covers a fresh bootstrap.
+    (48, "Add price history",
+     "CREATE TABLE IF NOT EXISTS price_history ("
+     " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+     " item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,"
+     " price REAL,"
+     " source TEXT NOT NULL DEFAULT 'isbndb',"
+     " observed_at TEXT NOT NULL DEFAULT (datetime('now')))"),
+    # Keep price alerts off where Valuation was explicitly disabled.
+    (49, "Start price alerts off where Valuation is off",
+     """INSERT OR IGNORE INTO settings (key, value)
+        SELECT 'feature.price_alerts', '0'
+        WHERE EXISTS (SELECT 1 FROM settings
+                      WHERE key = 'feature.valuation' AND value = '0')"""),
+    # A database that previously used upstream's 40/41 has those version rows
+    # but not the fork's logo/preferences tables. These idempotent bridge
+    # migrations restore them without changing the established 40–42 ledger.
+    (50, "Ensure game platform logo mappings",
+     """CREATE TABLE IF NOT EXISTS game_platform_logos (
+            platform_slug TEXT PRIMARY KEY REFERENCES game_platforms(slug) ON DELETE CASCADE,
+            svg_path TEXT NOT NULL
+        )"""),
+    (51, "Ensure per-user appearance settings",
+     """CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY(user_id, key)
+        )"""),
+    (52, "Ensure per-user platform logo mappings",
+     """CREATE TABLE IF NOT EXISTS user_platform_logos (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            platform_slug TEXT NOT NULL REFERENCES game_platforms(slug) ON DELETE CASCADE,
+            svg_path TEXT NOT NULL,
+            PRIMARY KEY(user_id, platform_slug)
+        )"""),
+    # Ocean originally named the blue/petrol variant. Preserve that choice
+    # while freeing the Ocean name for the new greener palette.
+    (53, "Rename blue Ocean theme to Navi",
+     "UPDATE user_preferences SET value = 'navi' WHERE key = 'theme' AND value = 'ocean'"),
 )
 
 MIGRATION_TABLES = """
@@ -429,6 +449,25 @@ CREATE TABLE IF NOT EXISTS game_platforms (
     name       TEXT NOT NULL,
     sort_order INTEGER DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS game_platform_logos (
+    platform_slug TEXT PRIMARY KEY REFERENCES game_platforms(slug) ON DELETE CASCADE,
+    svg_path TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY(user_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS user_platform_logos (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform_slug TEXT NOT NULL REFERENCES game_platforms(slug) ON DELETE CASCADE,
+    svg_path TEXT NOT NULL,
+    PRIMARY KEY(user_id, platform_slug)
 );
 
 -- media_type is also added via ALTER in MIGRATIONS (39) for upgrades of a

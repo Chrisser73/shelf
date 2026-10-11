@@ -359,7 +359,9 @@ def _more_complete(candidate: dict, current: dict) -> bool:
     return len(candidate["title"]) > len(current["title"])
 
 
-async def detect_spines(images: list[tuple[bytes, str]], settings: dict) -> list[dict]:
+async def detect_spines(
+    images: list[tuple[bytes, str]], settings: dict, *, media_type_hint: str | None = None,
+) -> list[dict]:
     """Dispatch to the configured provider. Raises VisionError on failure.
 
     `images` is [(bytes, mime), ...] — one entry for a normal photo, several
@@ -368,35 +370,44 @@ async def detect_spines(images: list[tuple[bytes, str]], settings: dict) -> list
     provider = settings.get("vision_provider") or ""
     if provider == "anthropic":
         if len(images) <= MAX_TILES_PER_REQUEST:
-            books = await _detect_anthropic(images, settings)
+            books = await _detect_anthropic(images, settings, media_type_hint=media_type_hint)
             # The prompt asks the model to merge overlap duplicates; sweep
             # once more in code to catch the ones it misses.
             return merge_tile_books([books]) if len(images) > 1 else books
-        results = [await _detect_anthropic([img], settings) for img in images]
+        results = [await _detect_anthropic([img], settings, media_type_hint=media_type_hint) for img in images]
         return merge_tile_books(results)
     if provider == "openai":
         if len(images) <= MAX_TILES_PER_REQUEST:
-            books = await _detect_openai(images, settings)
+            books = await _detect_openai(images, settings, media_type_hint=media_type_hint)
             # The prompt asks the model to merge overlap duplicates; sweep
             # once more in code to catch the ones it misses.
             return merge_tile_books([books]) if len(images) > 1 else books
-        results = [await _detect_openai([img], settings) for img in images]
+        results = [await _detect_openai([img], settings, media_type_hint=media_type_hint) for img in images]
         return merge_tile_books(results)
     if provider == "ollama":
         if len(images) == 1:
-            return await _detect_ollama(images[0][0], settings)
-        results = [await _detect_ollama(img, settings) for img, _ in images]
+            return await _detect_ollama(images[0][0], settings, media_type_hint=media_type_hint)
+        results = [await _detect_ollama(img, settings, media_type_hint=media_type_hint) for img, _ in images]
         return merge_tile_books(results)
     raise VisionError("No vision provider configured — set one up in Settings → Integrations")
 
 
-def _prompt_for(count: int) -> str:
+def _prompt_for(count: int, media_type_hint: str | None = None) -> str:
+    hint = ""
+    if media_type_hint in MEDIA_TYPES:
+        hint = (
+            f" The user says this photo is likely {MEDIA_TYPES[media_type_hint]}. "
+            "Use that only as a clue: inspect every item and keep its actual media_type "
+            "when the image shows mixed media."
+        )
     if count <= 1:
-        return PROMPT
-    return PROMPT + TILED_PROMPT_SUFFIX.format(n=count)
+        return PROMPT + hint
+    return PROMPT + hint + TILED_PROMPT_SUFFIX.format(n=count)
 
 
-async def _detect_anthropic(images: list[tuple[bytes, str]], settings: dict) -> list[dict]:
+async def _detect_anthropic(
+    images: list[tuple[bytes, str]], settings: dict, *, media_type_hint: str | None = None,
+) -> list[dict]:
     api_key = settings.get("anthropic_api_key")
     if not api_key:
         raise VisionError("Anthropic API key is not configured")
@@ -416,7 +427,7 @@ async def _detect_anthropic(images: list[tuple[bytes, str]], settings: dict) -> 
         }
         for image_bytes, mime in images
     ]
-    content.append({"type": "text", "text": _prompt_for(len(images))})
+    content.append({"type": "text", "text": _prompt_for(len(images), media_type_hint)})
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
@@ -458,7 +469,9 @@ async def _detect_anthropic(images: list[tuple[bytes, str]], settings: dict) -> 
         raise VisionError("The model returned an unreadable response — try again")
 
 
-async def _detect_openai(images: list[tuple[bytes, str]], settings: dict) -> list[dict]:
+async def _detect_openai(
+    images: list[tuple[bytes, str]], settings: dict, *, media_type_hint: str | None = None,
+) -> list[dict]:
     """Read spines via an OpenAI-compatible /chat/completions endpoint.
 
     Uses httpx directly (no SDK) so any compatible server works and respx can
@@ -474,7 +487,7 @@ async def _detect_openai(images: list[tuple[bytes, str]], settings: dict) -> lis
     model = settings.get("openai_vision_model") or DEFAULT_OPENAI_MODEL
     reasoning = settings.get("openai_vision_reasoning") or "low"
 
-    content: list[dict] = [{"type": "text", "text": _prompt_for(len(images)) + JSON_ONLY_SUFFIX}]
+    content: list[dict] = [{"type": "text", "text": _prompt_for(len(images), media_type_hint) + JSON_ONLY_SUFFIX}]
     for image_bytes, mime in images:
         b64 = base64.standard_b64encode(image_bytes).decode()
         content.append({
@@ -527,7 +540,9 @@ async def _detect_openai(images: list[tuple[bytes, str]], settings: dict) -> lis
         raise VisionError("The model returned an unreadable response — try again")
 
 
-async def _detect_ollama(image_bytes: bytes, settings: dict) -> list[dict]:
+async def _detect_ollama(
+    image_bytes: bytes, settings: dict, *, media_type_hint: str | None = None,
+) -> list[dict]:
     url = (settings.get("ollama_url") or DEFAULT_OLLAMA_URL).rstrip("/")
     model = settings.get("ollama_model") or DEFAULT_OLLAMA_MODEL
 
@@ -537,7 +552,7 @@ async def _detect_ollama(image_bytes: bytes, settings: dict) -> list[dict]:
         "format": "json",
         "messages": [{
             "role": "user",
-            "content": PROMPT + OLLAMA_RECOGNITION_SUFFIX + JSON_ONLY_SUFFIX,
+            "content": _prompt_for(1, media_type_hint) + OLLAMA_RECOGNITION_SUFFIX + JSON_ONLY_SUFFIX,
             "images": [base64.standard_b64encode(image_bytes).decode()],
         }],
     }

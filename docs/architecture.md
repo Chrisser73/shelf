@@ -25,7 +25,7 @@ Middleware, outermost first (`app/main.py`):
    whose version or username no longer matches the row is no session, and a
    refreshed token is minted from the row. Roles admin / editor / viewer
    enforced per route with `require_role`. Session length is
-   `SHELF_SESSION_DAYS` (default 7). The session cookie stays
+   `SHELF_SESSION_DAYS` (default 30). The session cookie stays
    `SameSite=Strict`, so a browser withholds it on a navigation that starts on
    another site. A cross-site **page** navigation without a session (`GET`,
    `Sec-Fetch-Mode: navigate`, `Sec-Fetch-Site: cross-site`) therefore gets one

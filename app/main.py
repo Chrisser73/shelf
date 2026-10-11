@@ -644,6 +644,17 @@ def _template_response_with_user(request_or_self, *args, **kwargs):
     from app.nav import visible_tabs
     user = getattr(request.state, "user", None)
     trash_nag = _trash_nag(user)
+    avatar_preferences = {}
+    user_theme = ""
+    if user:
+        # The account menu is part of every authenticated page, so its
+        # per-user symbol settings are resolved here rather than duplicated
+        # across every route that renders a template.
+        from app.database import get_db
+        from app.services.user_preferences import user_symbol_preferences, user_theme as get_user_theme
+        with get_db() as db:
+            avatar_preferences = user_symbol_preferences(db, user["id"])
+            user_theme = get_user_theme(db, user["id"])
     context = kwargs.get('context', None)
     if context is None:
         # Context is a positional arg (3rd after request, name)
@@ -652,11 +663,15 @@ def _template_response_with_user(request_or_self, *args, **kwargs):
                 a.setdefault("user", user)
                 a.setdefault("nav_tabs", visible_tabs(user))
                 a.setdefault("trash_nag", trash_nag)
+                a.setdefault("avatar_preferences", avatar_preferences)
+                a.setdefault("user_theme", user_theme)
                 break
     else:
         context.setdefault("user", user)
         context.setdefault("nav_tabs", visible_tabs(user))
         context.setdefault("trash_nag", trash_nag)
+        context.setdefault("avatar_preferences", avatar_preferences)
+        context.setdefault("user_theme", user_theme)
 
     return _original_template_response(request_or_self, *args, **kwargs)
 

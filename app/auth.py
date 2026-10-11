@@ -11,7 +11,6 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 
 from app.config import (
     SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRY_SECONDS,
-    REMEMBER_ME_EXPIRY_SECONDS,
 )
 from app.database import get_db
 
@@ -177,6 +176,7 @@ def create_token(
     display_name: str | None = None,
     token_version: int = 1,
     expiry_seconds: int = JWT_EXPIRY_SECONDS,
+    persistent: bool = True,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -187,6 +187,10 @@ def create_token(
         "tv": token_version,
         "iat": now,
         "exp": now + timedelta(seconds=expiry_seconds),
+        # Keep the browser-cookie choice in the signed token so a sliding
+        # refresh cannot silently turn a session-only login into a persisted
+        # one. Old tokens predate the field and remain persistent.
+        "persistent": persistent,
     }
     return jwt.encode(payload, get_secret_key(), algorithm=JWT_ALGORITHM)
 
@@ -203,27 +207,35 @@ def decode_token(token: str) -> dict | None:
 
 
 def _token_lifetime(token: str) -> int:
-    """Return a signed token's own lifetime, falling back to the normal week."""
+    """Return a signed token's own lifetime, falling back to the configured session."""
     payload = decode_token(token) or {}
     try:
-        lifetime = int(payload["exp"] - payload["iat"])
+        return int(payload["exp"] - payload["iat"])
     except (KeyError, TypeError, ValueError):
         return JWT_EXPIRY_SECONDS
-    return REMEMBER_ME_EXPIRY_SECONDS if lifetime >= REMEMBER_ME_EXPIRY_SECONDS else JWT_EXPIRY_SECONDS
+
+
+def _token_is_persistent(token: str) -> bool:
+    """Whether the signed token may outlive the current browser session."""
+    payload = decode_token(token) or {}
+    # Preserve current behaviour for tokens minted before this flag existed.
+    return payload.get("persistent", True) is not False
 
 
 def set_auth_cookie(request: Request, response: Response, token: str, csrf_token: str | None = None) -> None:
     # The browser-facing scheme: uvicorn rewrites it from X-Forwarded-Proto only
     # for SHELF_TRUST_PROXY peers, so an untrusted peer cannot claim https.
     secure = request.url.scheme == "https"
+    lifetime = _token_lifetime(token)
+    cookie_options = {"max_age": lifetime} if _token_is_persistent(token) else {}
     response.set_cookie(
         key="access_token",
         value=token,
         httponly=True,
         secure=secure,
         samesite="strict",
-        max_age=_token_lifetime(token),
         path="/",
+        **cookie_options,
     )
     # Set a paired CSRF token cookie (readable by JS for double-submit)
     if csrf_token is None:
@@ -234,8 +246,8 @@ def set_auth_cookie(request: Request, response: Response, token: str, csrf_token
         httponly=False,
         secure=secure,
         samesite="strict",
-        max_age=_token_lifetime(token),
         path="/",
+        **cookie_options,
     )
 
 
@@ -293,7 +305,8 @@ def should_refresh_token(request: Request, user: dict) -> str | None:
     if now > iat + half_life:
         return create_token(
             user["id"], user["username"], user["role"], user["display_name"], user["token_version"],
-            expiry_seconds=REMEMBER_ME_EXPIRY_SECONDS if (exp - iat) >= REMEMBER_ME_EXPIRY_SECONDS else JWT_EXPIRY_SECONDS,
+            expiry_seconds=JWT_EXPIRY_SECONDS,
+            persistent=_token_is_persistent(token),
         )
     return None
 

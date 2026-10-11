@@ -96,7 +96,11 @@ async def plan_photo(payload: PlanRequest):
 
 
 @router.post("/analyze")
-async def analyze_photo(photos: list[UploadFile] = File(...), job_id: str = Form("")):
+async def analyze_photo(
+    photos: list[UploadFile] = File(...),
+    job_id: str = Form(""),
+    media_type_hint: str = Form(""),
+):
     """Run the configured vision provider over an uploaded shelf photo.
 
     One file is the normal path; multiple files are overlapping tiles of a
@@ -113,6 +117,14 @@ async def analyze_photo(photos: list[UploadFile] = File(...), job_id: str = Form
     if task is not None:
         _ANALYSIS_TASKS[job_id] = task
     try:
+        hint = canonical_media_type(media_type_hint)
+        if hint not in MEDIA_TYPES:
+            hint = None
+        # Keep the no-hint call shape stable for provider integrations and
+        # test doubles.  The keyword is only meaningful when the user chose
+        # a real media type in the optional Intake control.
+        if hint:
+            return await _analyze_photo(photos, media_type_hint=hint)
         return await _analyze_photo(photos)
     except asyncio.CancelledError:
         logger.info("Intake analysis cancelled: %s", job_id)
@@ -126,7 +138,7 @@ async def analyze_photo(photos: list[UploadFile] = File(...), job_id: str = Form
         _ANALYSIS_TASKS.pop(job_id, None)
 
 
-async def _analyze_photo(photos: list[UploadFile]):
+async def _analyze_photo(photos: list[UploadFile], *, media_type_hint: str | None = None):
     """Implementation kept separate so cancellation registration is tiny."""
     images: list[tuple[bytes, str]] = []
     parts: list[str] = []
@@ -156,7 +168,7 @@ async def _analyze_photo(photos: list[UploadFile]):
         settings = get_all_settings(db)
 
     try:
-        books = await vision.detect_spines(images, settings)
+        books = await vision.detect_spines(images, settings, media_type_hint=media_type_hint)
     except vision.VisionError as e:
         return {"ok": False, "message": str(e)}
 

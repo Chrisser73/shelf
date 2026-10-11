@@ -534,6 +534,21 @@ class TestCopiesBlock:
     seam (issue #116). A merged item legitimately has copies in two places;
     before this the page showed only the first."""
 
+    def test_inline_location_editor_updates_the_item_location(self, admin_client, db):
+        basement = _insert_location(db, "Basement")
+        item_id = _insert_item(db, title="Location editor", isbn="9789000020011")
+        db.commit()
+
+        response = admin_client.post(
+            f"/api/items/{item_id}/quick-metadata",
+            data={"field": "location_id", "value": str(basement)},
+        )
+
+        assert response.json()["display"] == "Basement"
+        assert db.execute(
+            "SELECT location_id FROM items_live WHERE id = ?", (item_id,)
+        ).fetchone()["location_id"] == basement
+
     def test_one_placed_copy_renders_the_single_location_line(self, viewer_client, db):
         office = _insert_location(db, "Office / Bookcase 2 / Shelf 3")
         item_id = _insert_item(db, title="One Copy", isbn="9789000020034",
@@ -600,7 +615,7 @@ class TestCopiesBlock:
         assert "No location" in html
         assert "None" not in html
 
-    def test_an_item_with_no_copies_renders_neither_line_nor_heading(
+    def test_an_item_with_no_copies_keeps_the_location_line(
         self, viewer_client, db
     ):
         item_id = _insert_item(db, title="Unplaced", isbn="9789000020089")
@@ -608,7 +623,8 @@ class TestCopiesBlock:
 
         html = viewer_client.get(f"/item/{item_id}").text
 
-        assert "Location:" not in html
+        assert "Location:" in html
+        assert "No location" in html
         assert ">Copies<" not in html
 
     def test_a_located_item_with_no_copies_still_shows_its_location(
@@ -633,7 +649,7 @@ class TestCopiesBlock:
         assert ">Copies<" not in html
         assert 'id="item-copies" class="hidden"' not in html
 
-    def test_clearing_a_location_leaves_no_false_location_line(self, viewer_client, db):
+    def test_clearing_a_location_keeps_an_editable_no_location_line(self, viewer_client, db):
         """`update_item_fields(..., location_id=None)` keeps the primary copy
         and nulls its location (pinned in tests/test_item_copies.py). The page
         must show the same clean empty state it showed before this fragment
@@ -650,7 +666,8 @@ class TestCopiesBlock:
 
         html = viewer_client.get(f"/item/{item_id}").text
 
-        assert "Location:" not in html
+        assert "Location:" in html
+        assert "No location" in html
         assert ">Copies<" not in html
         assert "None" not in html
 
@@ -672,7 +689,7 @@ class TestCopiesBlock:
 
         assert "No location</span> · Fair · 2019-11-02 · Library sale · " in html
         assert f'data-testid="edit-copy-{only}"' in html
-        assert "Location:" not in html
+        assert "Location:" in html
         assert ">Copies<" not in html
 
     def test_a_lone_unlocated_copy_with_details_is_shown_to_a_viewer(
@@ -768,17 +785,15 @@ class TestCopiesBlock:
                 f"the block is hidden from an editor on item {item_id}"
             )
 
-    def test_the_empty_state_stays_hidden_for_a_viewer(self, viewer_client, db):
-        """The wrapper is only `hidden` when there is nothing to show *and*
-        the user cannot edit — otherwise an empty grid cell shifts the cells
-        after it into the wrong column."""
+    def test_the_empty_state_shows_no_location_for_a_viewer(self, viewer_client, db):
         item_id = _insert_item(db, title="Nothing", isbn="9789000020164")
         db.execute("DELETE FROM item_copies WHERE item_id = ?", (item_id,))
         db.commit()
 
         html = viewer_client.get(f"/item/{item_id}").text
 
-        assert 'id="item-copies" class="hidden"' in html
+        assert 'id="item-copies" class="hidden"' not in html
+        assert "Location:" in html and "No location" in html
 
     def test_the_add_form_offers_every_location_and_a_no_location_option(
         self, admin_client, db

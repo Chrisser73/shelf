@@ -1273,7 +1273,7 @@ async def update_quick_metadata(request: Request, item_id: int, _=Depends(requir
     form = await request.form()
     field = (form.get("field") or "").strip()
     value = (form.get("value") or "").strip()
-    allowed = {"title", "authors", "publisher", "platform", "region", "language", "publish_year"}
+    allowed = {"title", "authors", "publisher", "platform", "region", "language", "publish_year", "location_id"}
     if field not in allowed:
         return JSONResponse({"ok": False, "message": "Unknown metadata field"}, status_code=400)
     if field == "publish_year":
@@ -1288,7 +1288,20 @@ async def update_quick_metadata(request: Request, item_id: int, _=Depends(requir
             if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
                 return JSONResponse({"ok": False, "message": "Item not found"}, status_code=404)
             update_item_fields(db, item_id, {field: value})
-            if field == "platform" and value:
+            if field == "location_id":
+                if value is None:
+                    display = "No location"
+                else:
+                    location = db.execute(
+                        "SELECT name FROM locations WHERE id = ?", (value,)
+                    ).fetchone()
+                    display = location["name"] if location else "No location"
+                    from app.services.user_preferences import get_preference
+                    if str(value) == get_preference(
+                        db, request.state.user["id"], "default_location_id"
+                    ):
+                        display += " (default)"
+            elif field == "platform" and value:
                 display = get_game_platforms(db).get(value, value)
             elif field == "language" and value:
                 from app.services.national import SEARCH_LANGS

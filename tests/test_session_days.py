@@ -19,7 +19,7 @@ APP_DIR = Path(__file__).resolve().parent.parent
 @pytest.mark.parametrize("raw", [None, "", "   "])
 def test_unset_or_blank_is_default_and_silent(raw, caplog):
     with caplog.at_level(logging.WARNING):
-        assert session_days(raw) == 7
+        assert session_days(raw) == 30
     assert not caplog.records
 
 
@@ -33,7 +33,7 @@ def test_valid_values_pass_through(raw, expected, caplog):
 @pytest.mark.parametrize("raw", ["0", "-3", "366", "30.5", "abc"])
 def test_invalid_values_fall_back_with_one_warning(raw, caplog):
     with caplog.at_level(logging.WARNING):
-        assert session_days(raw) == 7
+        assert session_days(raw) == 30
     assert len(caplog.records) == 1
     assert "SHELF_SESSION_DAYS" in caplog.records[0].getMessage()
 
@@ -76,5 +76,5 @@ def test_env_var_sets_expiry_at_import(tmp_path):
     assert _expiry_in_subprocess(tmp_path, "30") == "2592000"
 
 
-def test_absent_env_var_is_seven_days(tmp_path):
-    assert _expiry_in_subprocess(tmp_path, None) == "604800"
+def test_absent_env_var_is_thirty_days(tmp_path):
+    assert _expiry_in_subprocess(tmp_path, None) == "2592000"

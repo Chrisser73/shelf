@@ -6,6 +6,26 @@ All notable changes to Shelf are documented here. The format follows
 
 ## [Unreleased]
 
+## V1.2.5 — Upgrade V1.2.5
+
+### Changed
+
+- **Sessions now remember users for 30 days by default.** An unset or empty
+  `SHELF_SESSION_DAYS` value uses 30 days; explicit values from 1 to 365 days
+  continue to work as before.
+- **Photo Intake can receive an optional media-type hint.** Choose a likely
+  media type before analyzing a photo to help recognition distinguish, for
+  example, games from Blu-rays. It is a clue only, so mixed-media photos can
+  still be classified item by item.
+- **Book creation keeps all selected defaults in one save.** Default tags,
+  default reading status and the Add/Wishlist choice now apply together rather
+  than creating a duplicate item after a rebase merge.
+- **Browse can now find items without a location.** Select **Missing location**
+  in the combined Missing filter to batch-assign their locations.
+- **The offline cache uses Shelf's actual icon files.** The service worker now
+  precaches the Android Chrome icons that are shipped with the app, and its
+  cache version was refreshed.
+
 ## [0.65.0] - 2026-10-11
 
 A Shelf CSV export was not a full backup of its own data. The export wrote each

@@ -18,6 +18,10 @@ function intakePage() {
         books: [],
         result: false,
         locationId: '',
+        // A user-supplied clue for the vision prompt.  It never overwrites
+        // the model's per-item classification, so mixed-media photos remain
+        // valid.
+        mediaTypeHint: '',
         owned: true,
         collectorCondition: '',
         // High-res tiling: filled from POST /api/intake/plan when the photo
@@ -340,6 +344,7 @@ function intakePage() {
                     ? window.crypto.randomUUID()
                     : '00000000-0000-4000-8000-' + Date.now().toString(16).padStart(12, '0').slice(-12);
                 form.append('job_id', this.activeAnalysisJob);
+                if (this.mediaTypeHint) form.append('media_type_hint', this.mediaTypeHint);
                 if (tiled && this.plan.tiles.length && this.imageEl) {
                     this.analysisPhase = 'Preparing detailed image sections…';
                     this.analysisProgress = 28;

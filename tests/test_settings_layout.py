@@ -47,6 +47,47 @@ def test_platform_logo_appearance_checkbox_reflects_the_saved_user_preference(ad
     assert "checked" not in logo_input[:200]
 
 
+def test_light_theme_is_a_per_user_appearance_preference(admin_client):
+    admin_client.post(
+        "/api/settings/appearance",
+        data={"theme": "light"},
+        follow_redirects=False,
+    )
+    html = admin_client.get("/settings").text
+    assert '<html lang="en" class="dark" data-theme="light">' in html
+    theme_input = html[html.index('name="theme" value="light"'):]
+    assert "checked" in theme_input[:200]
+
+    admin_client.post("/api/settings/appearance", data={}, follow_redirects=False)
+    html = admin_client.get("/settings").text
+    assert 'data-theme="light"' not in html
+
+
+def test_ocean_theme_is_a_per_user_appearance_preference(admin_client):
+    admin_client.post(
+        "/api/settings/appearance",
+        data={"theme": "ocean"},
+        follow_redirects=False,
+    )
+    html = admin_client.get("/settings").text
+    assert '<html lang="en" class="dark" data-theme="ocean">' in html
+    theme_input = html[html.index('name="theme" value="ocean"'):]
+    assert "checked" in theme_input[:200]
+
+
+def test_additional_dark_themes_are_available_per_user(admin_client):
+    for theme in ("navi", "sakura", "coffee", "retro", "matrix"):
+        admin_client.post(
+            "/api/settings/appearance",
+            data={"theme": theme},
+            follow_redirects=False,
+        )
+        html = admin_client.get("/settings").text
+        assert f'<html lang="en" class="dark" data-theme="{theme}">' in html
+        theme_input = html[html.index(f'name="theme" value="{theme}"'):]
+        assert "checked" in theme_input[:200]
+
+
 def test_admin_settings_entry_lives_in_account_menu(admin_client):
     html = admin_client.get("/browse").text
     assert 'data-testid="account-menu-button"' in html

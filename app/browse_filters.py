@@ -180,18 +180,24 @@ MISSING_VALUE_OPTIONS = {
     "language": "Missing language",
     "publish_year": "Missing year",
     "collector_condition": "Missing collector state",
+    "location": "Missing location",
 }
 
 
 def _missing_value_clause(value):
     if value == "cover":
         return _missing_cover("1")[0]
+    if value == "location":
+        # The UI label is deliberately plain "location", while the item
+        # table stores the primary location as a foreign-key id.
+        return "i.location_id IS NULL"
     condition = (
         f"(i.{value} IS NULL OR TRIM(i.{value}) = '')"
         if value != "publish_year" else "i.publish_year IS NULL"
     )
     # These metadata fields are game-only. Collector state is meaningful for
-    # physical non-book media, while title/creator/publisher work everywhere.
+    # physical non-book media, while title/creator/publisher and location work
+    # everywhere.
     if value in {"platform", "region", "language", "publish_year"}:
         condition = "i.media_type = 'video_game' AND " + condition
     elif value == "collector_condition":

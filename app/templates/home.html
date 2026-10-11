@@ -83,7 +83,9 @@
             <a href="/browse?platform_filter={{ platform.slug }}" class="bg-shelf-card border border-shelf-border rounded-lg p-5 hover:bg-shelf-hover transition-colors text-center grid items-center gap-4 gap-y-2">
                 <p class="text-shelf-muted text-sm truncate">{{ platform.name }}</p>
                 {% if platform.logo_path %}
-                <img src="/static/{{ platform.logo_path }}" alt="" class="max-h-6 w-full object-contain" style="max-height: 84px">
+                <span class="platform-logo-surface flex min-h-24 w-full items-center justify-center rounded-md px-3 py-2">
+                    <img src="/static/{{ platform.logo_path }}" alt="" class="max-h-6 w-full object-contain" style="max-height: 84px">
+                </span>
                 {% endif %}
 
                 <p class="text-3xl font-bold">{{ platform.item_count }}</p>
@@ -167,7 +169,7 @@
             {% for item in recent_items %}
             <a href="/item/{{ item.id }}" class="group relative block">
                 {% if collection_appearance.show_platform_logo and item.platform_logo_path %}
-                <div class="absolute top-2 left-2 z-10 w-12 h-12 rounded bg-shelf-border/80 flex items-center justify-center shadow">
+                <div class="platform-logo-surface absolute top-2 left-2 z-10 w-12 h-12 rounded bg-shelf-border/80 flex items-center justify-center shadow">
                     <img src="/static/{{ item.platform_logo_path }}" alt="" class="p-2 w-12 h-12 object-contain">
                 </div>
                 {% endif %}

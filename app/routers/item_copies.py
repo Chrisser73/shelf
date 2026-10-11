@@ -75,6 +75,10 @@ def _all_locations(db):
 def _render_block(request: Request, db, item_id: int):
     """Re-render the collapsed Copies block. `user` is injected by the
     TemplateResponse wrapper in app/main.py, so it is not passed here."""
+    from app.services.user_preferences import get_preference
+    default_location_id = get_preference(
+        db, request.state.user["id"], "default_location_id"
+    )
     return request.app.state.templates.TemplateResponse(
         request,
         "fragments/item_copies.html",
@@ -83,6 +87,7 @@ def _render_block(request: Request, db, item_id: int):
             "item": _item_with_location(db, item_id),
             "copies": item_copies.copies_for_item(db, item_id),
             "locations": _all_locations(db),
+            "default_location_id": default_location_id,
         },
     )
 

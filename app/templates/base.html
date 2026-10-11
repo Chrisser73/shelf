@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en" class="dark"{% if user_theme %} data-theme="{{ user_theme }}"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Shelf{% endblock %}</title>
     <link rel="manifest" href="/static/manifest.webmanifest">
-    <meta name="theme-color" content="#0f1117">
+    <meta name="theme-color" content="{% if user_theme == 'light' %}#f5f7fb{% elif user_theme == 'navi' %}#0a1018{% elif user_theme == 'ocean' %}#0b1418{% elif user_theme == 'sakura' %}#1a1018{% elif user_theme == 'coffee' %}#1a120f{% elif user_theme == 'retro' %}#241c12{% elif user_theme == 'matrix' %}#07110b{% else %}#0f1117{% endif %}">
     <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
     <link rel="icon" href="/static/icons/favicon-32x32.png" type="image/png" sizes="32x32">
     <link rel="icon" href="/static/icons/favicon-16x16.png" type="image/png" sizes="16x16">

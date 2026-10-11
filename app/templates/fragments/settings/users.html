@@ -11,6 +11,41 @@
          x-init="loadUsers()">
         <h2 class="text-lg font-semibold mb-4">Users</h2>
 
+        <form action="/api/settings/user-symbol" method="post" class="mb-6 rounded-lg border border-shelf-border bg-shelf-bg p-4">
+            <h3 class="text-sm font-semibold text-shelf-text">Your user symbol</h3>
+            <p class="mt-1 text-xs text-shelf-muted">This is saved per user and appears in the header and Account menu.</p>
+            {% if request.query_params.get('user_symbol_error') == 'invalid' %}
+            <p class="mt-2 text-sm text-shelf-error">Colours must use a six-digit hex value, for example #5B5BF7.</p>
+            {% endif %}
+            <label class="mt-3 flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" name="user_symbol_show_initial" value="1"
+                       {% if settings.get('user_symbol_show_initial') == '1' %}checked{% endif %}
+                       class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                Show first letter instead of icon
+            </label>
+            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                    <label class="block text-xs text-shelf-muted mb-1">Background colour</label>
+                    <div class="flex items-center gap-2">
+                        <input type="color" value="{{ settings.get('user_symbol_background') or '#242836' }}" data-color-picker-for="user-symbol-background"
+                               aria-label="Choose background colour" class="h-9 w-10 shrink-0 cursor-pointer rounded border border-shelf-border bg-shelf-card p-1">
+                        <input id="user-symbol-background" type="text" name="user_symbol_background" value="{{ settings.get('user_symbol_background', '') }}" placeholder="#1F2937" pattern="#[0-9A-Fa-f]{6}" data-color-text
+                               class="min-w-0 flex-1 bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text placeholder-shelf-muted/50 focus:outline-none focus:border-shelf-accent focus:ring-1 focus:ring-shelf-accent">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs text-shelf-muted mb-1">Text colour</label>
+                    <div class="flex items-center gap-2">
+                        <input type="color" value="{{ settings.get('user_symbol_text') or '#818cf8' }}" data-color-picker-for="user-symbol-text"
+                               aria-label="Choose text colour" class="h-9 w-10 shrink-0 cursor-pointer rounded border border-shelf-border bg-shelf-card p-1">
+                        <input id="user-symbol-text" type="text" name="user_symbol_text" value="{{ settings.get('user_symbol_text', '') }}" placeholder="#8B8BFF" pattern="#[0-9A-Fa-f]{6}" data-color-text
+                               class="min-w-0 flex-1 bg-shelf-card border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text placeholder-shelf-muted/50 focus:outline-none focus:border-shelf-accent focus:ring-1 focus:ring-shelf-accent">
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="mt-3 px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">Save user symbol</button>
+        </form>
+
         <!-- User list -->
         <div class="space-y-2 mb-6">
             <template x-for="u in users" :key="u.id">

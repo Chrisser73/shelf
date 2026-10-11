@@ -580,6 +580,22 @@ class TestAnalyzeEndpoint:
         resp = self._upload(admin_client)
         assert resp.json() == {"ok": True, "books": [{"title": "Dune", "authors": "Frank Herbert"}]}
 
+    def test_media_type_hint_reaches_the_vision_provider(self, admin_client, monkeypatch):
+        seen = {}
+
+        async def fake_detect(images, settings, *, media_type_hint=None):
+            seen["hint"] = media_type_hint
+            return [{"title": "Dune", "authors": "Frank Herbert"}]
+
+        monkeypatch.setattr(vision, "detect_spines", fake_detect)
+        response = admin_client.post(
+            "/api/intake/analyze",
+            files={"photos": ("shelf.jpg", FAKE_JPEG, "image/jpeg")},
+            data={"media_type_hint": "video_game"},
+        )
+        assert response.json()["ok"] is True
+        assert seen["hint"] == "video_game"
+
     def test_game_existing_marker_requires_the_same_platform(self, admin_client, db, monkeypatch):
         """A Switch scan must not offer the separate Switch 2 edition for replacement."""
         switch2_id = _insert_item(

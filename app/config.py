@@ -339,7 +339,7 @@ DEFAULT_PAGE_SIZE = 60
 # Auth
 SECRET_KEY = os.environ.get("SECRET_KEY", "")  # auto-generated into DATA_DIR/signing.key if empty
 JWT_ALGORITHM = "HS256"
-SESSION_DAYS_DEFAULT = 7
+SESSION_DAYS_DEFAULT = 30
 SESSION_DAYS_MAX = 365
 
 

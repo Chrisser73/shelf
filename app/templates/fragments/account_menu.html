@@ -3,11 +3,16 @@
     <button type="button" @click="toggle()"
             data-testid="account-menu-button" aria-label="Account menu" aria-haspopup="menu" :aria-expanded="open"
             class="flex min-w-0 w-auto items-center gap-2 rounded-lg px-2 py-1.5 text-shelf-muted hover:text-white hover:bg-shelf-hover transition-colors">
-        <span class="w-8 h-8 shrink-0 rounded-full bg-shelf-hover border border-shelf-border flex items-center justify-center text-shelf-accent2">
+        <span class="w-8 h-8 shrink-0 rounded-full border border-shelf-border flex items-center justify-center {% if not avatar_preferences.background %}bg-shelf-hover{% endif %} {% if not avatar_preferences.text %}text-shelf-accent2{% endif %}"
+              {% if avatar_preferences.background or avatar_preferences.text %}style="{% if avatar_preferences.background %}background-color: {{ avatar_preferences.background }};{% endif %}{% if avatar_preferences.text %}color: {{ avatar_preferences.text }};{% endif %}"{% endif %}>
+            {% if avatar_preferences.show_initial %}
+            <span style="font-size: 20px; font-weight: bold; line-height: 1;">{{ (user.display_name or user.username)[0]|upper }}</span>
+            {% else %}
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round"
                                                                                              stroke-linejoin="round"
                                                                                              stroke-width="2"
                                                                                              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            {% endif %}
         </span>
         <span class="hidden min-w-0 flex-1 text-left leading-tight sm:block">
             <span class="block text-sm font-medium text-shelf-text truncate">{{ user.display_name or user.username }}</span>
@@ -87,6 +92,9 @@
          class="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center">
         <div class="bg-shelf-card border border-shelf-border rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl"
              data-display-name="{{ user.display_name or user.username }}"
+             data-user-symbol-background="{{ avatar_preferences.background }}"
+             data-user-symbol-text="{{ avatar_preferences.text }}"
+             data-user-symbol-show-initial="{{ '1' if avatar_preferences.show_initial else '0' }}"
              x-data="accountModal">
             <div class="flex items-center justify-between mb-5">
                 <div>
@@ -127,6 +135,44 @@
                     <label class="block text-sm font-medium text-shelf-muted mb-1">Role</label>
                     <input type="text" value="{{ user.role|capitalize }}" disabled
                            class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-muted cursor-not-allowed">
+                </div>
+                <div class="border-t border-shelf-border pt-4 space-y-3">
+                    <div>
+                        <p class="text-sm font-medium text-shelf-text">User symbol</p>
+                    </div>
+                    <label class="flex items-center gap-2 text-sm cursor-pointer">
+                        <input x-model="userSymbolShowInitial" type="checkbox"
+                               class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                        Show first letter instead of icon
+                    </label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-shelf-muted mb-1">Background colour</label>
+                            <div class="flex items-center gap-2">
+                                <input x-model="userSymbolBackgroundPicker" @input="setUserSymbolBackground" type="color" aria-label="Choose background colour"
+                                       class="h-9 w-10 shrink-0 cursor-pointer rounded border border-shelf-border bg-shelf-bg p-1">
+                                <input x-model="userSymbolBackground" @input="syncUserSymbolBackgroundPicker" type="text" placeholder="#1F2937" pattern="#[0-9A-Fa-f]{6}"
+                                       class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text placeholder-shelf-muted/50 focus:outline-none focus:border-shelf-accent focus:ring-1 focus:ring-shelf-accent">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-shelf-muted mb-1">Text colour</label>
+                            <div class="flex items-center gap-2">
+                                <input x-model="userSymbolTextPicker" @input="setUserSymbolText" type="color" aria-label="Choose text colour"
+                                       class="h-9 w-10 shrink-0 cursor-pointer rounded border border-shelf-border bg-shelf-bg p-1">
+                                <input x-model="userSymbolText" @input="syncUserSymbolTextPicker" type="text" placeholder="#8B8BFF" pattern="#[0-9A-Fa-f]{6}"
+                                       class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text placeholder-shelf-muted/50 focus:outline-none focus:border-shelf-accent focus:ring-1 focus:ring-shelf-accent">
+                            </div>
+                        </div>
+                    </div>
+                    <template x-if="userSymbolResult">
+                        <p :class="userSymbolResult.ok ? 'text-shelf-success' : 'text-shelf-error'" class="text-sm"
+                           x-text="userSymbolResult.message"></p>
+                    </template>
+                    <button type="button" @click="saveUserSymbol()" :disabled="userSymbolSaving"
+                            class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors disabled:opacity-50">
+                        Save user symbol
+                    </button>
                 </div>
                 <template x-if="nameResult">
                     <p :class="nameResult.ok ? 'text-shelf-success' : 'text-shelf-error'" class="text-sm"

@@ -166,6 +166,12 @@ class TestBuildWhere:
         assert bf.build_where({"lent_out": "1"})[0] != ""
         assert bf.build_where({"lent_out": "0"}) == ("", [])
 
+    def test_missing_location_is_a_combinable_missing_value(self):
+        where, params = bf.build_where({"missing_value": "location,cover"})
+        assert "i.location_id IS NULL" in where
+        assert "i.cover_path IS NULL" in where
+        assert params == []
+
     def test_search_folds_accents_without_losing_non_latin_titles(self, db):
         db.execute(
             "INSERT INTO items (title, isbn, media_type, source) VALUES (?, ?, ?, ?)",

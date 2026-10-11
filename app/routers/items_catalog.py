@@ -328,14 +328,16 @@ async def add_book_from_search(
             )
 
         try:
-            with tags_svc.default_tags(tags):
+            # One write path carries all three creation intents.  Saving once
+            # before entering the default-status context was a bad rebase
+            # merge: it either raised a duplicate error or discarded the
+            # requested wishlist state and reading status.
+            with tags_svc.default_tags(tags), \
+                 item_write.default_reading_status(reading_status):
                 item_id = items_common._save_item(
                     metadata, isbn13, media_type, location_id, source, hc_ids,
                     owned=(mode != "wishlist"),
                 )
-            with tags_svc.default_tags(tags), \
-                 item_write.default_reading_status(reading_status):
-                item_id = items_common._save_item(metadata, isbn13, media_type, location_id, source, hc_ids)
         except sqlite3.IntegrityError:
             # A rival add (this same route, or a scan of the same ISBN) can
             # win the insert during this request's own metadata lookup — the

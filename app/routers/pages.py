@@ -443,6 +443,10 @@ async def item_detail(
         locations = db.execute(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
+        from app.services.user_preferences import get_preference
+        default_location_id = get_preference(
+            db, request.state.user["id"], "default_location_id"
+        )
 
         from app.services.tags import get_item_tags, get_all_tags
         item_tags = get_item_tags(db, item_id)
@@ -491,6 +495,7 @@ async def item_detail(
             "back": back,
             "copies": copies,
             "locations": locations,
+            "default_location_id": default_location_id,
             "item_tags": item_tags,
             "all_tags": all_tags,
             "media_types": MEDIA_TYPES,
@@ -825,6 +830,16 @@ async def settings(request: Request, _=Depends(require_role("viewer"))):
         settings["default_location_id"] = get_preference(
             db, request.state.user["id"], "default_location_id"
         )
+        settings["user_symbol_background"] = get_preference(
+            db, request.state.user["id"], "user_symbol_background"
+        )
+        settings["user_symbol_text"] = get_preference(
+            db, request.state.user["id"], "user_symbol_text"
+        )
+        settings["user_symbol_show_initial"] = get_preference(
+            db, request.state.user["id"], "user_symbol_show_initial"
+        )
+        settings["theme"] = get_preference(db, request.state.user["id"], "theme")
         for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types"):
             settings[f"home_tile:{key}"] = get_preference(db, request.state.user["id"], f"home_tile:{key}", "1")
         locations = db.execute(

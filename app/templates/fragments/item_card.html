@@ -2,7 +2,7 @@
     <a href="/item/{{ item.id }}" class="group relative block" data-item-id="{{ item.id }}"
        @click.prevent="openOrToggle({{ item.id }}, '/item/{{ item.id }}', $event)">
         {% if show_platform_logo_in_collection and item.platform and platform_logo_paths.get(item.platform) %}
-        <div class="absolute top-2 left-2 z-10 w-12 h-12 rounded bg-shelf-border/80 flex items-center justify-center shadow">
+        <div class="platform-logo-surface absolute top-2 left-2 z-10 w-12 h-12 rounded bg-shelf-border/80 flex items-center justify-center shadow">
             <img src="/static/{{ platform_logo_paths.get(item.platform) }}" alt="" class="p-2 w-12 h-12 object-contain">
         </div>
         {% endif %}

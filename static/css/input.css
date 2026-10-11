@@ -26,8 +26,111 @@
 
 /* App-wide styles previously inlined in base.html */
 body {
-    background-color: #0f1117;
-    color: #e2e8f0;
+    background-color: var(--color-shelf-bg);
+    color: var(--color-shelf-text);
+}
+
+/* Themes only replace the neutral and accent palette. Semantic success,
+   warning and error colours intentionally stay the same across themes. */
+:root[data-theme="light"] {
+    --color-shelf-bg: #f5f7fb;
+    --color-shelf-card: #ffffff;
+    --color-shelf-hover: #e8ecf5;
+    --color-shelf-accent: #4f46e5;
+    --color-shelf-accent2: #6366f1;
+    --color-shelf-text: #172033;
+    --color-shelf-muted: #64748b;
+    --color-shelf-border: #d7ddea;
+}
+
+/* Navi keeps Shelf's dark contrast, replacing its violet accents with a
+   balanced blue/petrol palette. */
+:root[data-theme="navi"] {
+    --color-shelf-bg: #0a1018;
+    --color-shelf-card: #111c2a;
+    --color-shelf-hover: #192b3b;
+    --color-shelf-accent: #0d8fb5;
+    --color-shelf-accent2: #38bdf8;
+    --color-shelf-text: #e4eef8;
+    --color-shelf-muted: #91a9c3;
+    --color-shelf-border: #283b54;
+}
+
+/* Ocean is the richer green-petrol counterpart to Navi. */
+:root[data-theme="ocean"] {
+    --color-shelf-bg: #0b1418;
+    --color-shelf-card: #10252c;
+    --color-shelf-hover: #16343a;
+    --color-shelf-accent: #0ea5a8;
+    --color-shelf-accent2: #38bdf8;
+    --color-shelf-text: #e1f4f3;
+    --color-shelf-muted: #8fb6b5;
+    --color-shelf-border: #25464e;
+}
+
+/* Sakura uses a deep plum surface with soft pink accents. */
+:root[data-theme="sakura"] {
+    --color-shelf-bg: #1a1018;
+    --color-shelf-card: #2a1425;
+    --color-shelf-hover: #3a1c33;
+    --color-shelf-accent: #ec4899;
+    --color-shelf-accent2: #f472b6;
+    --color-shelf-text: #fff0f7;
+    --color-shelf-muted: #d8a2ba;
+    --color-shelf-border: #59314d;
+}
+
+/* Coffee combines espresso surfaces with warm caramel highlights. */
+:root[data-theme="coffee"] {
+    --color-shelf-bg: #1a120f;
+    --color-shelf-card: #2b1c17;
+    --color-shelf-hover: #402a20;
+    --color-shelf-accent: #c77a3d;
+    --color-shelf-accent2: #e6a563;
+    --color-shelf-text: #fff1e5;
+    --color-shelf-muted: #d0a989;
+    --color-shelf-border: #624332;
+}
+
+/* Retro has warm arcade-brown panels and a classic amber accent. */
+:root[data-theme="retro"] {
+    --color-shelf-bg: #241c12;
+    --color-shelf-card: #382b1b;
+    --color-shelf-hover: #514026;
+    --color-shelf-accent: #e0a72f;
+    --color-shelf-accent2: #f3c75b;
+    --color-shelf-text: #fff4ce;
+    --color-shelf-muted: #d1bd80;
+    --color-shelf-border: #705a31;
+}
+
+/* Matrix is a near-black interface with luminous terminal-green accents. */
+:root[data-theme="matrix"] {
+    --color-shelf-bg: #07110b;
+    --color-shelf-card: #0b1d12;
+    --color-shelf-hover: #12301d;
+    --color-shelf-accent: #22c55e;
+    --color-shelf-accent2: #4ade80;
+    --color-shelf-text: #e4ffe9;
+    --color-shelf-muted: #8bc69a;
+    --color-shelf-border: #1d5a32;
+}
+
+/* Text-white is used for the active navigation entry. In the light palette
+   its neutral hover background needs the normal foreground instead. */
+:root[data-theme="light"] .bg-shelf-hover.text-white {
+    color: var(--color-shelf-text);
+}
+
+:root[data-theme="light"] .hover\:text-white:hover {
+    color: var(--color-shelf-text);
+}
+
+/* The bundled platform logos are white SVGs. Give their dedicated stage a
+   stable dark surface in the light palette without darkening the whole card. */
+:root[data-theme="light"] .platform-logo-surface {
+    background-color: #334155;
+    border-color: #475569;
 }
 
 a, button, select {
@@ -176,11 +279,11 @@ button:disabled, select:disabled {
 }
 
 ::-webkit-scrollbar-track {
-    background: #0f1117;
+    background: var(--color-shelf-bg);
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #2d3148;
+    background: var(--color-shelf-border);
     border-radius: 4px;
 }
 

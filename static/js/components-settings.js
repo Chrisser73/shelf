@@ -950,6 +950,22 @@ document.addEventListener('submit', function (e) {
     } catch (_) { /* private browsing may disable session storage */ }
 });
 
+// Keep the native colour pickers in Settings → Users and their editable hex
+// fields in sync. The picker always has a valid fallback colour, while an
+// empty text field remains meaningful: it restores Shelf's standard colour.
+document.addEventListener('input', function (e) {
+    const picker = e.target.closest('[data-color-picker-for]');
+    if (picker) {
+        const textField = document.getElementById(picker.dataset.colorPickerFor);
+        if (textField) textField.value = picker.value;
+        return;
+    }
+    const textField = e.target.closest('[data-color-text]');
+    if (!textField || !/^#[0-9a-fA-F]{6}$/.test(textField.value)) return;
+    const pickerForField = document.querySelector('[data-color-picker-for="' + textField.id + '"]');
+    if (pickerForField) pickerForField.value = textField.value;
+});
+
 document.addEventListener('DOMContentLoaded', function () {
     if (!document.querySelector('[data-settings-page]')) return;
     try {
