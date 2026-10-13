@@ -118,6 +118,18 @@ class TestBuildWhere:
             where, params = bf.build_where(values, exclude=f.name)
             assert where.count("?") == len(params)
 
+    def test_author_is_an_exists_over_the_index(self):
+        where, params = bf.build_where({"author_filter": "7"})
+        assert "EXISTS (SELECT 1 FROM item_authors ia" in where
+        assert "ia.item_id = i.id" in where
+        assert params == [7]
+
+    @pytest.mark.parametrize("value", ["abc", "1.5", "-", "9" * 22])
+    def test_an_uncastable_author_matches_nothing(self, value):
+        # Never None: that would drop the condition and show everything under
+        # an active Author chip.
+        assert bf.build_where({"author_filter": value}) == ("WHERE 1 = 0", [])
+
     def test_location_is_cast_to_int(self):
         _where, params = bf.build_where({"location_filter": "7"})
         assert params == [7]
@@ -153,6 +165,21 @@ class TestBuildWhere:
     def test_lent_out_only_applies_when_set(self):
         assert bf.build_where({"lent_out": "1"})[0] != ""
         assert bf.build_where({"lent_out": "0"}) == ("", [])
+
+    def test_missing_location_is_a_combinable_missing_value(self):
+        where, params = bf.build_where({"missing_value": "location,cover"})
+        assert "i.location_id IS NULL" in where
+        assert "i.cover_path IS NULL" in where
+        assert params == []
+
+    def test_search_folds_accents_without_losing_non_latin_titles(self, db):
+        db.execute(
+            "INSERT INTO items (title, isbn, media_type, source) VALUES (?, ?, ?, ?)",
+            ("Pokémon Shining Pearl", "9780000000026", "video_game", "test"),
+        )
+        where, params = bf.build_where({"q": "Poke"})
+        rows = db.execute(f"SELECT i.title FROM items_live i {where}", params).fetchall()
+        assert [row["title"] for row in rows] == ["Pokémon Shining Pearl"]
 
 
 class TestValuesFrom:

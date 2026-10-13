@@ -193,10 +193,9 @@ def _boot_server(
     The body `live_server` used to inline, so there is one implementation
     rather than two. Environment construction order is load-bearing: copy
     `os.environ`, drop every name in `clear_env`, apply the fixed E2E values
-    (`DATA_DIR`, `SHELF_DISABLE_RATE_LIMIT`, `SHELF_DEV_INSECURE_COOKIES`,
-    `SHELF_DISABLE_COVER_ENRICH`, `SHELF_UPC_LOOKUP_URL`), then apply
-    `env_extra` last — so a caller can always opt back in to something
-    `clear_env` removed.
+    (`DATA_DIR`, `SHELF_DISABLE_RATE_LIMIT`, `SHELF_DISABLE_COVER_ENRICH`,
+    `SHELF_UPC_LOOKUP_URL`), then apply `env_extra` last — so a caller can
+    always opt back in to something `clear_env` removed.
 
     `upc_stub_url` is keyword-only and **required** on purpose. Both callers
     supply it from the `upc_stub` fixture, so every E2E server gets the stub
@@ -213,11 +212,13 @@ def _boot_server(
     env.update({
         "DATA_DIR": str(data_dir),
         "SHELF_DISABLE_RATE_LIMIT": "1",
-        "SHELF_DEV_INSECURE_COOKIES": "1",
         # Disables the cover-enrichment queue worker and its startup requeue
         # too, so E2E makes no outbound cover fetches. enqueue() still works —
         # jobs simply sit, which is what the cover-poll tests rely on.
         "SHELF_DISABLE_COVER_ENRICH": "1",
+        # The server outlives the price-alert loop's first five-minute sleep; a
+        # test that saved an ISBNdb key beside a wishlisted ISBN would call it live.
+        "SHELF_DISABLE_PRICE_ALERTS": "1",
         # The UPC Item DB stub, in the *fixed* block rather than in `env_extra`:
         # every E2E server gets it with no test opting in, and `clear_env`
         # cannot remove it. `env_extra` is applied after, so a test that wants
@@ -277,7 +278,10 @@ def server_factory(upc_stub):
     `os.environ` is not an unconfigured baseline: `SECRET_ENV_VARS` values beat
     the DB row, so on a host that exports ABS_URL/ABS_TOKEN a nominally plain
     server renders Audiobookshelf as configured and a configuration-matrix test
-    fails for the host's state. A caller opts back in through `env_extra`.
+    fails for the host's state. A caller opts back in through `env_extra`. The
+    factory also owns uvicorn's forwarded-header trust setting for the same
+    reason: a host `FORWARDED_ALLOW_IPS` is not an unconfigured baseline either,
+    so it is cleared alongside the secrets rather than left to leak in.
 
     Iterate `.values()` — SECRET_ENV_VARS is settings-key -> ENV_NAME, and
     `for name in SECRET_ENV_VARS` would yield 'abs_url' and clear nothing, a
@@ -294,7 +298,7 @@ def server_factory(upc_stub):
             return stack.enter_context(
                 _boot_server(
                     env_extra,
-                    clear_env=SECRET_ENV_VARS.values(),
+                    clear_env=(*SECRET_ENV_VARS.values(), "FORWARDED_ALLOW_IPS"),
                     upc_stub_url=upc_stub["url"],
                 )
             )
@@ -662,11 +666,15 @@ def assert_page_clean(pg):
     raise AssertionError(message)
 
 
-def _run_setup_wizard(browser, base_url: str) -> dict:
+def _run_setup_wizard(browser, base_url: str, profile: str = "everything") -> dict:
     """Run the setup wizard against `base_url`; return the credentials dict.
 
     The body `setup_admin` used to inline, so a test driving a throwaway
     `server_factory` server can reach it without a session fixture.
+
+    `profile` defaults to Everything, not the form's Standard, so the session
+    server and every `server_factory` caller keep the all-on baseline the
+    suite was written against. A test that means a smaller install passes it.
 
     G44: `attach_page_guard(ctx.new_page())` on one line — the lint requires
     both calls on the same line, and this is a Page construction site like any
@@ -680,6 +688,7 @@ def _run_setup_wizard(browser, base_url: str) -> dict:
     page.fill("input[name=display_name]", ADMIN_DISPLAY)
     page.fill("input[name=password]", ADMIN_PASSWORD)
     page.fill("input[name=password_confirm]", ADMIN_PASSWORD)
+    page.check(f'input[name=profile][value="{profile}"]')
     page.click("button[type=submit]")
     page.wait_for_url(f"{base_url}/", timeout=10_000)
     assert_page_clean(page)

@@ -9,10 +9,12 @@ from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import HTTP_TIMEOUT, MEDIA_TYPES, MUSIC_MEDIA_TYPES
-from app.database import get_db
-from app.services import covers, music_catalog, musicbrainz
+from app.database import get_db, get_setting
+from app.services import covers, discogs, discogs_selection, music_catalog, musicbrainz
 from app.services import upc as upc_svc
+from app.services import item_write
 from app.services.item_write import insert_item, update_item_fields
 from app.services.write_targets import UnknownLocationError, validated_location_id
 
@@ -64,6 +66,17 @@ def _provider_error(result) -> str | None:
     }.get(result.outcome, "MusicBrainz search failed.")
 
 
+def _discogs_error(result) -> str | None:
+    if result is None or result.found:
+        return None
+    return {
+        "rate_limited": "Discogs is rate-limiting requests. Try again shortly.",
+        "transport_failed": "Discogs could not be reached.",
+        "rejected": "Discogs rejected the request. Check the configured token.",
+        "no_match": "No matching Discogs releases were found.",
+    }.get(result.outcome, "Discogs lookup failed.")
+
+
 def _music_types_sql() -> tuple[str, tuple[str, ...]]:
     values = tuple(sorted(MUSIC_MEDIA_TYPES))
     return ",".join("?" for _ in values), values
@@ -100,6 +113,7 @@ async def music_page(
     barcode: str = Query(""),
     catalog_number: str = Query(""),
     _=Depends(require_role("viewer")),
+    __=Depends(require_feature("music")),
 ):
     """Browse catalogued music and search exact MusicBrainz releases."""
     q = q.strip()[:200]
@@ -175,19 +189,28 @@ async def add_music_release(
     location_id: int | None = Form(None),
     owned: int = Form(1),
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("music")),
 ):
     """Add one exact MusicBrainz release to Shelf."""
     release_id = release_id.strip()
     if not release_id:
         return RedirectResponse("/music", status_code=303)
 
+    # The earliest guard that can return the row, and it reads
+    # `music_releases` with no items join — so with a trashed item this used
+    # to redirect to a page that bounces to Browse, before the funnel was
+    # ever reached. The restore goes here, at the earliest guard (G100), and
+    # again in the IntegrityError catch below.
     with get_db() as db:
         existing = db.execute(
             "SELECT item_id FROM music_releases WHERE musicbrainz_release_id = ?",
             (release_id,),
         ).fetchone()
+        restored = bool(existing) and item_write.restore_item(db, existing["item_id"])
     if existing:
-        return RedirectResponse(f"/music/item/{existing['item_id']}", status_code=303)
+        flag = "?restored=1" if restored else ""
+        return RedirectResponse(
+            f"/music/item/{existing['item_id']}{flag}", status_code=303)
 
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         result = await musicbrainz.lookup_release(release_id, client)
@@ -221,7 +244,13 @@ async def add_music_release(
                 wishlisted=not owned,
                 source="musicbrainz",
             )
-            music_catalog.save_release(db, item_id, release)
+            # A restore through the barcode keeps its stored release record,
+            # as a live twin would (it writes nothing). One that has none —
+            # added by UPC scan, then trashed — still gets this release.
+            if not (item_write.was_restored(item_id) and db.execute(
+                "SELECT 1 FROM music_releases WHERE item_id = ?", (item_id,)
+            ).fetchone()):
+                music_catalog.save_release(db, item_id, release)
     except UnknownLocationError:
         return HTMLResponse("Selected location no longer exists", status_code=400)
     except sqlite3.IntegrityError:
@@ -236,20 +265,30 @@ async def add_music_release(
                     (provider_barcode, media_type),
                 ).fetchone()
         if existing:
+            with get_db() as db:
+                restored = item_write.restore_item(db, existing["item_id"])
+            flag = "?restored=1" if restored else ""
             return RedirectResponse(
-                f"/music/item/{existing['item_id']}", status_code=303
+                f"/music/item/{existing['item_id']}{flag}", status_code=303
             )
         raise
 
+    restored = item_write.was_restored(item_id)
+    # Artwork runs either way: `_apply_release_artwork` already refuses to
+    # overwrite an existing cover, so a restored row keeps the user's and a
+    # restored row that never had one still gets artwork.
     await _apply_release_artwork(item_id, release_id)
-    return RedirectResponse(f"/music/item/{item_id}", status_code=303)
+    flag = "?restored=1" if restored else ""
+    return RedirectResponse(f"/music/item/{item_id}{flag}", status_code=303)
 
 
 @router.get("/music/item/{item_id}")
 async def music_item_page(
     request: Request,
     item_id: int,
+    restored: int = 0,
     _=Depends(require_role("viewer")),
+    __=Depends(require_feature("music")),
 ):
     with get_db() as db:
         item = db.execute(
@@ -262,7 +301,9 @@ async def music_item_page(
     return request.app.state.templates.TemplateResponse(
         request,
         "music_item.html",
-        {"item": item, "release": release, "media_types": MEDIA_TYPES},
+        {"item": item, "release": release, "media_types": MEDIA_TYPES,
+         # A boolean flag selects a template arm; nothing is echoed (G58).
+         "restored": bool(restored)},
     )
 
 
@@ -270,6 +311,7 @@ async def music_item_page(
 async def refresh_music_release(
     item_id: int,
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("music")),
 ):
     with get_db() as db:
         item = db.execute(
@@ -304,4 +346,148 @@ async def refresh_music_release(
         music_catalog.save_release(db, item_id, refreshed)
 
     await _apply_release_artwork(item_id, release_id)
+    return RedirectResponse(f"/music/item/{item_id}", status_code=303)
+
+
+@router.get("/api/music/items/{item_id}/discogs")
+async def discogs_panel(
+    request: Request,
+    item_id: int,
+    search: int = Query(0),
+    details: int = Query(0),
+    q: str = Query(""),
+    artist: str = Query(""),
+    barcode: str = Query(""),
+    catalog_number: str = Query(""),
+    _=Depends(require_role("viewer")),
+    __=Depends(require_feature("music")),
+):
+    """Render the optional exact-pressing panel for one MusicBrainz release."""
+    with get_db() as db:
+        item = db.execute(
+            "SELECT * FROM items_live WHERE id = ?", (item_id,)
+        ).fetchone()
+        release = music_catalog.get_release(db, item_id) if item else None
+        token = get_setting(db, "discogs_token")
+        selected_id = discogs_selection.get_selected_release_id(db, item_id)
+
+    if not item or item["media_type"] not in MUSIC_MEDIA_TYPES or not release:
+        return HTMLResponse("Music release not found", status_code=404)
+
+    user = getattr(request.state, "user", None)
+    # AuthMiddleware stores the current user as the same dict shape returned by
+    # the authentication helpers. Keep role inspection consistent with the rest
+    # of Shelf rather than treating it like an object.
+    can_edit = bool(user and user.get("role") in ("admin", "editor"))
+    if (search or details) and not can_edit:
+        return HTMLResponse("Editor role required", status_code=403)
+
+    fields = {
+        "q": q.strip()[:200] or item["title"],
+        "artist": artist.strip()[:200] or (item["authors"] or ""),
+        "barcode": upc_svc.normalize_barcode(barcode)[:32]
+        or upc_svc.normalize_barcode(item["upc"] or "")[:32],
+        "catalog_number": catalog_number.strip()[:100]
+        or (release.get("catalog_number") or ""),
+    }
+    results: list[dict] = []
+    selected_release = None
+    error = None
+
+    if (search or details) and not token:
+        error = "Discogs is not configured. Add a token in Settings → Integrations."
+    elif search:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            result = await discogs.search_releases(
+                fields["q"],
+                client,
+                token=token,
+                artist=fields["artist"] or None,
+                barcode=fields["barcode"] or None,
+                catalog_number=fields["catalog_number"] or None,
+                limit=20,
+            )
+        if result.found:
+            results = result.payload or []
+        else:
+            error = _discogs_error(result)
+    elif details and selected_id:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            result = await discogs.lookup_release(selected_id, client, token=token)
+        if result.found:
+            selected_release = result.payload
+        else:
+            error = _discogs_error(result)
+
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "fragments/music_discogs.html",
+        {
+            "item": item,
+            "release": release,
+            "selected_id": selected_id,
+            "selected_release": selected_release,
+            "results": results,
+            "error": error,
+            "fields": fields,
+            "configured": bool(token),
+            "can_edit": can_edit,
+        },
+    )
+
+
+@router.post("/api/music/items/{item_id}/discogs/select")
+async def select_discogs_release(
+    item_id: int,
+    release_id: str = Form(...),
+    _=Depends(require_role("editor")),
+    __=Depends(require_feature("music")),
+):
+    """Validate and remember one concrete Discogs release for a music item."""
+    with get_db() as db:
+        item = db.execute(
+            "SELECT * FROM items_live WHERE id = ?", (item_id,)
+        ).fetchone()
+        release = music_catalog.get_release(db, item_id) if item else None
+        token = get_setting(db, "discogs_token")
+    if not item or item["media_type"] not in MUSIC_MEDIA_TYPES or not release:
+        return HTMLResponse("Music release not found", status_code=404)
+    if not token:
+        return HTMLResponse("Discogs is not configured", status_code=400)
+
+    try:
+        candidate_id = int(release_id.strip())
+    except (TypeError, ValueError):
+        return HTMLResponse("Invalid Discogs release id", status_code=400)
+    if candidate_id <= 0:
+        return HTMLResponse("Invalid Discogs release id", status_code=400)
+
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        result = await discogs.lookup_release(candidate_id, client, token=token)
+    if not result.found:
+        return HTMLResponse(_discogs_error(result) or "Discogs lookup failed", status_code=502)
+
+    concrete_id = (result.payload or {}).get("discogs_release_id")
+    if not concrete_id:
+        return HTMLResponse("Discogs did not return a concrete release", status_code=502)
+
+    with get_db() as db:
+        discogs_selection.set_selected_release_id(db, item_id, concrete_id)
+    return RedirectResponse(f"/music/item/{item_id}", status_code=303)
+
+
+@router.post("/api/music/items/{item_id}/discogs/clear")
+async def clear_discogs_release(
+    item_id: int,
+    _=Depends(require_role("editor")),
+    __=Depends(require_feature("music")),
+):
+    """Remove only the optional Discogs pressing selection."""
+    with get_db() as db:
+        item = db.execute(
+            "SELECT id, media_type FROM items_live WHERE id = ?", (item_id,)
+        ).fetchone()
+        if not item or item["media_type"] not in MUSIC_MEDIA_TYPES:
+            return HTMLResponse("Music release not found", status_code=404)
+        discogs_selection.clear_selected_release_id(db, item_id)
     return RedirectResponse(f"/music/item/{item_id}", status_code=303)

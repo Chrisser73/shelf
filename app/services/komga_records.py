@@ -19,7 +19,7 @@ from typing import Any
 
 from app.config import MEDIA_TYPES
 from app.services import isbn as isbn_svc
-from app.services.item_write import insert_item, update_item_fields
+from app.services.item_write import IdentifierInTrash, insert_item, update_item_fields
 
 KOMGA_KINDS = frozenset({"comic", "manga"})
 
@@ -63,9 +63,20 @@ def _shelf_media_type(kind: str) -> str:
 
 
 def _existing_record(db, komga_id: str):
+    """The record for `komga_id`, whether or not its item is in Trash.
+
+    The join is part of the read (G107): joining `items_live` is exactly what
+    would hide a trashed item's record, and `komga_id` is the PRIMARY KEY of
+    `komga_records` — so a hidden record means the caller inserts the item
+    again, the record INSERT trips the PK, and `get_db()` rolls the whole
+    block back. Physical, carrying `deleted_at`, so the caller can skip it.
+
+    No live-first ordering is needed: `komga_id` is a primary key, so there
+    is at most one record and no live twin for a trashed one to shadow.
+    """
     return db.execute(
-        "SELECT kr.*, i.source, i.media_type FROM komga_records kr "
-        "JOIN items_live i ON i.id = kr.item_id WHERE kr.komga_id = ?",
+        "SELECT kr.*, i.source, i.media_type, i.deleted_at FROM komga_records kr "
+        "JOIN items i ON i.id = kr.item_id WHERE kr.komga_id = ?",
         (komga_id,),
     ).fetchone()
 
@@ -142,7 +153,7 @@ def _reclassify_owned_record(db, existing, kind: str, media_type: str) -> None:
             )
         try:
             update_item_fields(db, existing["item_id"], {"media_type": media_type})
-        except sqlite3.IntegrityError as exc:
+        except (sqlite3.IntegrityError, IdentifierInTrash) as exc:
             raise KomgaPersistenceError(
                 "Changing this Komga library between Comic and Manga would collide "
                 "with an existing Shelf edition"
@@ -182,11 +193,20 @@ def persist_candidate(db, candidate: dict[str, Any]) -> dict[str, Any]:
     isbn = fields["isbn"]
 
     existing = _existing_record(db, komga_id)
+    if existing is not None and existing["deleted_at"] is not None:
+        return {"item_id": existing["item_id"], "action": "in_trash"}
+
     if existing is not None:
         _reclassify_owned_record(db, existing, kind, media_type)
         item_id = existing["item_id"]
         if existing["source"] == "komga":
-            update_item_fields(db, item_id, _refresh_fields(fields))
+            try:
+                update_item_fields(db, item_id, _refresh_fields(fields))
+            except IdentifierInTrash as exc:
+                raise KomgaPersistenceError(
+                    "Refreshing this Komga holding would give it an ISBN an "
+                    "item in Trash already holds"
+                ) from exc
         else:
             _fill_missing_fields(db, item_id, candidate)
         db.execute(
@@ -219,7 +239,13 @@ def persist_candidate(db, candidate: dict[str, Any]) -> dict[str, Any]:
                     "source": "komga",
                     "owned": 1,
                 },
+                restore_trashed=False,
             )
+        except IdentifierInTrash as exc:
+            # A trashed ISBN twin with no Komga record of its own. Refused
+            # before any write, and reported with the blocking row's id so
+            # the sync loop's item_id read succeeds (claude-R3).
+            return {"item_id": exc.item_id, "action": "in_trash"}
         except sqlite3.IntegrityError:
             # A concurrent/external writer may have created the same exact
             # edition after our lookup. Never fall back to a title guess.

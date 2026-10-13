@@ -9,21 +9,119 @@ separate frontend build beyond Tailwind.
 Middleware, outermost first (`app/main.py`):
 
 1. **SecurityHeaders** — strict CSP (no `unsafe-inline`/`unsafe-eval`, no
-   third-party origins), HSTS, frame/denial headers.
+   third-party origins), frame/denial headers, and HSTS only when
+   `request.url.scheme` is `https`.
 2. **RateLimit** — per-IP sliding window on `/api/`, `/share/`, `/login`,
-   `/setup`. Client IP comes from the socket unless `SHELF_TRUST_PROXY` is
-   set.
-3. **Auth** — JWT in an HTTP-only secure cookie; redirects to `/setup` when
+   `/setup`. The client IP is the socket peer and no header is read in app
+   code. uvicorn's proxy-headers middleware rewrites the peer for proxies
+   listed in `SHELF_TRUST_PROXY` (handed to it as `FORWARDED_ALLOW_IPS` by
+   `entrypoint.sh`), walking `X-Forwarded-For` right to left and skipping
+   every trusted hop.
+3. **Auth** — JWT in an HTTP-only cookie, `Secure` only when
+   `request.url.scheme` is `https`; redirects to `/setup` when
    no users exist, `/login` when unauthenticated; sliding refresh past the
-   token's half-life. Roles admin / editor / viewer enforced per route with
-   `require_role`.
+   token's half-life. Identity and role are read from the `users` row on
+   every request: the JWT proves the session and does not carry it, so a token
+   whose version or username no longer matches the row is no session, and a
+   refreshed token is minted from the row. Roles admin / editor / viewer
+   enforced per route with `require_role`. Session length is
+   `SHELF_SESSION_DAYS` (default 30). The session cookie stays
+   `SameSite=Strict`, so a browser withholds it on a navigation that starts on
+   another site. A cross-site **page** navigation without a session (`GET`,
+   `Sec-Fetch-Mode: navigate`, `Sec-Fetch-Site: cross-site`) therefore gets one
+   empty `200` with `Refresh: 0` to the same path, which the browser re-requests
+   same-origin with the cookie; `/login` itself included. Never on `/api/`:
+   the GET event streams there (Hardcover export and import, synopsis
+   backfill, cover bulk retry, Komga / RomM / Audiobookshelf sync, valuation)
+   do real work, and CSRF does not check GETs.
 4. **CSRF** — double-submit cookie; accepts an `X-CSRF-Token` header (HTMX,
    fetch) or `_csrf` form field on mutating requests.
 
+**The browser's scheme is `request.url.scheme`, and only that.** uvicorn sets
+it from `X-Forwarded-Proto`, but only for peers listed in `SHELF_TRUST_PROXY`
+(or `127.0.0.1` when unset); from any other peer the header is ignored. The
+cookie's `Secure` flag and HSTS both key off it, so they are right under the
+built-in TLS listener, behind a trusted TLS proxy with `SHELF_TLS=off`, and on
+plain HTTP alike. There is deliberately no second switch for either. Anything else that needs the
+browser-facing scheme, such as OIDC redirect URIs (#89), must use the same rule.
+
 Routes live in `app/routers/`, one module per feature. Pages render full
 templates; HTMX endpoints render fragments from `app/templates/fragments/`.
-`TemplateResponse` is wrapped to inject `user` and `nav_tabs` into every
-context.
+`TemplateResponse` is wrapped to inject `user`, `nav_tabs` and `trash_nag`
+into every context. `trash_nag` is the admin Trash banner's state: the wrapper
+checks the role **before** any service call, so a non-admin render runs no
+Trash code and no query, and an admin render reads `trash.expired_count()`'s
+one-hour module cache. A failed read means no banner for that render, never a
+failed page; `base.html` guards on `{% if trash_nag %}`, so a hand-built
+environment without the key still renders.
+
+### Feature flags
+
+**Flags gate surfaces and schedulers, never schema and never data.** Optional
+features (`app/features.py`, the `FEATURES` registry) can be turned off by an
+admin in Settings → Features. Migrations run in full and every table exists
+whatever the flags say; disabling hides and refuses, enabling re-reveals
+everything, including rows written in between. Archive export and import
+ignore flags. Core surfaces (scan, Browse, items, copies, locations, tags,
+Trash, settings, users, backup, archive, logs) are not registered and cannot
+be turned off.
+
+- **Storage.** One `settings` row per feature, `feature.<key>`. Only the exact
+  value `"0"` disables; an absent row means enabled, so an upgrade changes
+  nothing. Reads go through a module cache that every write path invalidates
+  twice — immediately and again after its transaction commits
+  (`database.after_commit`), with a generation guard on the refill, so a
+  concurrent read cannot re-cache the pre-commit value.
+- **Profiles are not stored.** Each registry entry names the smallest profile
+  it belongs to (`standard` or `everything`; Minimal is core only).
+  `apply_profile` writes every `feature.<key>` row inside the caller's
+  transaction, and the install's profile is derived from the flags on each
+  read, so a hand-flipped switch reads as Custom. `/setup` applies the chosen profile in the same
+  transaction as the first admin's insert: no install holds an admin and half
+  a profile.
+- **The gate is a route dependency, not a middleware.**
+  `require_feature(key)` runs after the four middlewares above and is declared
+  **after** the route's `require_role`, so a user without the role gets the
+  role refusal and never learns from the disabled page what a route is for.
+  While the feature is off it answers an `EventSource` request with one SSE
+  `type:error` frame (the browser hides a 403's body from a stream), a native
+  form post or link (`Sec-Fetch-Mode: navigate`) and an HTML page with
+  `feature_disabled.html` (with an Enable form for admins), an htmx request
+  with a 403 and an `HX-Trigger` toast, and any other `/api/` request with a
+  403 JSON body.
+- **Use is gated, configuration is not.** Each integration's status, settings,
+  test and library/platform routes stay reachable while it is off, as do
+  `/api/tmdb/test-key` (TMDb is core DVD scanning), the periodical 977
+  scan-confirmation routes (they belong to scanning) and `/sw.js`.
+- **The share page is gated inline.** `/share/{token}` has no user, so a
+  disabled Sharing feature takes the same statement as an unknown token and
+  answers byte for byte like one: an anonymous visitor cannot tell that
+  sharing exists and is off. The `lend` and `return` scan modes refuse inside
+  `items_scan_modes.py` through the scan card's existing error arm.
+- **The registry lint** (`tests/test_features.py`) walks `app.routes` like the
+  nav census: every route in a feature's module is gated by it or listed in
+  its `ungated`/`inline` exemptions with a reason, no other route carries a
+  gate, every exemption names a real route, every nav tab belongs to exactly
+  one feature or to `CORE_NAV_TABS`, and every gate resolves after its role
+  check.
+- **The render census** (`tests/test_feature_sweep.py`) is its page-level
+  counterpart: with each feature off in turn, the pages that stay on carry
+  none of its gated URLs and none of its registry `client` names (the
+  scripts and Alpine components its JS reaches routes through); with
+  everything on, each swept feature's references render.
+
+The nav drops a disabled feature's tab in `visible_tabs`, beside the role and
+integration checks. Manual tab hiding (Settings → Navigation) stays
+presentation only: a hidden tab's routes keep serving.
+
+**Trash** is two routers in `app/routers/trash.py`, registered separately: the
+unprefixed page (`GET /trash`, editor) and the API under `/api/trash/` —
+restore an item or copy (editor), delete permanently, **Empty expired** and
+dismiss the banner (admin). Every role check is per route; there is no
+router-level dependency, so the editor/admin split is visible at each
+decorator. The API is rate-limited and CSRF-checked like any `/api/` route.
+Every mutating Trash route takes `BEGIN IMMEDIATE` before the read that decides
+what to act on.
 
 ## Data
 
@@ -37,9 +135,12 @@ Main tables: `items` (everything — books, discs, games; ~38 columns incl.
 `media_type`, `owned`, `reading_status`, `series_name`/`position`,
 `location_id`, value columns, language, external ids), `item_copies`,
 `locations`, `borrowers` + `checkouts`, `tags` (`name` unique NOCASE, plus a
-nullable `media_type` **scope**) + `item_tags`, `series_meta` (Hardcover
+nullable `media_type` **scope**) + `item_tags`, `authors` + `item_authors`
+(the author index, below), `series_meta` (Hardcover
 completeness), `reading_log`, `users`, `settings` (k/v, secrets encrypted),
 `share_links`, `scan_log`, `game_platforms`, `valuation_history`,
+`price_history` (append-only list-price observations for wishlisted books,
+one row per lookup, a `NULL` price recording a miss),
 `cover_queue`, `lists` (named lists — one seeded row, `wishlist`) +
 `list_items` (which items are on which list),
 `legacy_book_mappings` (a confirmed legacy price-point
@@ -51,9 +152,11 @@ below — `music_releases` + `music_media` + `music_tracks` +
 
 **`tags.media_type` is an advisory scope, not a constraint.** NULL means the
 tag is global. Nothing strips or refuses an association whose item is outside
-the scope — the column exists so a later release can offer a tag where it is
-relevant without a schema change, and enforcement can be layered on top if it
-is ever wanted. It is added in both places G1 requires: as `MIGRATIONS` entry
+the scope. The Settings tag manager is its only writer: a scope narrows the
+suggestion lists (the item pages' datalist is built from `get_all_tags(db,
+media_type=<the item's type>)`) and the manager counts each scoped tag's
+out-of-scope items, and enforcement can be layered on top if it is ever
+wanted. It is added in both places G1 requires: as `MIGRATIONS` entry
 39 *and* in `MIGRATION_TABLES`' `CREATE TABLE tags`. That is the opposite of
 the `deleted_at` columns below, and the difference is where the table is
 created — `tags` is created by `executescript(MIGRATION_TABLES)`, which runs
@@ -73,6 +176,26 @@ allowlisted by path in `scripts/check_items_live.py`: a trashed row must be
 rewritten too, and the twin lookup predicts a `UNIQUE(isbn, media_type)`
 collision, which a view that hides trashed rows cannot do.
 
+**The author index is derived, never edited.** `authors` (one row per person:
+`name` as first indexed, `name_key` unique, `AUTOINCREMENT` so a freed id is
+never handed to someone else) and `item_authors` (`item_id`, `author_id`,
+`position`, `role`; `ON DELETE CASCADE` both ways, like `item_tags`) index
+`items.authors`, which stays the record. The invariant: *`item_authors` equals
+`authors.parse(items.authors)` for every physical row; it is written only by
+`app/services/author_index.py`, called from the `item_write` funnel and one
+boot step, and rebuilt whenever the parser version changes.* Trashed rows keep
+their index rows, as with tags — every read reaches them through `items_live`.
+The boot step, `author_index.rebuild_all`, runs after `_retire_kids_book`: when
+`settings.authors_index_version` is absent or differs from
+`authors.PARSER_VERSION` it re-indexes every physical row in one
+`BEGIN IMMEDIATE` transaction (links replaced, authors upserted by key, so
+unchanged names keep their ids) and records the version; otherwise it only
+sweeps authors that a purge or merge left with no link, and writes nothing
+when there are none. Archives exclude `settings`, so an imported library
+rebuilds. The two tables live only in `MIGRATION_TABLES` — no numbered
+migration, per `tests/test_schema_ownership.py`. `tests/test_item_write.py`
+pins that no other module writes them.
+
 **`kids_book` survives as an input alias.** `config.MEDIA_TYPE_ALIASES` maps
 it to `book` and `canonical_media_type()` resolves it, so an old CSV, an old
 archive or a device whose cached form still offers it keeps working. Routes
@@ -81,10 +204,11 @@ value cannot match a twin stored under the canonical one — and
 `item_write.validate_item_fields` is the backstop that makes it impossible
 for a retired value to reach the table by any path.
 
-**`items` and `item_copies` each carry `deleted_at TEXT DEFAULT NULL`, and
-nothing sets it.** Deletion is still a `DELETE`: the column is the seam a later
-soft-delete feature switches on, landed on its own so that the read side could
-be repointed against an unchanged test suite. Both columns are appended
+**`items` and `item_copies` each carry `deleted_at TEXT DEFAULT NULL`, and it
+is how Trash works.** Deleting an item or removing a copy stamps the column;
+restoring clears it; every reader sees only unstamped rows (below). The column
+landed on its own, ahead of Trash, so the read side could be repointed against
+an unchanged test suite. Both columns are appended
 `MIGRATIONS` entries and deliberately absent from `SCHEMA`'s `CREATE TABLE`
 — `init_db()` runs `SCHEMA` and then replays every migration on a fresh
 database, so a second copy of the column would raise `duplicate column name`
@@ -164,8 +288,8 @@ object rather than to the edition: `condition`, `acquired_date`,
 `acquisition_source`, `acquisition_price`, `provenance`, `notes`, a
 `copy_barcode` (unique across the collection) and its own `location_id`
 (`ON DELETE SET NULL`). `(item_id, copy_number)` is unique and a partial
-unique index allows at most one `is_primary = 1` row per item; deleting an item
-cascades to its copies. **`items.location_id` is the compatibility seam**:
+unique index allows at most one `is_primary = 1` row per item; permanently
+deleting an item cascades to its copies (trashing one writes nothing to them). **`items.location_id` is the compatibility seam**:
 `item_write.py` mirrors a written `location_id` into that item's primary copy
 (creating it if needed), a null never invents a copy, and secondary copies are
 never moved by the legacy field — see `app/services/item_copies.py` and
@@ -178,7 +302,8 @@ the item page, the shelf audit (`/api/inventory/missing`), Scan's Inventory and
 Lookup modes, and the portable archive all read the copies relation rather than
 the seam, because a merged item legitimately has copies in two rooms and the
 seam names only one. (They read it through `copies_live`, not the physical
-table — see the read invariant below.)
+table — see the read invariant below — except the archive export, which carries
+Trash and so reads the physical table.)
 Where an item has no copy rows at all — the conservative backfill leaves
 wishlist rows without one — those readers fall back to the seam, which is then
 the only answer there is. Browse, Scan's Move mode, the valuation report and
@@ -187,15 +312,16 @@ change the numbers on an insurance report, which is its own decision.
 
 **`item_copies` has a write funnel.** `insert_copy` and `update_copy` in
 `app/services/item_copies.py` are the only way a row reaches or changes in the
-table, and `delete_copy` / `delete_copies_for_item` the only way one leaves it,
-exactly as `item_write.py` is for `items`: column names are validated against
+table, and `purge_copy` (Trash's Delete permanently, trashed copies only) /
+`delete_copies_for_item` (the archive import's placeholder removal) the only
+ways one leaves it, exactly as `item_write.py` is for `items`: column names are validated against
 `PRAGMA table_info`, so an unknown column raises instead of being dropped, and
 a location change clears the copy's location-scoped `position_order` unless the
 caller sets one explicitly. `tests/test_item_write.py` enforces the funnel by
 scanning `app/` for raw statements. Two set-based `INSERT ... SELECT` backfills
 stay raw and are allowlisted by path — migration 26's, which runs before any
 application code is importable, and `backfill_legacy_locations`. `add_copy`
-and `delete_copy` sit above the row-level pair and hold the rules no caller
+and `trash_copy` sit above the row-level pair and hold the rules no caller
 should reproduce: numbering a new copy above the item's highest, deciding
 `is_primary` from what the item already has, and promoting the lowest-numbered
 survivor when the primary is removed. See `docs/item-copies.md`.
@@ -239,6 +365,10 @@ not grow a column per family:
   `UNIQUE COLLATE NOCASE` ISSN; `periodical_issues` is 1:1 with `items` and
   points at it. So a run of one magazine is one publication row and many item
   rows, which is the whole reason the family is modelled separately from books.
+  The ISSN is the publication's identity: a stored ISSN is never replaced
+  by a different one, and a title match only lets an ISSN-less publication
+  adopt its first ISSN. So same-titled editions — the US and UK *Wired* —
+  stay separate publications.
   The family is named rather than hardcoded to `magazine` so journals and
   newspapers can join it without every consumer being rewritten.
 
@@ -298,20 +428,48 @@ cover search all read position 0 as the primary author. Open Library's cap is
 on author *keys*, applied before any request, so a long contributor list costs
 at most four extra paced requests (~1.4 s) on an interactive scan.
 
+**`authors.parse()` is `join_names` run backwards**, and it feeds the author
+index (see Data). Its rule was measured against a real 622-row collection and
+does no more than that table needed: split on commas; a bare `Jr.`/`Sr.`/`II`
+/`III`/`IV` segment rejoins the name before it; a trailing ` - <one word>` is
+a role (`Ken Liu - translator`) only when the word is a known credit word
+(`_ROLE_WORDS`), so an unknown word or a longer dash phrase stays part of the
+name; a leading `and ` is dropped; `&` and an inner ` and ` never split, so
+`Simon & Garfunkel` stays one credit; repeats of a name key are dropped, first
+wins. Identity is `name_key = " ".join(normalize(name))` — the same
+normaliser `matches()` uses, and deliberately not `matches()` itself, which
+would merge "J. Smith" into "John Smith". `normalize()` keeps letters in any
+script, so a CJK, Cyrillic or Arabic name has a key. **Known limits,
+accepted:** `Last, First` (`Williams, Robin`) reads as two authors — nothing in
+the string tells it from two co-authors — and is fixed by editing the text;
+`et al` has no rule (none measured). A rule change bumps `PARSER_VERSION`, and
+the next boot re-indexes everything.
+
 The national leg is a registry, `services/national.py`: unhyphenated ISBN-13
 registration-group prefixes mapped to provider modules, resolved by
 **longest** prefix match, so a narrow key can coexist with a broader one. It
-currently serves two groups — **DNB** (`services/dnb.py`, MARC21 over SRU) for
-978-3, and **SBN** (`services/sbn.py`, flat JSON over ICCU's OPAC endpoint) for
-the Italian 978-88 and 979-12. Keys are as wide as the group: `97888` and
-`97912` at five digits, because a 4-digit `9788` would also capture Spain,
-Brazil and the Czech/Slovak group. Both providers build every stored string
-through `services/bib_normalize.py`, so text from either is NFC and comparable.
+currently serves four providers — **DNB** (`services/dnb.py`, MARC21 over SRU)
+for 978-3, **OSZK NEKTÁR** (`services/oszk.py`, HUNMARC over Z39.50 at
+`tagetes2.oszk.hu:1616/ANY`) for the Hungarian 978-615 and 978-963 groups,
+**SBN** (`services/sbn.py`, flat JSON over ICCU's OPAC endpoint) for the Italian
+978-88 and 979-12, and **KB** (`services/kb.py`, SPARQL over the Nederlandse
+Bibliografie Totaal) for the Dutch 978-90 and 978-94 groups. Keys are as wide
+as the group: the Italian `97888` and `97912` and Dutch `97890` and `97894` use
+five digits so neighbouring registration groups are not captured.
+All providers build stored bibliographic strings through
+`services/bib_normalize.py`, so text is NFC and comparable.
 An ISBN in no registered group skips the leg entirely and costs no request.
 Adding a provider is a module plus a registry entry — no call-site change.
-**The covers cascade below is unchanged by this**: SBN contributes no cover
-source, and the DNB cover rung is a separate hand-written prefix test in
-`services/covers.py`, not a read of this registry.
+NEKTÁR uses `yaz-client` and `pymarc`; it paces each query against
+`tagetes2.oszk.hu` and accepts records only when a 020 ISBN exactly matches
+the requested edition. Its five-second query timeout and provider diagnostics
+stay server-side, while the scan surface receives only the normal provider
+outcome and `oszk` identifier.
+**The covers cascade and picker below are unchanged by this**: OSZK, SBN and KB
+contribute no cover source, and the DNB cover rung is a separate hand-written
+prefix test in `services/covers.py`, not a read of this registry. Any later
+OSZK cover source needs its own request pacing, host configuration, URL
+validation and a placement decision in the cover order and picker.
 
 **Music and periodicals do not enter through `_lookup_metadata` at all.** Each
 has its own page and its own provider, because neither is answered by an ISBN or
@@ -330,8 +488,24 @@ a retail UPC and neither produces a plain `items` row:
   the user confirms those. A portal that refuses or answers nothing is handled as
   a clean `found=False`, not an error: a datacenter IP blocked at the portal must
   degrade to "look it up yourself", not to a failed scan.
+  When the portal's answer is wrong or missing, the confirmation card offers an
+  **assisted search** (`services/periodical_google.py`): a Google Books query by
+  magazine title, paced through `outbound.fetch` on the existing Google Books
+  host. A chosen result only refills the card; the scanned EAN and supplement
+  stay the issue's identity, and an ISSN is taken only when its check digit is
+  valid. Nothing is written until the user confirms.
+- **Discogs** (`services/discogs.py`) is optional exact-pressing enrichment on
+  an existing Music item. `routers/music.py` searches concrete releases and
+  validates a chosen release before `services/discogs_selection.py` stores only
+  its Release ID in `music_identifiers` as `discogs_release_id`. MusicBrainz
+  remains the canonical identity in `music_releases`; Discogs response metadata
+  is fetched fresh on demand rather than copied into Shelf, and Discogs artwork
+  or copy-level condition, acquisition and provenance data are not imported.
+  The admin's personal access token (`discogs_token`) remains a sensitive
+  setting, and `api.discogs.com` is paced at 1 req/s, the published rate for
+  authenticated requests.
 
-Both pace through `services/outbound.py` like every other shared public host.
+All three pace through `services/outbound.py` like every other shared public host.
 
 **One family of UPC is intercepted above all of that**, by
 `services/legacy_book.py`: the pre-Bookland price-point UPC-A a few publishers
@@ -497,8 +671,13 @@ post-redirect re-check. Misses are retried by a background **cover queue**
 The **picker is a separate, human-driven path** and dispatches on the item's
 media type (`covers.search_covers`): `dvd` → TMDb's poster set for the film,
 `video_game` → IGDB cover art and artwork, and everything else — including an
-unrecognised `media_type`, which the schema does not constrain — → the
-unchanged book search over Google Books and Open Library. Here TMDb and IGDB
+unrecognised `media_type`, which the schema does not constrain — → book cover
+search over Google Books and Open Library. The book search asks both sources
+for the item's exact ISBN edition first. It accepts a Google result only when
+its identifiers match and an Open Library result only when the ISBN endpoint's
+edition identifiers match; otherwise it offers title matches labelled
+"Check edition" for a person to inspect. A custom picker query skips the ISBN
+stage so the user can look for an alternate edition. Here TMDb and IGDB
 supply *galleries* rather than the single URL the unattended cascade takes,
 and the two must not be conflated: the cascade is untouched by the picker's
 dispatch. `MEDIA_TYPE_PROVIDERS` and `CREDENTIAL_KEYS` in `covers.py` are the
@@ -532,9 +711,9 @@ unconfigured-provider note first (nothing was asked, so there is no outcome to
 report), then the actionable state, then the generic "No covers found" line,
 which now means only that the provider answered and had nothing. A `found`
 result with an **empty** payload is that genuine miss and is not an error. The
-book branch is wrapped as `found` rather than re-typed: it fans out over two
-sources that each swallow their own failure, so it has no single outcome to
-report.
+book branch combines the two source outcomes: if neither supplies a candidate,
+a rejected key, rate limit or transport failure reaches the picker rather
+than being shown as a genuine miss.
 
 ### Scan outcomes
 
@@ -780,11 +959,48 @@ the queue and walk the reviewer backwards.
 Started in the app lifespan, each polling every 5 minutes and reading its
 schedule from `settings`: Audiobookshelf sync, Hardcover reading-status
 sync, overdue-loan reminder digest (ntfy / webhook via `services/notify.py`),
-plus the cover queue worker. All are plain `asyncio` tasks in the one
+the wishlist price-alert pass (`services/price_alerts.py`), plus the cover
+queue worker. All are plain `asyncio` tasks in the one
 process. The Audiobookshelf sync is idempotent per item — an unchanged item
 is neither rewritten nor re-covered, and a same-format ISBN already present
 is adopted rather than inserted — and isolated per library, so one library's
 timeout is reported for that library and the rest still run.
+
+Each of the four scheduled jobs checks its feature flag (`abs_sync`,
+`hardcover`, `lending`, `price_alerts`) at the top of every pass. A disabled
+job skips the pass without calling its service and without writing its
+`abs_last_sync` / `hc_last_sync` / `loan_reminder_last_sent` /
+`price_alert_last_run` stamp, so
+re-enabling does not pretend a sync ran. The loop never exits: turning the
+feature back on resumes it at the next five-minute wake, with no restart. The
+cover queue is core and has no flag.
+
+The price-alert pass runs at most once a day. It selects live, wishlisted,
+ISBN-bearing items (`items_live` + `lists.WISHLISTED_SQL`) ordered by their
+newest `price_history` row, never-observed first, and takes the first
+`price_alert_nightly_cap`. That ordering is the round-robin: no cursor, it
+survives restarts, and a newly wishlisted book jumps the queue. Each lookup
+**bypasses the ISBNdb cache read** (`lookup_price(..., use_cache=False)`) —
+valuation keeps a year-long cache, which would have the watcher re-read the
+same price for a year — but still writes a fresh answer back, so valuation
+sees it. Only an *answer* is cached: a 200, or a 404 for a book ISBNdb does
+not have. A refused key, a rate limit, a 5xx or a timeout leaves the cache
+alone — an entry written for it would be trusted for a year and would
+overwrite a good price valuation had cached. Pacing is unchanged: every
+request goes through `outbound.acquire`.
+A lookup that returns no price is recorded as a `NULL` row, so a title ISBNdb
+cannot price moves to the back of the queue instead of holding a slot every
+night. A lookup ISBNdb did not answer (`lookup_price(..., raise_on_failure=True)`
+raises `LookupFailed`) records **no** row, so the book keeps its place; it is
+counted, a 401 or 403 ends the pass (every further lookup would be refused),
+and the pass logs a warning and stores `price_alert_last_summary`, which the
+Settings block shows beside the last-run time. Unlike the loan digest, the pass writes its stamp whether or not the
+digest was delivered: the expensive part is the lookups, not the send.
+A feature with no flag row reads as on, so migration 41 writes
+`feature.price_alerts = '0'` on upgrade wherever `feature.valuation` is `'0'`:
+an install on Standard or Minimal does not wake up spending its ISBNdb key.
+`SHELF_DISABLE_PRICE_ALERTS` keeps the loop from starting, which the test
+suites rely on to stay offline.
 
 ## Self-hosted library sync
 
@@ -827,6 +1043,54 @@ must be simple, which is why the lint exists. Tailwind compiled locally to
 (`static/js/scanner-engine.js`) choosing ZXing on iOS Safari and
 html5-qrcode elsewhere.
 
+**A click- or submit-triggered htmx control is guarded by default.** A
+delegated listener in `static/js/app.js` marks the control that issued a
+request `aria-busy` (a spinner in CSS) and disables it — a form's submitter,
+not the whole form — until `htmx:afterRequest`, which fires on success,
+error, abort and timeout alike. It never disables a text input (a
+search-as-you-type box is only marked), never re-enables a control it did
+not disable, and ignores a request a form listener cancelled, which gets no
+`afterRequest`. What it disabled is keyed on the request's `xhr`, not the
+element, because htmx rewrites `detail.elt` between events. It works
+alongside `hx-disabled-elt` rather than deferring to it. So a new htmx
+button needs no attribute to be guarded, and an Alpine control can opt into
+the same look with `:aria-busy`. The 2px bar at the top of the viewport
+remains for requests no control started (lazy loaders, polling,
+`htmx.ajax`).
+
+**`GET /api/tags` is the one source for every tag datalist** on the add
+surfaces (Scan, Shelf Fill, Photo Intake). `static/js/tag-suggest.js` — a
+plain script, not an Alpine component — fetches it once per page, fills the
+input's `<datalist>` filtered by the media-type select the input names in
+`data-type-source`, re-filters on a type change without refetching, and keeps
+the field's value in `localStorage` under the input's `data-storage-key`. The
+field carries no `x-model`, so every reader — htmx, `FormData`, the catalog
+results' `.tags-sync` mirror in `app.js` — reads the DOM value. The item
+page's tag chips still server-render their own list.
+
+**Images are made on a `<canvas>` in the browser; the server renders no
+raster images.** Photo Intake does it twice: `static/js/intake-capture.js`
+grabs a webcam frame, and `static/js/intake.js` resizes and crops the photo
+before `/api/intake/analyze`. `static/js/wrapup.js` draws the
+Stats wrap-up (`GET /stats/wrapup`, gated by the `stats` feature): the route
+renders the period's numbers and up to 24 cover tiles as `data-*` attributes
+from `app/services/wrapups.py`, and the script draws them at 1080 × 1350 and
+hands the `toBlob` PNG to a download link and, where `navigator.canShare`
+accepts files, the Web Share API. It is a plain script, not an Alpine component,
+and it makes no request beyond the font and the covers. **The canvas must stay
+untainted**: covers are same-origin `/covers/` files, and the script skips any
+cover whose URL is not same-origin, because one foreign image makes `toBlob`
+throw. A cover that fails to load becomes a titled placeholder tile rather than
+a failed export. The wrap-up also brings **the only vendored font**, Inter 4.1
+(OFL), unmodified from the upstream release as `static/vendor/inter-4.1-*`.
+The files sit flat in `static/vendor/` because `tests/test_vendor_integrity.py`
+hashes only that folder's top level, so each one has its `HASHES` line. The script
+loads them with the `FontFace` API (`font-src 'self'`) and draws only after they
+resolve, so the image is the same on every device. The pages' own CSS still uses
+the system font stack. The server-side renderers (Pillow, SVG) were rejected: a
+Pillow renderer puts an image decoder in the app process, and the major social
+platforms do not accept an SVG upload.
+
 **The script load order is a stated invariant, and `make check-alpine`
 enforces it.** Eight files under `static/js/` register Alpine components; every
 one of them is a **classic** script, and Alpine's own tag is the only one that
@@ -851,8 +1115,11 @@ Scan page's Add by hand panel gave it a page-load root, so it is now caught by
 the `alpine:initialized` pass there; the `htmx:afterSwap` pass still covers the
 instance every `not_found` scan card brings with it. What it
 cannot resolve becomes **one `console.error` per lost script**, naming the file
-and — for the four page-scoped components, which alone declare a matching
-top-level function — whether that script executed at all. The reader gets one
+and — for the four components it probes (`browsePage`, `scanPage`,
+`intakePage`, `coverDrop`) — whether that script executed at all. It can name a
+file only for a component listed in its `SCRIPTS` map, so `make check-alpine`
+fails on any `Alpine.data()` registration missing from that map or filed under
+the wrong script. The reader gets one
 toast asking them to reload; a reload almost always fixes it, because the
 failure is per-navigation. It is deliberately its own file: a guard inside
 `components.js` could not report the loss of `components.js`, which on
@@ -958,7 +1225,8 @@ typed by hand (see `docs/development.md` § Service worker versioning).
 The item routes are four modules sharing the `/api` prefix: `items.py` (scan,
 CRUD, search, bulk operations), `items_covers.py` (status polling, retry,
 manual search and selection, upload, removal, bulk sweeps), `items_csv.py`
-(export and import) and `items_catalog.py` (search-a-provider-then-add for
+(export and import; the import's row mapping, write pre-checks and per-request
+location cache live in `services/csv_import.py`) and `items_catalog.py` (search-a-provider-then-add for
 video games, books and DVDs). Helpers more than one of them needs — metadata
 lookup, the save path, cover resolution, the scan log, UPC scanning — live in
 `items_common.py`, which other packages also import (`pages.py` for
@@ -992,9 +1260,9 @@ else**, never at package import time.
 ### Writing items
 
 Every path that creates an item — scan, manual add, CSV import, photo intake,
-Hardcover sync and discover, Audiobookshelf sync, the store's offline queue,
-the game/DVD/book adds, archive import — goes through
-`insert_item()` in `app/services/item_write.py`. It reads the column set from
+Hardcover sync and discover, Audiobookshelf, Komga and RomM sync, the store's
+offline queue, music and periodical adds, the game/DVD/book adds, archive
+import — goes through `insert_item()` in `app/services/item_write.py`. It reads the column set from
 the live table rather than carrying its own copy, raises on an unknown field
 instead of dropping it, and leaves unset columns to their `SCHEMA` defaults.
 Callers pass their own connection so the insert and any follow-up writes share
@@ -1039,9 +1307,54 @@ route's order exemption → UPC check → conflict lookup → funnel.
 HTTP wrapper over it. It holds name normalisation, get-or-create (an existing
 tag wins outright — its scope is never overwritten), attach/detach with orphan
 collection, a grouped `tags_for_items` for export paths, and the scoped
-suggestion list. Every function runs in the caller's transaction, opens no
-connection of its own and logs nothing, because callers may hold a write lock
-around it.
+suggestion list, plus the bulk and manager operations (`bulk_tag`,
+`update_tag`, `delete_tag`). Every function runs in the caller's transaction,
+opens no connection of its own and logs nothing, because callers may hold a
+write lock around it.
+
+The routes: editors add and remove one item's tags
+(`POST /api/items/{id}/tags`, `DELETE /api/items/{id}/tags/{tag_id}`, both
+HTMX fragment swaps used by the item page and the edit page) and a Browse
+selection's (`POST /api/items/bulk-tags`, JSON, all or nothing — any id not in
+`items_live` refuses the whole request). All three take `BEGIN IMMEDIATE`
+before their liveness check (G18). `bulk-tags` lives in `routers/tags.py`
+despite its path because `items.py` is at its size cap, and `main.py` includes
+`tags.router` **before** `items.router` for it: `items.py`'s
+`POST /items/{item_id}` also matches `/items/bulk-tags` — the int annotation
+validates after path selection, it does not select — and the first match
+wins. Admins rename, re-scope and delete through two plain form routes,
+`POST /api/tags/{id}/update` and `POST /api/tags/{id}/delete`, which 303 back to
+`/settings` or `/settings?tag_error=<code>`; a rename collision is caught by
+the `UNIQUE NOCASE` column rather than a pre-read. The admin gate is per route,
+since the same router carries the editor routes.
+
+**Add-time defaults ride the insert funnel's transaction.** Two
+`ContextVar` blocks carry what the Scan card sets for a session:
+`tags_svc.default_tags(raw)` and `item_write.default_reading_status(raw)`. An
+add route wraps its insert in them, and `insert_item` applies them to the row
+it inserts or restores, on the same connection, so the item and its defaults
+commit together or not at all (G118). Only a row the funnel files takes them —
+a `duplicate`, `promoted` or `in_trash` result never reaches the funnel. Each
+block empties itself on exit, so a background task spawned inside it does not
+inherit it.
+
+- **Default tags** attach to a fresh row and to a restored one alike: tags are
+  additive. `POST /api/scan` (a thin wrapper over `_scan_isbn_inner`, which is
+  also what Shelf Fill's scan reaches), the three catalog adds,
+  `POST /api/items/manual` and Photo Intake's confirm loop each open the block.
+- **The default reading status** is validated when the block is *entered*, so
+  an unknown value renders the route's error card before any lookup or
+  insert. It is set on a fresh row only when the caller passed no status and
+  the type carries one (`STATUS_MEDIA_TYPES`), and on a restored row only when
+  that row's status is NULL — a status is one value, and restore never
+  overwrites what the user left. It records no dates and no `reading_log` row.
+  Only the Scan page's sites open it: the scan wrapper, the three catalog adds
+  and manual add. Shelf Fill passes an empty value through the scan wrapper,
+  and Photo Intake does not open it.
+
+The scan's two legacy-barcode continuation forms echo `tags` and
+`reading_status` as hidden inputs, so the item that finally lands still
+carries both.
 
 **Wishlist membership is a list, not a column.** All three funnels accept a
 virtual `wishlisted: bool` field, popped before the name check so it never
@@ -1102,7 +1415,7 @@ A failed rule raises a typed subclass of `ItemValueError` (a `ValueError`,
 defined in `services/write_targets.py` so the pre-existing
 `UnknownLocationError` can sit under it): `InvalidIsbn`, `UnknownMediaType`,
 `UnknownLocationError`, `UnknownPlatform`, `InvalidReadingStatus`,
-`InvalidOwned`. Each carries a stable `code` and the `field` it belongs to;
+`InvalidOwned`, `IdentifierInTrash`. Each carries a stable `code` and the `field` it belongs to;
 the message is the sentence a user reads. Routes reduce to one
 `except ItemValueError` and render it on their own surface — the scan card's
 error arm, the edit form's `?error=<code>` banner (copy lives in the
@@ -1123,6 +1436,106 @@ the log (and, for an archive, a line in the import's error report), because a
 sync or a restore that refuses a whole row over a bad ISBN loses data. The
 visible consequence: Audiobookshelf ASINs are no longer stored in `isbn`, and
 a row that carried one from an earlier sync is cleared on the next.
+
+**The two funnels own the collision-with-Trash rule.** A trashed row keeps its
+`UNIQUE(isbn, media_type)` and `UNIQUE(upc, media_type)` slots — the
+constraints see it — so a write that claims one of those slots is not an
+ordinary duplicate. It is resolved in one place per direction, rather than at
+each of the ~20 duplicate guards, which stay on `items_live` and correctly miss
+a trashed row:
+
+- **`insert_item` restores or refuses.** Before its `INSERT`, a write carrying
+  an `isbn` or a `upc` looks for a trashed row holding the slot it is about to
+  claim. By default — a **person** re-adding something — it restores that row
+  and returns its id, leaving every stored field alone and applying the
+  caller's ownership intent only toward owned. With `restore_trashed=False` —
+  a **machine** re-syncing — it raises `IdentifierInTrash` and writes nothing,
+  so a background sync never resurrects what a person deleted. The return is
+  an `ItemId`, an `int` subclass carrying `.restored`, read through
+  `was_restored()` *before* the id is transformed (arithmetic returns a plain
+  `int`). A write with neither identifier looks nothing up and cannot restore.
+- **The update funnel refuses.** `_execute_update` calls
+  `refuse_trash_collision()` before its statement: an edit that would move a
+  live row onto a trashed row's slot raises `IdentifierInTrash`, naming the
+  trashed title and both ways out. It cannot restore — the user is editing a
+  *different* item. It fires on a `media_type`-only change too, since the slot
+  is `(isbn, media_type)`, and checks every target of a bulk update before
+  writing, so a mixed selection refuses whole.
+
+The `sqlite3.IntegrityError` handlers at the add routes therefore mean what
+their comments say again — a lost race, not a trashed twin.
+
+Four places cannot reach the funnel's rule and carry it themselves. Music's
+and periodicals' earliest duplicate guards read a child table with no items
+join, so they restore at that guard, before a redirect to a page that would
+bounce to Browse. CSV import's dedup reads find an existing row directly — no
+`INSERT` to fold into — and restore it there. The portable archive import
+classifies every record before it writes anything (`_classify` in
+`services/archive.py`, shared by the plan and apply stages): a live record
+whose twin is in Trash gets a **`restore`** verdict, found by its own physical
+lookup over ISBN, UPC *and* title/author — the funnel keys on ISBN and UPC
+only, so an ISBN-less record would otherwise land as a second live row beside
+its trashed twin. And the external-id matchers of
+the four syncs (Audiobookshelf's `abs_id`, Komga's and RomM's record tables,
+Hardcover's `hardcover_book_id`) read the physical relation so a trashed twin
+is *seen* and skipped, counted as `in_trash`: through the view, an ISBN-less
+item would miss and be duplicated, and a Komga or RomM record would be hidden,
+tripping its table's primary key on the re-insert and rolling the whole sync
+block back.
+
+**Live wins wherever the key is not unique.** The funnel's own lookups need no
+ordering — a trashed row holding a unique slot means there is no live holder.
+But CSV's title/author fallback, `find_duplicate_issue`, `abs_id` and
+`hardcover_book_id` are covered by no unique index, so each lets a live row win
+and acts on a trashed hit only when no live row matches. Without that, deleting
+one of two equal matches and re-importing resurrects the deleted one.
+
+**`deleted_at` is written by exactly four functions** — `item_write.trash_item`
+/ `restore_item` and `item_copies.trash_copy` / `restore_copy` — and both
+funnels refuse it as a caller-supplied field name, so it cannot be reached
+through `update_item_fields` either. A source pin in `tests/test_item_write.py`
+holds the four-function claim by enclosing function, not by file. Four routes
+put rows into Trash — the item delete (`routers/items.delete_item`, also what
+Browse's bulk delete loops over), Remove copy (`routers/item_copies`), the
+Audiobookshelf excluded-library cleanup (`routers/sync`) and CSV import, for a
+row its file marks `deleted` (`routers/items_csv`) — and
+`tests/test_trash_funnel.py` pins exactly those four. The archive import is the
+fifth caller, from `services/archive.py`: a record in its source's Trash is
+created and then trashed with the source's own date, which is what
+`trash_item`'s and `trash_copy`'s optional `at` exists for (validated first: a
+malformed or future date means "now"). Carrying `deleted_at` is also why the
+archive's `FORMAT_VERSION` is 2 — an older reader refuses the archive rather
+than importing its Trash as live rows; a version 1 archive imports every row
+live. **No import ever
+trashes a row that was live before it ran** — a record that matches a live
+item is skipped or updated whatever its file says. None of them touches
+`scan_log`: the link survives, recent scans join `items_live`, and a restore
+re-links it for free.
+
+**`DELETE FROM items` lives in exactly three functions** — `merge_items`
+(`routers/items.py`, the husk, after `item_merge.reparent_children` has moved
+every child including trashed copies), `_retire_kids_book` (`database.py`, a
+twin folded into its book), and `trash.purge_item` (Trash's Delete permanently,
+which accepts only a trashed row and nulls `scan_log.item_id` first, the one
+child without an `ON DELETE` clause). A purge is the one place the child
+cascades should fire. A source pin in `tests/test_item_write.py` holds the
+claim by `(path, enclosing function)` over the same comment-stripped buffer as
+the other pins, so prose in a docstring counts and a comment does not. Cover
+files are never unlinked, on any delete path.
+
+**The Trash service** (`app/services/trash.py`) owns retention and nothing
+deletes on a timer. `trash_retention_days` (default 180; `0` means nothing
+expires) is read with `get_setting`. **"Expired" is one predicate**,
+`expired_clause(days, alias)`, shared by the count, the Trash page's filter and
+Empty expired; a copy expires on its own clock only while its item is live — a
+trashed item's copies are counted, listed and purged with the item.
+`expired_count()` is a module-level cache with a one-hour TTL rather than a
+background sweep, invalidated from three classes of writer: the four funnel
+functions, the purges, and the retention setting's save. With a connection it
+reads fresh and leaves the cache alone, for callers inside a transaction. The
+banner's dismissal is a `settings` row (`trash_nag_dismissed_count`) riding in
+the same cache entry, written under `BEGIN IMMEDIATE` with the count it
+records; the banner returns when the count exceeds it.
 
 The rule is pinned structurally. `tests/test_item_write.py` requires that
 `INSERT INTO items` exists only in `item_write.py`, and that every raw
@@ -1163,16 +1576,18 @@ Two details decide whether the guard actually guards:
 
 Some reads stay on the physical tables, each allowlisted by repository-relative
 path — never by basename — with its reason at the entry. On the **items** side,
-13 entries excusing 15 reads:
+36 entries excusing 39 reads:
 
 - the `items_live` CREATE in `get_db()` itself — the seam reads the physical
   table by definition, and so does the `copies_live` CREATE, which joins `items`;
 - the four historical backfills inside the append-only `MIGRATIONS` tuple, which
   ran against the table at a past schema version;
 - `_find_item_by_barcode`'s two lookups (`routers/items.py`) and the CSV dedup
-  pair (`routers/items_csv.py`) — the existing-item scan and import paths must
-  still *see* a soft-deleted row, so that a later restore can match on it
-  rather than creating a duplicate;
+  reads (`routers/items_csv.py` — ISBN, UPC for an ISBN-less row, then
+  title/author) — the existing-item scan and import paths must
+  still *see* a soft-deleted row, so that a restore can match on it rather
+  than creating a duplicate. CSV import now restores through it, ordering live
+  rows first;
 - the `series_meta` garbage collector in `database.py` — a soft-deleted item
   keeps its series alive, so restoring it finds the series intact;
 - `_barcode_conflict`'s join (`routers/item_copies.py`) — see the class below;
@@ -1180,14 +1595,34 @@ path — never by basename — with its reason at the entry. On the **items** si
   re-read under the write lock, because a trashed `kids_book` row must be
   rewritten too, and its twin lookup, which predicts the
   `UNIQUE(isbn, media_type)` collision the rewrite would otherwise hand to the
-  database.
+  database;
+- the collision-with-Trash lookups in `services/item_write.py` — the insert
+  funnel's two slot lookups, the update funnel's two, and `trashed_title`,
+  which names the blocking row on the edit page. They read the physical table
+  because the constraints do;
+- the four sync external-id matchers — `services/audiobookshelf.py`,
+  `services/komga_records.py`, `services/romm_records.py`,
+  `routers/hardcover.py` — which must *see* a trashed twin in order to leave
+  it alone (see *Writing items* above);
+- the Trash service (`services/trash.py`) — the expired count and the ids Empty
+  expired purges, `copy_state` (which tells `restore_copy`'s three `None`
+  outcomes apart), `purge_item`'s guard and the Trash page's listing. Trash is
+  the one surface whose whole job is the rows the views hide;
+- the two portable exports, which carry Trash: the archive's item read
+  (`services/archive.py`) and the CSV export's editor/admin branch
+  (`routers/items_csv.py` — a viewer's export stays on `items_live`, because
+  the Trash page is editor-only);
+- the archive import's trashed-twin lookup (`services/archive.py`, three
+  statements: ISBN, UPC, title/author) and its pre-import `MAX(id)` bound, one
+  statement text read by both the plan and apply stages. The bound is physical
+  so a trashed row numbered above the live maximum is still inside it.
 
-On the **copies** side, 8 entries excusing 8 reads, and they are all **one
-class: a read that exists to predict a UNIQUE violation reads the physical
-table, because the constraint does.** A trashed row still occupies its unique
-slot, so a guard asking "will this insert collide?" must see trashed rows or it
-predicts *no collision* and hands the collision to SQLite. `item_copies` carries
-three such rules, and each has its mirroring reads:
+On the **copies** side, 16 entries excusing 16 reads. **Eight are one class: a
+read that exists to predict a UNIQUE violation reads the physical table,
+because the constraint does.** A trashed row still occupies its unique slot, so
+a guard asking "will this insert collide?" must see trashed rows or it predicts
+*no collision* and hands the collision to SQLite. `item_copies` carries three
+such rules, and each has its mirroring reads:
 
 | rule | reads that stay physical |
 |---|---|
@@ -1203,9 +1638,25 @@ classes** — `add_copy` reads the highest `copy_number` (predicts the constrain
 and whether the item has any copy at all (an ordinary read) and is therefore
 split in two, the `MAX` on `item_copies` and the `COUNT(*)` on `copies_live`.
 
-The partial unique index `idx_item_copies_one_primary` needs no exemption, on
-the stated contract that trashing a copy also demotes it. The three
-primary-lookup reads that go through the view depend on that contract holding.
+**The other eight are a different class, and say so at their entries**, because
+a reader who generalises the rule above would "fix" them by repointing them at
+the view. All read the physical table to find a row the view deliberately
+hides, and none predicts a constraint: `restore_copy` and `purge_copy`
+(`services/item_copies.py`), which have to start from the trashed copy they act
+on; the four Trash service reads above that join copies; the archive export's
+`_copies_by_item` (`services/archive.py`), which carries trashed copies into the
+archive; and `_reparent_copies`' row-selection read
+(`services/item_merge.py`), which moves a merged item's trashed copies onto the
+keeper — through the view they would stay parented to the husk and be destroyed
+by its `ON DELETE CASCADE`, losing a restorable row for good.
+
+The partial unique index `idx_item_copies_one_primary` needs no exemption,
+because `trash_copy` demotes a copy in the same statement that stamps it
+(`tests/test_trash_funnel.py::TestTheGeminiN1Contract` pins it). That is what
+lets `add_copy` decide primary from a `copies_live` census unchanged: without
+the demote, trashing an item's only primary copy and adding another would
+collide with the trashed row still holding the slot. The three primary-lookup
+reads that go through the view depend on the same contract.
 
 A stale allowlist entry fails the suite, exactly as the write funnel's does, and
 so does one whose declared hit count drifts from what the code produces.
@@ -1241,12 +1692,19 @@ not wait for it.
 
 ## Security posture
 
-Non-root container, HTTPS from first boot, strict CSP, CSRF everywhere,
+Non-root container, HTTPS from first boot by default (`SHELF_TLS=off` hands TLS to a proxy), strict CSP, CSRF everywhere,
 bcrypt with a constant-cost login path (an unknown username costs the same
 as a wrong password, so timing does not enumerate accounts), short-lived
 sliding JWTs, per-IP rate limiting, encrypted secrets,
 write-only credential fields, allow-listed image hosts for cover downloads,
 `noindex` + unguessable tokens on share links.
+
+**bcrypt never runs on the event loop.** Every hash and verify in a route goes
+through the thread pool, and never while a write transaction is open, so a
+burst of logins cannot stall other requests or hold SQLite's write lock.
+**A restore outranks every earlier session:** it sets each user's token version
+above the highest version this install issued before the restore, so no cookie
+from before it authenticates afterwards.
 
 **The database holds no key material.** The credential-encryption key
 (`data/encryption.key`, or `SHELF_ENCRYPTION_KEY`) and the session-signing key

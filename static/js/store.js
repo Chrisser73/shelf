@@ -93,33 +93,48 @@
         }).then(function (r) {
             if (r.status === 401 || r.status === 403) {
                 var hint = $('sync-hint');
-                hint.textContent = 'Sign in to Shelf to sync your queued scans.';
-                hint.classList.remove('hidden');
-                throw new Error('auth');
+                return r.json().catch(function () { return null; }).then(function (body) {
+                    hint.textContent = (r.status === 403 && body && body.error === 'feature_disabled')
+                        ? 'Store Mode is turned off on this Shelf. Your queued scans are kept.'
+                        : 'Sign in to Shelf to sync your queued scans.';
+                    hint.classList.remove('hidden');
+                    throw new Error('auth');
+                });
             }
             if (!r.ok) throw new Error(r.status);
             return r.json();
         }).then(function (data) {
             var handled = {};
             var unreadable = 0;
+            var restored = 0;
             (data.results || []).forEach(function (res) {
                 handled[normalizeCode(res.isbn)] = true;
                 if (res.status === 'unreadable') unreadable++;
+                if (res.status === 'restored') restored++;
                 // Make freshly wishlisted books match on an immediate re-scan.
                 // 'unreadable' is included so re-scanning the same bad barcode
                 // matches the row the server just made instead of queueing a
                 // second one — there is no ISBN on it to dedupe against.
+                // 'restored' is a status the server can now return, and every
+                // returned status must have a branch here: the entry is
+                // dropped from the queue above regardless, so one this block
+                // does not index is a book the next scan cannot match.
                 if (res.status === 'wishlisted' || res.status === 'added_bare' ||
-                    res.status === 'duplicate' || res.status === 'unreadable') {
+                    res.status === 'duplicate' || res.status === 'unreadable' ||
+                    res.status === 'restored') {
                     index[normalizeCode(res.isbn)] = {
                         title: res.title || ('ISBN ' + res.isbn),
                         authors: null,
-                        owned: res.status === 'duplicate',
+                        // A restored row carries its real ownership; only the
+                        // other statuses can be inferred from the status.
+                        owned: res.owned !== undefined
+                            ? !!res.owned
+                            : res.status === 'duplicate',
                     };
                 }
             });
             setQueue(getQueue().filter(function (e) { return !handled[normalizeCode(e.isbn)]; }));
-            showSyncResult(unreadable);
+            showSyncResult(unreadable, restored);
             updateStatus();
         }).catch(function () { renderQueue(); });
     }
@@ -127,13 +142,22 @@
     // A barcode that failed its check digit is still saved, as a titled
     // wishlist row with no ISBN. Say so: the queue block that would otherwise
     // carry the news hides itself the moment the flush empties it.
-    function showSyncResult(unreadable) {
+    function showSyncResult(unreadable, restored) {
         var el = $('sync-result');
         if (!el) return;
-        if (!unreadable) { el.classList.add('hidden'); el.textContent = ''; return; }
-        el.textContent = unreadable === 1
-            ? "1 barcode didn't scan cleanly — saved to your wishlist to fix later."
-            : unreadable + " barcodes didn't scan cleanly — saved to your wishlist to fix later.";
+        var parts = [];
+        if (unreadable) {
+            parts.push(unreadable === 1
+                ? "1 barcode didn't scan cleanly — saved to your wishlist to fix later."
+                : unreadable + " barcodes didn't scan cleanly — saved to your wishlist to fix later.");
+        }
+        if (restored) {
+            parts.push(restored === 1
+                ? '1 restored from Trash.'
+                : restored + ' restored from Trash.');
+        }
+        if (!parts.length) { el.classList.add('hidden'); el.textContent = ''; return; }
+        el.textContent = parts.join(' ');
         el.classList.remove('hidden');
     }
 

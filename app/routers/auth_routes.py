@@ -3,13 +3,16 @@ import sqlite3
 
 from fastapi import APIRouter, Form, Request, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.auth import (
+    TOKEN_VERSION_HIGH_WATER,
     hash_password, verify_password, create_token,
     set_auth_cookie, clear_auth_cookie, get_user_count,
     require_role,
 )
-from app.config import get_client_ip
+from app import features
+from app.config import get_client_ip, JWT_EXPIRY_SECONDS
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,12 @@ router = APIRouter()
 
 # --- Public pages ---
 
+def _login_context(error: str | None):
+    return {
+        "error": error,
+        "session_days": JWT_EXPIRY_SECONDS // 86400,
+    }
+
 
 @router.get("/login")
 async def login_page(request: Request):
@@ -32,11 +41,16 @@ async def login_page(request: Request):
     if user:
         return RedirectResponse(url="/", status_code=303)
     templates = request.app.state.templates
-    return templates.TemplateResponse(request, "login.html", {"error": None})
+    return templates.TemplateResponse(request, "login.html", _login_context(None))
 
 
 @router.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+async def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    remember_me: bool = Form(False),
+):
     templates = request.app.state.templates
     with get_db() as db:
         user = db.execute(
@@ -46,24 +60,28 @@ async def login(request: Request, username: str = Form(...), password: str = For
 
     if not user:
         # One bcrypt verification on both known and unknown username paths.
-        verify_password("dummy", _DUMMY_PASSWORD_HASH)
+        await run_in_threadpool(verify_password, "dummy", _DUMMY_PASSWORD_HASH)
         logger.warning("Failed login attempt for username=%s from %s", username, get_client_ip(request))
         return templates.TemplateResponse(
             request, "login.html",
-            {"error": "Invalid username or password"},
+            _login_context("Invalid username or password"),
             status_code=401,
         )
-    if not verify_password(password, user["password"]):
+    if not await run_in_threadpool(verify_password, password, user["password"]):
         logger.warning("Failed login attempt for username=%s from %s", username, get_client_ip(request))
         return templates.TemplateResponse(
             request, "login.html",
-            {"error": "Invalid username or password"},
+            _login_context("Invalid username or password"),
             status_code=401,
         )
 
-    token = create_token(user["id"], user["username"], user["role"], user["display_name"], user["token_version"])
+    token = create_token(
+        user["id"], user["username"], user["role"], user["display_name"], user["token_version"],
+        expiry_seconds=JWT_EXPIRY_SECONDS,
+        persistent=remember_me,
+    )
     response = RedirectResponse(url="/", status_code=303)
-    set_auth_cookie(response, token)
+    set_auth_cookie(request, response, token)
     logger.info("User '%s' logged in from %s", username, get_client_ip(request))
     return response
 
@@ -78,12 +96,23 @@ async def logout():
 # --- Setup wizard (only works when no users exist) ---
 
 
+def _setup_page(request: Request, error: str | None, profile: str = "standard"):
+    """Render the setup form, keeping the submitted profile selected.
+
+    The profile list comes from the route context, not a Jinja global (G92).
+    """
+    return request.app.state.templates.TemplateResponse(request, "setup.html", {
+        "error": error,
+        "profiles": features.profile_choices(),
+        "selected_profile": profile if profile in features.PROFILES else "standard",
+    })
+
+
 @router.get("/setup")
 async def setup_page(request: Request):
     if get_user_count() > 0:
         return RedirectResponse(url="/login", status_code=303)
-    templates = request.app.state.templates
-    return templates.TemplateResponse(request, "setup.html", {"error": None})
+    return _setup_page(request, None)
 
 
 @router.post("/setup")
@@ -93,31 +122,27 @@ async def setup(
     display_name: str = Form(""),
     password: str = Form(...),
     password_confirm: str = Form(...),
+    # Absent means Standard: an old cached form or a script posting the four
+    # account fields gets the default, not a refusal.
+    profile: str = Form("standard"),
 ):
     if get_user_count() > 0:
         return RedirectResponse(url="/login", status_code=303)
-
-    templates = request.app.state.templates
 
     username = username.strip()
     display_name = display_name.strip() or username
 
     if len(password) < 8:
-        return templates.TemplateResponse(
-            request, "setup.html",
-            {"error": "Password must be at least 8 characters"},
-        )
+        return _setup_page(request, "Password must be at least 8 characters", profile)
     if password != password_confirm:
-        return templates.TemplateResponse(
-            request, "setup.html",
-            {"error": "Passwords do not match"},
-        )
+        return _setup_page(request, "Passwords do not match", profile)
     if not username or len(username) < 2:
-        return templates.TemplateResponse(
-            request, "setup.html",
-            {"error": "Username must be at least 2 characters"},
-        )
+        return _setup_page(request, "Username must be at least 2 characters", profile)
+    if profile not in features.PROFILES:
+        return _setup_page(request, "Choose how much of Shelf to start with")
 
+    # bcrypt never runs while a write transaction is open.
+    hashed = await run_in_threadpool(hash_password, password)
     with get_db() as db:
         # The initial get_user_count() is only a fast path. Serialize the
         # authoritative "still no users?" decision with the insert so two
@@ -127,13 +152,16 @@ async def setup(
             return RedirectResponse(url="/login", status_code=303)
         db.execute(
             "INSERT INTO users (username, password, display_name, role) VALUES (?, ?, ?, 'admin')",
-            (username, hash_password(password), display_name),
+            (username, hashed, display_name),
         )
+        # Same transaction as the admin row: no install holds an admin and
+        # half a profile (G118). No logging in here (G3).
+        features.apply_profile(db, profile)
         user = db.execute("SELECT id, username, role, display_name, token_version FROM users WHERE username = ?", (username,)).fetchone()
 
     token = create_token(user["id"], user["username"], user["role"], user["display_name"], user["token_version"])
     response = RedirectResponse(url="/", status_code=303)
-    set_auth_cookie(response, token)
+    set_auth_cookie(request, response, token)
     logger.info("Setup completed: admin user '%s' created", username)
     return response
 
@@ -168,11 +196,12 @@ async def create_user(
     if not username or len(username) < 2:
         return {"ok": False, "message": "Username must be at least 2 characters"}
 
+    hashed = await run_in_threadpool(hash_password, password)
     try:
         with get_db() as db:
             db.execute(
                 "INSERT INTO users (username, password, display_name, role) VALUES (?, ?, ?, ?)",
-                (username, hash_password(password), display_name, role),
+                (username, hashed, display_name, role),
             )
     except sqlite3.IntegrityError:
         logger.warning("Failed to create user '%s': username already exists", username)
@@ -223,13 +252,14 @@ async def reset_user_password(
     if len(password) < 8:
         return {"ok": False, "message": "Password must be at least 8 characters"}
 
+    hashed = await run_in_threadpool(hash_password, password)
     with get_db() as db:
         target = db.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
         if not target:
             return {"ok": False, "message": "User not found"}
         db.execute(
             "UPDATE users SET password = ?, token_version = token_version + 1, updated_at = datetime('now') WHERE id = ?",
-            (hash_password(password), user_id),
+            (hashed, user_id),
         )
 
     logger.info("Password reset for user id=%d by admin", user_id)
@@ -250,22 +280,31 @@ async def change_own_password(
 
     with get_db() as db:
         row = db.execute("SELECT password FROM users WHERE id = ?", (user["id"],)).fetchone()
-        if not row or not verify_password(current_password, row["password"]):
-            logger.warning("Failed password change attempt for user '%s'", user["username"])
-            return {"ok": False, "message": "Current password is incorrect"}
-        db.execute(
-            "UPDATE users SET password = ?, token_version = token_version + 1, updated_at = datetime('now') WHERE id = ?",
-            (hash_password(new_password), user["id"]),
+    if not row or not await run_in_threadpool(verify_password, current_password, row["password"]):
+        logger.warning("Failed password change attempt for user '%s'", user["username"])
+        return {"ok": False, "message": "Current password is incorrect"}
+    stored_hash = row["password"]
+    new_hash = await run_in_threadpool(hash_password, new_password)
+    with get_db() as db:
+        # Matching the hash that was verified refuses a password changed in between (G18).
+        cursor = db.execute(
+            "UPDATE users SET password = ?, token_version = token_version + 1, updated_at = datetime('now') "
+            "WHERE id = ? AND password = ?",
+            (new_hash, user["id"], stored_hash),
         )
-        row = db.execute("SELECT token_version FROM users WHERE id = ?", (user["id"],)).fetchone()
-        new_tv = row["token_version"]
+        new_tv = None
+        if cursor.rowcount:
+            new_tv = db.execute("SELECT token_version FROM users WHERE id = ?", (user["id"],)).fetchone()["token_version"]
+    if new_tv is None:
+        logger.warning("Failed password change attempt for user '%s'", user["username"])
+        return {"ok": False, "message": "Current password is incorrect"}
 
     logger.info("User '%s' changed their password", user["username"])
     # Issue a new token with updated version so the user stays logged in
     new_token = create_token(user["id"], user["username"], user["role"], user.get("display_name"), new_tv)
     from fastapi.responses import JSONResponse
     resp = JSONResponse({"ok": True, "message": "Password changed"})
-    set_auth_cookie(resp, new_token)
+    set_auth_cookie(request, resp, new_token)
     return resp
 
 
@@ -286,18 +325,31 @@ async def change_display_name(
             "UPDATE users SET display_name = ?, updated_at = datetime('now') WHERE id = ?",
             (display_name, user["id"]),
         )
-        # Re-read token_version so the refreshed JWT matches the DB value
-        row = db.execute(
-            "SELECT token_version FROM users WHERE id = ?", (user["id"],)
-        ).fetchone()
-        token_version = row["token_version"] if row else 1
 
-    # Refresh the JWT so the nav bar updates immediately
-    token = create_token(user["id"], user["username"], user["role"], display_name, token_version)
+    # The display-name update does not bump the version, so the resolved one is current (G10).
+    token = create_token(user["id"], user["username"], user["role"], display_name, user["token_version"])
     from fastapi.responses import JSONResponse
     resp = JSONResponse({"ok": True, "message": "Display name updated", "display_name": display_name})
-    set_auth_cookie(resp, token)
+    set_auth_cookie(request, resp, token)
     return resp
+
+
+@router.post("/api/account/user-symbol")
+async def change_own_user_symbol(
+    request: Request,
+    background: str = Form(""),
+    text: str = Form(""),
+    show_initial: bool = Form(False),
+    _=Depends(require_role("viewer")),
+):
+    """Save the signed-in user's account-menu symbol preferences."""
+    from app.services.user_preferences import set_user_symbol_preferences
+
+    with get_db() as db:
+        ok, message = set_user_symbol_preferences(
+            db, request.state.user["id"], background, text, show_initial,
+        )
+    return {"ok": ok, "message": message}
 
 
 @router.delete("/api/users/{user_id}")
@@ -307,7 +359,7 @@ async def delete_user(request: Request, user_id: int, _=Depends(require_role("ad
         return {"ok": False, "message": "Cannot delete your own account"}
 
     with get_db() as db:
-        target = db.execute("SELECT id, role FROM users WHERE id = ?", (user_id,)).fetchone()
+        target = db.execute("SELECT id, role, token_version FROM users WHERE id = ?", (user_id,)).fetchone()
         if not target:
             return {"ok": False, "message": "User not found"}
 
@@ -316,6 +368,12 @@ async def delete_user(request: Request, user_id: int, _=Depends(require_role("ad
             if admin_count <= 1:
                 return {"ok": False, "message": "Cannot delete the last admin"}
 
+        # A restore must outrank this user's sessions too, after the row is gone.
+        db.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET "
+            "value = MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER))",
+            (TOKEN_VERSION_HIGH_WATER, str(target["token_version"])),
+        )
         db.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
     logger.info("User id=%d deleted by admin '%s'", user_id, current_user["username"])

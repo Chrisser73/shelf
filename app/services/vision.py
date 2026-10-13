@@ -1,4 +1,4 @@
-"""Vision-based shelf-photo intake: read book spines and recognize covers.
+"""Vision-based photo intake: read item spines and recognize covers.
 
 Three backends, selected by the `vision_provider` setting:
 - "anthropic": Claude vision via the official SDK (best spine accuracy).
@@ -9,7 +9,8 @@ Three backends, selected by the `vision_provider` setting:
   vision-capable model such as gemma3).
 
 All return the same shape: a list of
-{"title": str, "authors": str|None, "isbn": str|None, "source": "read"|"recognized"}.
+{"title": str, "authors": str|None, "isbn": str|None, "media_type": str,
+ "source": "read"|"recognized"}.
 `isbn` is a checksum-validated ISBN-13 transcribed from the photo (never
 recalled from the model's knowledge); `source` says whether the row was
 read off the item or recognized from its cover art.
@@ -29,45 +30,80 @@ import re
 
 import httpx
 
-from app.config import MAX_TILES_PER_REQUEST
+from app.config import MAX_TILES_PER_REQUEST, MEDIA_TYPES, canonical_media_type
 from app.services import isbn as isbn_svc
+from app.services import item_write
+from app.services.national import SEARCH_LANGS
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
+DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+DEFAULT_OPENAI_MODEL = "gpt-6-luna"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "gemma3:12b"
+# The recommended reverse-proxy window is 1200 seconds. Leave a little room
+# for the proxy to return Shelf's JSON result instead of producing its own
+# timeout page first.
+OLLAMA_REQUEST_TIMEOUT = 1100.0
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
+# Combined budget for one /analyze call. A tiled submission has no per-file
+# cap of its own (MAX_IMAGE_BYTES bounds only each tile), so an editor could
+# otherwise submit an unbounded number of near-10MB tiles in one request —
+# RAM plus billed vision calls (review 2026-09-23, B-4). 300MB is generous.
+# A tiled photo's total size tracks its pixel count, not its tile count:
+# measured on real shelf photos cropped per compute_grid() and encoded as
+# the client does (JPEG, quality 0.92), a 50MP photo came to ~8MB under
+# every provider cap, largest tile 0.69MB — so even ~190MP is ~30MB.
+MAX_TOTAL_INTAKE_BYTES = 300 * 1024 * 1024
+
 PROMPT = (
-    "This photo shows books — on a shelf, in a stack, or laid out face-up with "
+    "This photo shows catalog items — books, audiobooks, movies, music, comics, "
+    "or video games — on a shelf, in a stack, or laid out face-up with "
     "the front or back cover showing. Text on spines may run vertically or "
     "horizontally, and a cover may be rotated or upside down. Examine the image "
-    "carefully, section by section, and list EVERY distinct book you can "
-    "identify — do not stop after the most obvious ones. For each book: "
+    "carefully, section by section, and list EVERY distinct item you can "
+    "identify — do not stop after the most obvious ones. For each item: "
     "(1) If the text is legible, transcribe it exactly — the title as printed, "
-    'the author if readable (null if not) — and set "source" to "read". '
+    'the creator if readable (use the authors field; null if not) — and set "source" to "read". '
     "(2) If the text is absent, illegible, or too partial to stand on its own "
-    "but you recognize the book from its cover — artwork, design, typography, "
-    "stylized or partial text — give its canonical title and author and set "
+    "but you recognize the item from its cover — artwork, design, typography, "
+    "stylized or partial text — give its canonical title and creator and set "
     '"source" to "recognized". Prefer "read" whenever the full title is legible, '
-    "and never replace a legible title with a different book's. "
+    "and never replace a legible title with a different item's. "
+    "A clear front cover is enough to identify a specific game or release: use its "
+    "cover art, title logo, platform branding, age rating, and publisher marks together; "
+    "do not reduce it to partial OCR when that visual evidence identifies the item. "
+    "For a shelf/stack photograph, first identify the shared context (for example a Nintendo 64 logo repeated on game boxes) and then treat EACH visible box/spine as one item. Logos such as Nintendo, Konami, PEGI, USK, or a platform mark are evidence about platform, publisher, region or language — never a game title by themselves. Do not return brand names or invented partial-title guesses as items. Rotate an upside-down spine mentally before identifying it; require the title lettering, package style and platform clues to agree before naming a game. "
+    "Titles and metadata may use any writing system, including Japanese kana "
+    "or kanji. When readable, preserve the printed original script exactly; "
+    "do not translate, romanize, or invent a Latin title. "
     '(3) Give "isbn" only if the ISBN digits are actually printed and readable '
     "in the photo, usually beside the back-cover barcode, and transcribe those "
     "digits exactly. Never supply an ISBN from memory or from what you know "
-    "about the book — use null whenever the digits are not visible. "
-    "(4) Skip objects that are not books."
+    "about the item — use null whenever the digits are not visible. "
+    f"(4) Set media_type to one of: {', '.join(MEDIA_TYPES)}. Once an item is confidently identified, "
+    "also supplement publisher and original release/publication year from reliable knowledge when you are reasonably certain; for a recognized game, use reliable knowledge for developer, publisher, and year even when they are not printed on the cover. A confident game identity is normally sufficient to populate all three — do not leave year, developer, or publisher blank merely because they are absent from the photographed packaging; "
+    "omit them rather than guess when uncertain or when they could be specific to a regional edition. "
+    "For video games, provide the console or platform name in platform, the language printed on the item in language (or multi for multiple languages), "
+    "the release region in region (PAL, NTSC, NTSC-J, PAL-M, or unknown), and an English or locally searchable alternate_title when the printed title uses another script or regional title. Infer PAL from PAL/European packaging and PEGI markings, German-language packaging or USK markings; infer NTSC-J from Japanese packaging. Never call a clearly German/European box NTSC. If language is not readable use multi rather than guessing one language. "
+    "For a game, put its developer in authors and its publisher in publisher when confidently identified. Preserve every visible part of a cover title, including Japanese and Latin logo text such as DX; never shorten a title merely because its artwork is familiar. The alternate_title must be the official international/searchable name of this exact pictured edition only — never merge paired releases or add a related game after a slash. For example, a cover for Pokémon Shining Pearl must return alternate_title exactly Pokémon Shining Pearl, never Pokémon Brilliant Diamond / Pokémon Shining Pearl; the paired release is not the title of that individual item. "
+    "For films use publisher for the studio or distributor, "
+    "for music use the label, and for books use the publisher. Use authors for the appropriate creator, artist, or director. "
+    "Classify collector_condition from the pictured physical item, never from the game label or cover art. A bare cartridge or bare optical disc is always loose: this includes the grey NES cartridge, SNES cartridge, Game Boy/Game Boy Color/Game Boy Advance cartridge, Nintendo DS card, Nintendo 3DS card, and PlayStation, Xbox, GameCube, Wii, DVD or Blu-ray discs shown without their original case. These items are not boxed merely because they have a printed label. Use boxed only when the original retail box/case is visibly present with the game; use cib only when box/case, cartridge/disc and manual or inserts are visibly present together. A photographed game box without its cartridge/disc is at least boxed. If the packaging is not visible clearly enough, leave collector_condition empty rather than guessing boxed. "
+    "(5) The response property is named books for backward compatibility, but "
+    "it must contain every catalog item, not only books. "
+    "(6) Skip objects that are not catalog items."
 )
 
 TILED_PROMPT_SUFFIX = (
     " IMPORTANT: these {n} images are overlapping tiles of ONE photograph, "
     "ordered left-to-right then top-to-bottom. Adjacent tiles share an "
-    "overlap region, so the same book may appear in two tiles — merge such "
-    "duplicates and list each distinct book exactly once."
+    "overlap region, so the same item may appear in two tiles — merge such "
+    "duplicates and list each distinct item exactly once."
 )
 
 # Appended for providers without a schema-enforced output mode (Ollama, and
@@ -78,8 +114,20 @@ JSON_ONLY_SUFFIX = (
     # copies "... or null" and "read or recognized" through verbatim, and
     # _clean would coerce the latter to "read", silently dropping the badge.
     ' Respond with JSON only. Each "source" must be exactly "read" or '
-    '"recognized"; use JSON null for an unread author or ISBN. Example: '
-    '{"books": [{"title": "Dune", "authors": null, "isbn": null, "source": "read"}]}'
+    '"recognized"; use JSON null for an unread creator or ISBN. Example: '
+    '{"books": [{"title": "Dune", "authors": null, "publisher": null, "publish_year": null, "isbn": null, "media_type": "book", "platform": null, "source": "read"}]}'
+)
+
+# Local models can recognize a cover or cartridge yet return an empty list when
+# they infer that the legacy output key "books" excludes games. State the
+# crucial distinction in short, concrete language directly before the JSON
+# contract, where it has the most influence on smaller vision models.
+OLLAMA_RECOGNITION_SUFFIX = (
+    " IMPORTANT: recognizable game cartridges, discs, box art, and covers are "
+    "catalog items even when no barcode or full spine text is visible. Return "
+    "each recognizable game with media_type video_game and source recognized; "
+    "only return an empty books array when you genuinely recognize no catalog "
+    "item at all."
 )
 
 # Fuzzy-title similarity at or above which two tile results are the same book
@@ -95,10 +143,25 @@ BOOKS_SCHEMA = {
                 "properties": {
                     "title": {"type": "string"},
                     "authors": {"type": ["string", "null"]},
+                    "publisher": {"type": ["string", "null"]},
+                    "publish_year": {"type": ["integer", "null"]},
                     "isbn": {"type": ["string", "null"]},
+                    "media_type": {"type": "string", "enum": list(MEDIA_TYPES)},
+                    "platform": {"type": ["string", "null"]},
+                    "language": {"type": ["string", "null"]},
+                    "region": {"type": ["string", "null"]},
+                    "alternate_title": {"type": ["string", "null"]},
+                    # Anthropic structured output rejects mixed null/string
+                    # enums. The property is optional, so absence cleanly
+                    # represents an unknown condition for every provider.
+                    "collector_condition": {
+                        "type": "string",
+                        "enum": ["cib", "boxed", "loose"],
+                        "description": "Physical state only: bare cartridges or discs are loose; boxed and cib require visible original packaging.",
+                    },
                     "source": {"type": "string", "enum": ["read", "recognized"]},
                 },
-                "required": ["title", "authors", "isbn", "source"],
+                "required": ["title", "authors", "isbn", "media_type", "source"],
                 "additionalProperties": False,
             },
         }
@@ -165,7 +228,13 @@ def _clean(raw: object) -> list[dict]:
         for entry in raw.get("books") or []:
             if not isinstance(entry, dict):
                 continue
-            title = (entry.get("title") or "").strip()
+            title = item_write.repair_malformed_unicode((entry.get("title") or "").strip())
+            title = re.sub(r"\bPokken Tournament\b", "Pokkén Tournament", title, flags=re.IGNORECASE)
+            # Vision/OCR frequently returns an otherwise correct title in
+            # all caps. Preserve normal mixed case verbatim, but make the
+            # all-caps transcription readable before it reaches review.
+            if title and any(ch.isalpha() for ch in title) and title.upper() == title:
+                title = title.title()
             if not title:
                 continue
             authors = entry.get("authors")
@@ -173,12 +242,46 @@ def _clean(raw: object) -> list[dict]:
             if authors and authors.lower() in ("null", "none", "n/a", "unknown"):
                 authors = None
             source = entry.get("source")
-            books.append({
+            media_type = canonical_media_type(entry.get("media_type"))
+            cleaned = {
                 "title": title,
                 "authors": authors or None,
                 "isbn": clean_isbn(entry.get("isbn")),
+                "media_type": media_type if media_type in MEDIA_TYPES else "book",
                 "source": source if source in ("read", "recognized") else "read",
-            })
+            }
+            publisher = entry.get("publisher")
+            if isinstance(publisher, str) and publisher.strip():
+                cleaned["publisher"] = publisher.strip()
+            platform = entry.get("platform")
+            if isinstance(platform, str) and platform.strip():
+                cleaned["platform"] = platform.strip()
+            for key in ("language", "alternate_title"):
+                value = entry.get(key)
+                if isinstance(value, str) and value.strip():
+                    value = value.strip()
+                    if key == "language":
+                        # Models commonly say "Japanese" while Shelf stores
+                        # ISO codes for filtering. Keep an unknown value rather
+                        # than discard it, but normalize every known label.
+                        labels = {label.casefold(): code for code, label in SEARCH_LANGS.items()}
+                        value = labels.get(value.casefold(), value.casefold() if value.casefold() in SEARCH_LANGS else value)
+                    else:
+                        value = item_write.repair_malformed_unicode(value)
+                        # The official searchable spelling includes the
+                        # accent, even where OCR gives plain "Pokken".
+                        value = re.sub(r"\\bPokken Tournament\\b", "Pokkén Tournament", value, flags=re.IGNORECASE)
+                    cleaned[key] = value
+            region = entry.get("region")
+            if isinstance(region, str) and region.strip():
+                cleaned["region"] = region.strip()
+            year = entry.get("publish_year")
+            if isinstance(year, int) and 1900 <= year <= 2100:
+                cleaned["publish_year"] = year
+            condition = entry.get("collector_condition")
+            if isinstance(condition, str) and condition.strip().lower() in ("cib", "boxed", "loose"):
+                cleaned["collector_condition"] = condition.strip().lower()
+            books.append(cleaned)
     return books
 
 
@@ -256,7 +359,9 @@ def _more_complete(candidate: dict, current: dict) -> bool:
     return len(candidate["title"]) > len(current["title"])
 
 
-async def detect_spines(images: list[tuple[bytes, str]], settings: dict) -> list[dict]:
+async def detect_spines(
+    images: list[tuple[bytes, str]], settings: dict, *, media_type_hint: str | None = None,
+) -> list[dict]:
     """Dispatch to the configured provider. Raises VisionError on failure.
 
     `images` is [(bytes, mime), ...] — one entry for a normal photo, several
@@ -265,39 +370,49 @@ async def detect_spines(images: list[tuple[bytes, str]], settings: dict) -> list
     provider = settings.get("vision_provider") or ""
     if provider == "anthropic":
         if len(images) <= MAX_TILES_PER_REQUEST:
-            books = await _detect_anthropic(images, settings)
+            books = await _detect_anthropic(images, settings, media_type_hint=media_type_hint)
             # The prompt asks the model to merge overlap duplicates; sweep
             # once more in code to catch the ones it misses.
             return merge_tile_books([books]) if len(images) > 1 else books
-        results = [await _detect_anthropic([img], settings) for img in images]
+        results = [await _detect_anthropic([img], settings, media_type_hint=media_type_hint) for img in images]
         return merge_tile_books(results)
     if provider == "openai":
         if len(images) <= MAX_TILES_PER_REQUEST:
-            books = await _detect_openai(images, settings)
+            books = await _detect_openai(images, settings, media_type_hint=media_type_hint)
             # The prompt asks the model to merge overlap duplicates; sweep
             # once more in code to catch the ones it misses.
             return merge_tile_books([books]) if len(images) > 1 else books
-        results = [await _detect_openai([img], settings) for img in images]
+        results = [await _detect_openai([img], settings, media_type_hint=media_type_hint) for img in images]
         return merge_tile_books(results)
     if provider == "ollama":
         if len(images) == 1:
-            return await _detect_ollama(images[0][0], settings)
-        results = [await _detect_ollama(img, settings) for img, _ in images]
+            return await _detect_ollama(images[0][0], settings, media_type_hint=media_type_hint)
+        results = [await _detect_ollama(img, settings, media_type_hint=media_type_hint) for img, _ in images]
         return merge_tile_books(results)
     raise VisionError("No vision provider configured — set one up in Settings → Integrations")
 
 
-def _prompt_for(count: int) -> str:
+def _prompt_for(count: int, media_type_hint: str | None = None) -> str:
+    hint = ""
+    if media_type_hint in MEDIA_TYPES:
+        hint = (
+            f" The user says this photo is likely {MEDIA_TYPES[media_type_hint]}. "
+            "Use that only as a clue: inspect every item and keep its actual media_type "
+            "when the image shows mixed media."
+        )
     if count <= 1:
-        return PROMPT
-    return PROMPT + TILED_PROMPT_SUFFIX.format(n=count)
+        return PROMPT + hint
+    return PROMPT + hint + TILED_PROMPT_SUFFIX.format(n=count)
 
 
-async def _detect_anthropic(images: list[tuple[bytes, str]], settings: dict) -> list[dict]:
+async def _detect_anthropic(
+    images: list[tuple[bytes, str]], settings: dict, *, media_type_hint: str | None = None,
+) -> list[dict]:
     api_key = settings.get("anthropic_api_key")
     if not api_key:
         raise VisionError("Anthropic API key is not configured")
     model = settings.get("anthropic_vision_model") or DEFAULT_ANTHROPIC_MODEL
+    reasoning = settings.get("anthropic_vision_reasoning") or ""
 
     import anthropic
 
@@ -312,15 +427,23 @@ async def _detect_anthropic(images: list[tuple[bytes, str]], settings: dict) -> 
         }
         for image_bytes, mime in images
     ]
-    content.append({"type": "text", "text": _prompt_for(len(images))})
+    content.append({"type": "text", "text": _prompt_for(len(images), media_type_hint)})
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
+        options = {
+            "model": model,
+            "max_tokens": 16000,
+            "output_config": {"format": {"type": "json_schema", "schema": BOOKS_SCHEMA}},
+            "messages": [{"role": "user", "content": content}],
+        }
+        # Adaptive thinking is opt-in. Leaving it unset remains compatible
+        # with older Claude models and avoids reasoning-token cost by default.
+        if reasoning:
+            options["thinking"] = {"type": "adaptive"}
+            options["output_config"]["effort"] = reasoning
         response = await client.messages.create(
-            model=model,
-            max_tokens=16000,
-            output_config={"format": {"type": "json_schema", "schema": BOOKS_SCHEMA}},
-            messages=[{"role": "user", "content": content}],
+            **options,
         )
     except anthropic.AuthenticationError:
         raise VisionError("Anthropic API key was rejected — check it in Settings")
@@ -346,7 +469,9 @@ async def _detect_anthropic(images: list[tuple[bytes, str]], settings: dict) -> 
         raise VisionError("The model returned an unreadable response — try again")
 
 
-async def _detect_openai(images: list[tuple[bytes, str]], settings: dict) -> list[dict]:
+async def _detect_openai(
+    images: list[tuple[bytes, str]], settings: dict, *, media_type_hint: str | None = None,
+) -> list[dict]:
     """Read spines via an OpenAI-compatible /chat/completions endpoint.
 
     Uses httpx directly (no SDK) so any compatible server works and respx can
@@ -360,8 +485,9 @@ async def _detect_openai(images: list[tuple[bytes, str]], settings: dict) -> lis
         raise VisionError("OpenAI API key is not configured")
     base_url = (settings.get("openai_base_url") or DEFAULT_OPENAI_BASE_URL).rstrip("/")
     model = settings.get("openai_vision_model") or DEFAULT_OPENAI_MODEL
+    reasoning = settings.get("openai_vision_reasoning") or "low"
 
-    content: list[dict] = [{"type": "text", "text": _prompt_for(len(images)) + JSON_ONLY_SUFFIX}]
+    content: list[dict] = [{"type": "text", "text": _prompt_for(len(images), media_type_hint) + JSON_ONLY_SUFFIX}]
     for image_bytes, mime in images:
         b64 = base64.standard_b64encode(image_bytes).decode()
         content.append({
@@ -371,16 +497,20 @@ async def _detect_openai(images: list[tuple[bytes, str]], settings: dict) -> lis
 
     payload = {
         "model": model,
-        # Classic Chat Completions field — the form every OpenAI-compatible
-        # server understands (reasoning models use max_completion_tokens, but
-        # those aren't the vision target here).
-        "max_tokens": 16000,
         "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": content}],
     }
+    # GPT-5.6/6 reasoning models use this Chat Completions spelling and the
+    # completion-token field.  Leaving the setting blank preserves broad
+    # OpenAI-compatible-server compatibility.
+    if reasoning:
+        payload["reasoning_effort"] = reasoning
+        payload["max_completion_tokens"] = 16000
+    else:
+        payload["max_tokens"] = 16000
     headers = {"Authorization": f"Bearer {api_key}"}
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=OLLAMA_REQUEST_TIMEOUT) as client:
             resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
     except httpx.HTTPError:
         raise VisionError(f"Could not reach the OpenAI API at {base_url}")
@@ -410,7 +540,9 @@ async def _detect_openai(images: list[tuple[bytes, str]], settings: dict) -> lis
         raise VisionError("The model returned an unreadable response — try again")
 
 
-async def _detect_ollama(image_bytes: bytes, settings: dict) -> list[dict]:
+async def _detect_ollama(
+    image_bytes: bytes, settings: dict, *, media_type_hint: str | None = None,
+) -> list[dict]:
     url = (settings.get("ollama_url") or DEFAULT_OLLAMA_URL).rstrip("/")
     model = settings.get("ollama_model") or DEFAULT_OLLAMA_MODEL
 
@@ -420,7 +552,7 @@ async def _detect_ollama(image_bytes: bytes, settings: dict) -> list[dict]:
         "format": "json",
         "messages": [{
             "role": "user",
-            "content": PROMPT + JSON_ONLY_SUFFIX,
+            "content": _prompt_for(1, media_type_hint) + OLLAMA_RECOGNITION_SUFFIX + JSON_ONLY_SUFFIX,
             "images": [base64.standard_b64encode(image_bytes).decode()],
         }],
     }

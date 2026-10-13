@@ -62,7 +62,7 @@ than on a push to `main`:
 | `restamp` | Push to `main` only. Rebuilds with `make css` and `make badges`, then commits **only the generated paths that actually changed** — any of `README.md`, `static/css/app.css`, `static/sw.js`, and never one already current — as `github-actions[bot]` (`Restamp generated output after merge`) and pushes to `main`. `test`, `css` and `e2e` below check out whatever this job produced (or the pushed commit unchanged, on a pull request or when nothing needed restamping) rather than the raw push |
 | `test` | `make test` and `make checks-fast` |
 | `e2e` | `make css`, then `make test-e2e` — the suite is always judged against a stylesheet rebuilt from the templates in that checkout |
-| `css` | Rebuilds with `make css`. The **rebuild** runs on every event, so a template or `tailwind.config.js` change that breaks compilation still fails cheaply. The **comparison** against the committed output fails on push to `main` and is advisory (a `::notice::`) on a pull request |
+| `css` | Rebuilds with `make css`. The **rebuild** runs on every event, so a template or `static/css/input.css` change that breaks compilation still fails cheaply. The **comparison** against the committed output fails on push to `main` and is advisory (a `::notice::`) on a pull request |
 | `generated-output` | Pull requests only. Fails if the merge result changes `static/css/app.css`, `sw.js`'s `SW_VERSION` or either README badge count, relative to the base branch |
 
 The split exists because **a pull request carries no generated output** — see
@@ -222,6 +222,9 @@ it posted from.
   and Alpine's own tag is the only deferred one and comes **last**. Disturb any
   of the three and the affected page throws `Undefined variable` once per
   binding, with the guard installed too late to say which file was lost.
+  A new `Alpine.data('name', …)` also needs a `name: 'file.js'` entry in the
+  guard's `SCRIPTS` map, or losing that file goes unreported — the same lint
+  fails until it is there.
 - **Raw `fetch()` must send `X-CSRF-Token`.** `make check-csrf` enforces;
   HTMX is configured globally in `base.html`.
 - **`MIGRATIONS` in `app/database.py` is append-only.** Never edit or
@@ -240,7 +243,8 @@ it posted from.
   `JOIN copies_live`, never the bare tables; `make check-deleted` enforces both
   and matches `JOIN` as well as `FROM`, because several files reach a table
   through a join alone. Writes stay on the physical tables, as do the reads
-  that exist to predict a UNIQUE violation (`GOTCHAS.md` G107).
+  that exist to predict a UNIQUE violation and the few that must *find* a row
+  the view hides — each allowlist entry states which (`GOTCHAS.md` G107).
 - **A route that decides on a `SELECT` guards and writes in one
   transaction.** `db.execute("BEGIN IMMEDIATE")` goes first in the block,
   above the guard query — a bare `SELECT` opens no transaction, so guarding in

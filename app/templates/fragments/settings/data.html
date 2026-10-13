@@ -2,6 +2,7 @@
    which was 1,517 lines: the largest template with the thinnest E2E
    coverage. Included by settings.html inside its `settingsTabs` x-data,
    so `tab` and `setTab()` resolve from the parent scope. #}
+{% import "fragments/settings/feature_off_note.html" as feature_notes %}
     <!-- Data Tab -->
     <div x-show="tab === 'data'" class="space-y-8">
 
@@ -137,6 +138,62 @@
                     </div>
                 </div>
             </div>
+
+            <div class="border-t border-shelf-border pt-5" data-testid="game-metadata-maintenance">
+                <h3 class="font-medium">Metadata maintenance</h3>
+                <p class="text-sm font-medium mt-3">Video Games</p>
+                <p class="text-xs text-shelf-muted mt-1">Finds missing game metadata with your configured AI and IGDB. Covers are never fetched, changed, or replaced.</p>
+                <div class="flex flex-wrap items-center gap-2 mt-3">
+                    <button @click="planGameMetadata()" :disabled="metaPlanning || metaApplying"
+                            class="px-4 py-2 bg-shelf-hover text-shelf-text rounded-lg text-sm hover:bg-shelf-border transition-colors disabled:opacity-50">
+                        <span x-show="!metaPlanning">Fetch All Metadata</span>
+                        <span x-show="metaPlanning"><i data-lucide="refresh-cw" class="w-4 h-4 animate-spin inline" aria-hidden="true"></i> Checking games...</span>
+                    </button>
+                    <span x-show="metaEstimate" class="text-xs text-shelf-muted" x-text="metaEstimate"></span>
+                </div>
+                <p x-show="metaError" class="text-sm text-shelf-error mt-2" x-text="metaError"></p>
+
+                <div x-show="metaPlan.length > 0" class="mt-5 space-y-4">
+                    <p class="text-sm text-shelf-muted">Review every proposed value before syncing. Yellow fields are the values that will be saved.</p>
+                    <template x-for="(row, i) in metaPlan" :key="row.id">
+                        <div class="border border-shelf-border rounded-lg p-4 grid gap-3" :class="row.include ? '' : 'opacity-60'">
+                            <div class="flex items-center justify-between gap-3">
+                            <label class="flex items-center gap-2 text-sm font-medium">
+                                <input type="checkbox" :checked="row.include" @change="toggleMeta(i)" class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                                <span x-text="row.current.title"></span>
+                            </label>
+                            <div>
+                                <button x-show="!isSingleConfirming(row.id) && !isSingleSyncing(row.id)" @click="requestSingleMetaSync(i)" :disabled="!row.include" class="px-3 py-1 bg-shelf-accent text-white rounded text-xs hover:bg-shelf-accent2 disabled:opacity-50">Sync item</button>
+                                <span x-show="isSingleConfirming(row.id)" class="inline-flex items-center gap-1"><button @click="applyGameMetadata()" class="px-3 py-1 bg-shelf-accent text-white rounded text-xs">Yes</button><button @click="cancelMetaSync()" class="px-3 py-1 bg-shelf-hover rounded text-xs">No</button></span>
+                                <span x-show="isSingleSyncing(row.id)" class="px-3 py-1 bg-shelf-accent text-white rounded text-xs"><i data-lucide="refresh-cw" class="w-3 h-3 animate-spin inline" aria-hidden="true"></i></span>
+                            </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                                <p class="text-xs text-shelf-muted">Current</p><p class="text-xs text-shelf-warning">Will be</p>
+                                <p :class="metaChanged(row, 'title') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Title: <span x-text="displayMeta(currentMeta(row, 'title'))"></span></p><label>Title<input type="text" :value="row.proposed.title" @input="setMeta(i, 'title', $event.target.value)" :class="metaInputClass(row, 'title')"></label>
+                                <p :class="metaChanged(row, 'alternate_title') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Alternate name: <span x-text="displayMeta(currentMeta(row, 'alternate_title'))"></span></p><label>Alternate name<input type="text" :value="row.proposed.alternate_title" @input="setMeta(i, 'alternate_title', $event.target.value)" :class="metaInputClass(row, 'alternate_title')"></label>
+                                <p :class="metaChanged(row, 'authors') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Developer: <span x-text="displayMeta(currentMeta(row, 'authors'))"></span></p><label>Developer<input type="text" :value="row.proposed.authors" @input="setMeta(i, 'authors', $event.target.value)" :class="metaInputClass(row, 'authors')"></label>
+                                <p :class="metaChanged(row, 'publisher') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Publisher: <span x-text="displayMeta(currentMeta(row, 'publisher'))"></span></p><label>Publisher<input type="text" :value="row.proposed.publisher" @input="setMeta(i, 'publisher', $event.target.value)" :class="metaInputClass(row, 'publisher')"></label>
+                                <p :class="metaChanged(row, 'platform') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Platform: <span x-text="displayMeta(currentMeta(row, 'platform'))"></span></p><label>Platform<select :value="row.proposed.platform" @change="setMeta(i, 'platform', $event.target.value)" :class="metaInputClass(row, 'platform')"><option value="">Platform</option>{% for slug, name in game_platforms.items() %}<option value="{{ slug }}">{{ name }}</option>{% endfor %}</select></label>
+                                <p :class="metaChanged(row, 'region') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Region: <span x-text="displayMeta(currentMeta(row, 'region'))"></span></p><label>Region<select :value="row.proposed.region" @change="setMeta(i, 'region', $event.target.value)" :class="metaInputClass(row, 'region')"><option value="">Region</option><option value="unknown">Unknown</option><option value="PAL">PAL</option><option value="NTSC">NTSC</option><option value="NTSC-J">NTSC-J</option><option value="PAL-M">PAL-M</option></select></label>
+                                <p :class="metaChanged(row, 'language') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Language: <span x-text="displayMeta(currentMeta(row, 'language'))"></span></p><label>Language<select :value="row.proposed.language" @change="setMeta(i, 'language', $event.target.value)" :class="metaInputClass(row, 'language')"><option value="">Language</option>{% for code, label in search_langs.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select></label>
+                                <p :class="metaChanged(row, 'publish_year') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Year: <span x-text="displayMeta(currentMeta(row, 'publish_year'))"></span></p><label>Year<input type="number" :value="row.proposed.publish_year" @input="setMeta(i, 'publish_year', $event.target.value ? Number($event.target.value) : null)" :class="metaInputClass(row, 'publish_year')"></label>
+                                <p x-show="!currentMeta(row, 'location_id')" :class="metaChanged(row, 'location_id') ? 'rounded border border-shelf-warning px-2 py-1' : ''">Location: <span x-text="displayMeta(currentMeta(row, 'location_id'))"></span></p><label x-show="!currentMeta(row, 'location_id')">Location<select :value="row.proposed.location_id || ''" @change="setMeta(i, 'location_id', $event.target.value ? Number($event.target.value) : null)" :class="metaInputClass(row, 'location_id')"><option value="">No location</option>{% for loc in locations %}<option value="{{ loc.id }}">{{ loc.name }}{% if default_location_id == loc.id|string %} (default){% endif %}</option>{% endfor %}</select></label>
+                            </div>
+                        </div>
+                    </template>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button x-show="!isBatchConfirming() && !isBatchSyncing()" @click="requestMetaSync()" :disabled="metaSelectedCount() === 0" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors disabled:opacity-50" x-text="'Sync ' + metaSelectedCount() + ' items'"></button>
+                        <span x-show="isBatchConfirming()" class="inline-flex items-center gap-1"><button @click="applyGameMetadata()" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm">Yes</button><button @click="cancelMetaSync()" class="px-4 py-2 bg-shelf-hover rounded-lg text-sm">No</button></span>
+                        <span x-show="isBatchSyncing()" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm"><i data-lucide="refresh-cw" class="w-4 h-4 animate-spin inline" aria-hidden="true"></i></span>
+                        <p class="text-xs text-shelf-error">This will override currently saved metadata. Are you sure?</p>
+                    </div>
+                </div>
+                <div x-show="metaResult.length > 0" class="mt-4 text-sm">
+                    <p class="text-shelf-success">Metadata updated for <span x-text="metaResult.length"></span> items.</p>
+                    <ul class="mt-1 space-y-1"><template x-for="item in metaResult" :key="item.id"><li><a :href="'/item/' + item.id" class="text-shelf-accent2 hover:text-shelf-accent" x-text="item.title"></a></li></template></ul>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -153,10 +210,10 @@
 
             <div class="border-t border-shelf-border pt-4">
                 <p class="text-sm text-shelf-muted mb-2">Import items from a CSV file (columns: title, authors, isbn, media_type, publisher, publish_year, page_count, series_name)</p>
-                <p class="text-sm text-shelf-muted mb-2"><strong class="text-shelf-text">Goodreads</strong> and <strong class="text-shelf-text">StoryGraph</strong> library exports are detected automatically — reading status, dates, and owned/wishlist flags are mapped for you.</p>
+                <p class="text-sm text-shelf-muted mb-2"><strong class="text-shelf-text">Goodreads</strong>, <strong class="text-shelf-text">StoryGraph</strong>, <strong class="text-shelf-text">LibraryThing</strong> and <strong class="text-shelf-text">Libib</strong> library exports are detected automatically — reading status, dates, and owned/wishlist flags are mapped for you.</p>
                 <form @submit.prevent="doImport">
                     <div class="flex flex-wrap gap-2 items-end">
-                        <input type="file" name="file" accept=".csv" required class="block w-full text-sm text-shelf-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-shelf-hover file:text-shelf-text">
+                        <input type="file" name="file" accept=".csv,.tsv,.txt" required class="block w-full text-sm text-shelf-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-shelf-hover file:text-shelf-text">
                         <select name="mode" class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text">
                             <option value="skip">Skip duplicates</option>
                             <option value="update">Update duplicates</option>
@@ -178,18 +235,30 @@
                         </label>
                     </div>
                 </form>
-                <div x-show="importResult" class="mt-2 text-sm">
+                <div x-show="importResult" class="mt-2 text-sm" data-testid="csv-import-result">
                     <template x-if="importResult && importResult.error">
                         <p class="text-shelf-error" x-text="importResult.error"></p>
                     </template>
                     <template x-if="importResult && !importResult.error">
                         <div>
                             <p class="text-shelf-muted">
-                                <template x-if="importResult.format && importResult.format !== 'generic'">
+                                <template x-if="importResult.format && importResult.format !== 'generic' && importResult.format !== 'librarything'">
                                     <span>Detected <span x-text="importResult.format" class="capitalize text-shelf-accent2"></span> export · </span>
+                                </template>
+                                <template x-if="importResult.format === 'librarything'">
+                                    <span>Detected <span class="text-shelf-accent2">LibraryThing</span> export · </span>
+                                </template>
+                                <template x-if="importResult.format === 'librarything' || importResult.format === 'libib'">
+                                    <span><span class="font-semibold text-shelf-muted">Beta</span> — built from the documented export format — if a row imports wrongly, <a href="https://github.com/dgahagan/shelf/issues/new/choose" target="_blank" rel="noopener" class="text-shelf-accent2 hover:underline">open an issue</a> with your file's header row. · </span>
                                 </template>
                                 Imported: <span x-text="importResult.imported" class="text-shelf-success"></span>,
                                 Skipped: <span x-text="importResult.skipped"></span>
+                                <template x-if="importResult.restored > 0">
+                                    <span>, Restored: <span x-text="importResult.restored"></span></span>
+                                </template>
+                                <template x-if="importResult.trashed > 0">
+                                    <span>, To Trash: <span x-text="importResult.trashed"></span></span>
+                                </template>
                                 <template x-if="importResult.covers_queued > 0">
                                     <span> · Fetching <span x-text="importResult.covers_queued"></span> covers in background</span>
                                 </template>
@@ -205,12 +274,32 @@
                                success guard rather than repeating it: a second top-level
                                x-if would have to chain importResult two levels, which the
                                CSP build evaluates eagerly (G5). #}
+                            <template x-if="importResult.locations_created && importResult.locations_created.length">
+                                <p class="mt-1 text-xs text-shelf-muted" data-testid="csv-import-locations-created">
+                                    Created locations:
+                                    <template x-for="(name, i) in importResult.locations_created" :key="i">
+                                        <span>
+                                            <span x-text="name"></span><span x-show="i < importResult.locations_created.length - 1">, </span>
+                                        </span>
+                                    </template>
+                                </p>
+                            </template>
                             <template x-if="importResult.errors && importResult.errors.length > 0">
                                 <ul class="mt-1 space-y-0.5 text-xs text-shelf-error">
                                     <template x-for="(err, i) in importResult.errors" :key="i">
                                         <li x-text="err"></li>
                                     </template>
                                 </ul>
+                            </template>
+                            <template x-if="importResult.dropped && importResult.dropped.length">
+                                <p class="mt-1 text-xs text-shelf-muted" data-testid="csv-import-dropped">
+                                    Not imported:
+                                    <template x-for="(d, i) in importResult.dropped" :key="i">
+                                        <span>
+                                            <span x-text="d.column"></span><span x-show="d.reason === 'existing_item'"> (items already in Shelf)</span><span x-show="d.reason === 'game_platform'"> (game platform)</span><span x-show="i < importResult.dropped.length - 1">, </span>
+                                        </span>
+                                    </template>
+                                </p>
                             </template>
                         </div>
                     </template>
@@ -222,6 +311,7 @@
     <!-- Share Links -->
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6" x-data="sharePanel">
         <h2 class="text-lg font-semibold mb-1">Sharing</h2>
+        {{ feature_notes.feature_off_note('share') }}
         <p class="text-sm text-shelf-muted mb-4">Public read-only links to your wishlist (for gift ideas) or collection. Anyone with the link can view titles, authors, and covers — never locations, loans, or values. Revoke a link at any time.</p>
 
         {% if share_links %}
@@ -231,6 +321,7 @@
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if sl.scope == 'wishlist' %}bg-shelf-warning/90 text-black{% else %}bg-shelf-accent/80 text-white{% endif %} uppercase">{{ sl.scope }}</span>
                 <span class="text-sm">{{ sl.label or 'Untitled link' }}</span>
                 <code class="text-xs text-shelf-muted truncate max-w-[220px]">/share/{{ sl.token }}</code>
+                {% if feature_on('share') %}
                 <div class="ml-auto flex items-center gap-2">
                     <button type="button" data-token="{{ sl.token }}"
                             @click="copyLink('{{ sl.token }}', {{ sl.id }})"
@@ -240,16 +331,18 @@
                     </button>
                     <a href="/share/{{ sl.token }}" target="_blank" rel="noopener"
                        class="px-2 py-1 bg-shelf-hover text-shelf-text rounded text-xs hover:bg-shelf-border transition-colors">Open</a>
-                    <form action="/api/share/{{ sl.id }}/delete" method="post" class="inline">
+                    <form action="/api/share/{{ sl.id }}/delete" method="post" class="inline" data-testid="share-revoke">
                         <button type="submit" class="px-2 py-1 bg-shelf-error/20 text-shelf-error rounded text-xs hover:bg-shelf-error/30 transition-colors">Revoke</button>
                     </form>
                 </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
         {% endif %}
 
-        <form action="/api/share" method="post" class="flex gap-2 items-end flex-wrap">
+        {% if feature_on('share') %}
+        <form action="/api/share" method="post" class="flex gap-2 items-end flex-wrap" data-testid="share-create">
             <select name="scope" class="bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text">
                 <option value="wishlist">Wishlist</option>
                 <option value="collection">Collection</option>
@@ -260,6 +353,7 @@
                 Create Link
             </button>
         </form>
+        {% endif %}
     </div>
 
     <!-- Backup & Restore -->
@@ -356,9 +450,9 @@
 
                     <div class="space-y-2 border-t border-shelf-border pt-3">
                         <p class="text-xs uppercase tracking-wide text-shelf-muted">Include</p>
-                        <label class="flex items-center gap-2 text-shelf-text" x-show="plan.summary.create > 0">
+                        <label class="flex items-center gap-2 text-shelf-text" x-show="showCreatesCheckbox()">
                             <input type="checkbox" x-model="selCreates" class="rounded border-shelf-border bg-shelf-bg">
-                            <span><span x-text="plan.summary.create"></span> new items</span>
+                            <span x-text="createsLabel()"></span>
                         </label>
                         <label class="flex items-center gap-2 text-shelf-text" x-show="plan.summary.update > 0">
                             <input type="checkbox" x-model="selUpdates" class="rounded border-shelf-border bg-shelf-bg">
@@ -387,6 +481,9 @@
                         <p class="text-xs text-shelf-muted" x-show="plan.summary.skip > 0">
                             <span x-text="plan.summary.skip"></span> items already in your library are skipped either way.
                         </p>
+                        <p class="text-xs text-shelf-muted" x-show="plan.summary.restore > 0">
+                            <span x-text="plan.summary.restore"></span> items in your Trash will be restored — they keep their own details, copies and history.
+                        </p>
                     </div>
 
                     <div class="flex gap-2 items-center border-t border-shelf-border pt-3">
@@ -413,6 +510,12 @@
                             Imported: <span x-text="importResult.imported" class="text-shelf-success"></span>,
                             Updated: <span x-text="importResult.updated"></span>,
                             Skipped: <span x-text="importResult.skipped"></span>
+                            <template x-if="importResult.restored > 0">
+                                <span> · Restored: <span x-text="importResult.restored"></span></span>
+                            </template>
+                            <template x-if="importResult.trashed > 0">
+                                <span> · To Trash: <span x-text="importResult.trashed"></span></span>
+                            </template>
                             <template x-if="importResult.covers_installed > 0">
                                 <span> · Covers installed: <span x-text="importResult.covers_installed"></span></span>
                             </template>

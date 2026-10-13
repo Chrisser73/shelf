@@ -7,6 +7,10 @@ from app.services import provider_result
 from tests.conftest import _insert_item
 
 
+def _book_result(candidates):
+    return provider_result.found("book_covers", candidates)
+
+
 class TestCoverSearchQuery:
     def test_query_overrides_stored_title(self, editor_client, db, monkeypatch):
         from app.services import covers
@@ -14,8 +18,8 @@ class TestCoverSearchQuery:
         item_id = _insert_item(db, title="Stored Title", isbn="9789000030019")
         db.commit()
 
-        search = AsyncMock(return_value=[])
-        monkeypatch.setattr(covers, "search_cover_by_title", search)
+        search = AsyncMock(return_value=_book_result([]))
+        monkeypatch.setattr(covers, "search_book_covers", search)
 
         resp = editor_client.get(
             f"/api/items/{item_id}/cover-search", params={"query": "Custom Query"}
@@ -31,8 +35,8 @@ class TestCoverSearchQuery:
         item_id = _insert_item(db, title="Stored Title", isbn="9789000030026")
         db.commit()
 
-        search = AsyncMock(return_value=[])
-        monkeypatch.setattr(covers, "search_cover_by_title", search)
+        search = AsyncMock(return_value=_book_result([]))
+        monkeypatch.setattr(covers, "search_book_covers", search)
 
         resp = editor_client.get(
             f"/api/items/{item_id}/cover-search", params={"query": "   "}
@@ -41,6 +45,7 @@ class TestCoverSearchQuery:
         assert resp.status_code == 200
         args, _ = search.await_args
         assert args[0] == "Stored Title"
+        assert args[2] == "9789000030026"
 
 
 class TestCoverSelectFailure:
@@ -52,10 +57,10 @@ class TestCoverSelectFailure:
 
         monkeypatch.setattr(covers, "_download_to_item", AsyncMock(return_value=None))
         monkeypatch.setattr(
-            covers, "search_cover_by_title",
-            AsyncMock(return_value=[
+            covers, "search_book_covers",
+            AsyncMock(return_value=_book_result([
                 {"url": "https://example.test/a.jpg", "thumbnail": "https://example.test/a-thumb.jpg", "source": "Test"},
-            ]),
+            ])),
         )
 
         resp = editor_client.post(
@@ -95,8 +100,8 @@ class TestCoverSelectFailure:
         db.commit()
 
         monkeypatch.setattr(covers, "_download_to_item", AsyncMock(return_value=None))
-        search = AsyncMock(return_value=[])
-        monkeypatch.setattr(covers, "search_cover_by_title", search)
+        search = AsyncMock(return_value=_book_result([]))
+        monkeypatch.setattr(covers, "search_book_covers", search)
 
         # No query box exists yet (a later task adds it) so the only way to
         # observe that the box would be seeded is the template context the
@@ -129,11 +134,11 @@ class TestCoverSelectFailure:
 
         monkeypatch.setattr(covers, "_download_to_item", AsyncMock(return_value=None))
         monkeypatch.setattr(
-            covers, "search_cover_by_title",
-            AsyncMock(return_value=[
+            covers, "search_book_covers",
+            AsyncMock(return_value=_book_result([
                 {"url": "https://example.test/a.jpg", "thumbnail": "https://example.test/a-thumb.jpg", "source": "Test A"},
                 {"url": "https://example.test/b.jpg", "thumbnail": "https://example.test/b-thumb.jpg", "source": "Test B"},
-            ]),
+            ])),
         )
 
         resp = editor_client.post(
@@ -278,6 +283,67 @@ class TestCoverUpload:
         assert resp.status_code in (401, 403)
 
 
+class TestUploadedCoverSplit:
+    """`validate_uploaded_cover` is pure; `write_uploaded_cover` only writes (#127)."""
+
+    @staticmethod
+    def _padded(magic, size=512):
+        return magic + b"\x00" * (size - len(magic))
+
+    def test_validate_accepts_padded_jpeg(self):
+        from app.services import covers
+
+        assert covers.validate_uploaded_cover(self._padded(b"\xff\xd8\xff")) is True
+
+    def test_validate_accepts_padded_png(self):
+        from app.services import covers
+
+        assert covers.validate_uploaded_cover(self._padded(b"\x89PNG\r\n\x1a\n")) is True
+
+    def test_validate_rejects_too_small(self):
+        from app.services import covers
+
+        assert covers.validate_uploaded_cover(self._padded(b"\xff\xd8\xff", 99)) is False
+
+    def test_validate_rejects_too_large(self):
+        from app.services import covers
+
+        blob = self._padded(b"\xff\xd8\xff", covers.MAX_COVER_SIZE + 1)
+        assert covers.validate_uploaded_cover(blob) is False
+
+    def test_validate_rejects_non_image(self):
+        from app.services import covers
+
+        assert covers.validate_uploaded_cover(b"not an image" * 50) is False
+
+    def test_validate_writes_nothing(self):
+        import app.config
+        from app.services import covers
+
+        covers.validate_uploaded_cover(self._padded(b"\xff\xd8\xff"))
+
+        assert not (app.config.COVERS_DIR / "7.jpg").exists()
+
+    def test_write_writes_exact_bytes_and_returns_path(self):
+        import app.config
+        from app.services import covers
+
+        blob = self._padded(b"\xff\xd8\xff")
+
+        assert covers.write_uploaded_cover(7, blob) == "covers/7.jpg"
+        assert (app.config.COVERS_DIR / "7.jpg").read_bytes() == blob
+
+    def test_write_overwrites_existing_file(self):
+        import app.config
+        from app.services import covers
+
+        covers.write_uploaded_cover(7, self._padded(b"\xff\xd8\xff", 200))
+        new = self._padded(b"\x89PNG\r\n\x1a\n", 300)
+        covers.write_uploaded_cover(7, new)
+
+        assert (app.config.COVERS_DIR / "7.jpg").read_bytes() == new
+
+
 class TestCoverRemove:
     def test_remove_clears_the_column(self, editor_client, db):
         item_id = _insert_item(db, title="Remove Me", isbn="9789000050017")
@@ -386,7 +452,7 @@ class TestPickerReachability:
         )
         db.commit()
 
-        monkeypatch.setattr(covers, "search_cover_by_title", AsyncMock(return_value=[]))
+        monkeypatch.setattr(covers, "search_book_covers", AsyncMock(return_value=_book_result([])))
 
         resp = editor_client.get(f"/api/items/{item_id}/cover-search")
 
@@ -405,11 +471,11 @@ class TestPickerReachability:
         db.commit()
 
         monkeypatch.setattr(
-            covers, "search_cover_by_title",
-            AsyncMock(return_value=[
+            covers, "search_book_covers",
+            AsyncMock(return_value=_book_result([
                 {"url": "https://example.test/a.jpg", "thumbnail": "https://example.test/a-thumb.jpg", "source": "Test A"},
                 {"url": "https://example.test/b.jpg", "thumbnail": "https://example.test/b-thumb.jpg", "source": "Test B"},
-            ]),
+            ])),
         )
 
         resp = editor_client.get(f"/api/items/{item_id}/cover-search")
@@ -444,7 +510,7 @@ class TestPickerReachability:
         db.commit()
 
         monkeypatch.setattr(covers, "_download_to_item", AsyncMock(return_value=None))
-        monkeypatch.setattr(covers, "search_cover_by_title", AsyncMock(return_value=[]))
+        monkeypatch.setattr(covers, "search_book_covers", AsyncMock(return_value=_book_result([])))
 
         resp = editor_client.post(
             f"/api/items/{item_id}/cover-select",
@@ -959,10 +1025,10 @@ class TestFragmentDefaultsReproduceItemDetailMarkup:
         db.commit()
 
         monkeypatch.setattr(
-            covers, "search_cover_by_title",
-            AsyncMock(return_value=[
+            covers, "search_book_covers",
+            AsyncMock(return_value=_book_result([
                 {"url": "https://example.test/a.jpg", "thumbnail": "https://example.test/a-thumb.jpg", "source": "Test"},
-            ]),
+            ])),
         )
 
         resp = editor_client.get(f"/api/items/{item_id}/cover-search")
@@ -983,7 +1049,7 @@ class TestFragmentDefaultsReproduceItemDetailMarkup:
         item_id = _insert_item(db, title="Default Upload Swap", isbn="9789000090075")
         db.commit()
 
-        monkeypatch.setattr(covers, "search_cover_by_title", AsyncMock(return_value=[]))
+        monkeypatch.setattr(covers, "search_book_covers", AsyncMock(return_value=_book_result([])))
 
         resp = editor_client.get(f"/api/items/{item_id}/cover-search")
 

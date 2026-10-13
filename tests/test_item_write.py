@@ -7,6 +7,7 @@ said to retire the entry if the count ever dropped to 1-2; these tests are
 what hold it there.
 """
 
+import ast
 import re
 import sqlite3
 from pathlib import Path
@@ -131,6 +132,25 @@ RAW_COPY_UPDATE_ALLOWLIST: dict[str, set[str]] = {}
 #: is what M1 was.
 ITEM_COPIES_MODULE = "app/services/item_copies.py"
 
+#: The `deleted_at` assignment guard's pattern, shared by the guard and its
+#: own bypass pins so the two cannot drift apart.
+#:
+#: `\s*` around the underscore is not decoration. `_normalised_source` joins
+#: physical lines with a **space**, which is right for a statement split
+#: across adjacent string literals the way M1's was
+#: (`"INSERT INTO " "item_copies ..."` — SQL tokens are space-separated
+#: anyway). It is wrong for a split *inside an identifier*: Python
+#: concatenates `"deleted" "_at = ..."` into `deleted_at = ...`, but the
+#: buffer holds `deleted _at = ...` and a `deleted_at` needle sails past it.
+#: Found while writing the bypass pin below, which is what the pin is for.
+#:
+#: What it still does not defend: a split at some *other* character
+#: (`"delet" "ed_at"`). Defeating that needs a whitespace-free buffer with its
+#: own offset map, which is more machinery than the risk earns — the guard is
+#: a tripwire against an ordinary fifth writer, not against someone
+#: deliberately hiding one.
+DELETED_AT_ASSIGNMENT = re.compile(r"deleted\s*_\s*at\s*=")
+
 
 def _raw_update_hits(path: Path, needle: str = "UPDATE items SET",
                      flags: int = 0) -> list[tuple[int, str]]:
@@ -148,6 +168,22 @@ def _raw_update_hits(path: Path, needle: str = "UPDATE items SET",
     follows to test allowlist substrings against. `needle` defaults to the
     `items` guard's construct; the `item_copies` guard passes
     `"UPDATE item_copies SET"` instead.
+    """
+    buf, line_for = _normalised_source(path)
+    hits = []
+    for m in re.finditer(re.escape(needle), buf, flags):
+        hits.append((line_for(m.start()), buf[m.end():m.end() + 300]))
+    return hits
+
+
+def _normalised_source(path: Path):
+    """The comment-stripped, quote-collapsed buffer, and an offset→line map.
+
+    Split out of `_raw_update_hits` so a guard that needs a real **regex**
+    rather than a literal needle scans exactly the same bytes. `_raw_update_hits`
+    re-escapes its needle, so it cannot express one; the `deleted_at` guard
+    below has to. Sharing the buffer is what keeps G53 (a comment quoting the
+    construct is not a write) and the adjacent-literal rule true of both.
     """
     lines = path.read_text().splitlines()
     buf_parts: list[str] = []
@@ -172,10 +208,29 @@ def _raw_update_hits(path: Path, needle: str = "UPDATE items SET",
             line_no = ln
         return line_no
 
-    hits = []
-    for m in re.finditer(re.escape(needle), buf, flags):
-        hits.append((_line_for(m.start()), buf[m.end():m.end() + 300]))
-    return hits
+    return buf, _line_for
+
+
+def _enclosing_function(path: Path, line_no: int) -> str | None:
+    """The name of the innermost function containing `line_no`, via `ast`.
+
+    Returns `None` for a line at module level. Used by the `deleted_at` guard
+    to say not merely *which file* writes the column but *which function* — the
+    claim the design makes is "exactly four functions", and a file-level pin
+    would pass a fifth writer added to either module.
+    """
+    tree = ast.parse(path.read_text())
+    best: tuple[int, str] | None = None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        end = getattr(node, "end_lineno", None)
+        if end is None or not (node.lineno <= line_no <= end):
+            continue
+        # Innermost wins: the deepest node whose span contains the line.
+        if best is None or node.lineno > best[0]:
+            best = (node.lineno, node.name)
+    return best[1] if best else None
 
 
 class TestSingleWritePath:
@@ -307,7 +362,7 @@ class TestSingleWritePath:
                 offenders.append(f"{rel}:{line_no}")
         assert not offenders, (
             "item_copies rows must be removed through the delete arm of "
-            "app.services.item_copies (delete_copy / delete_copies_for_item), "
+            "app.services.item_copies (purge_copy / delete_copies_for_item), "
             "not raw SQL:\n  "
             + "\n  ".join(offenders)
         )
@@ -367,6 +422,160 @@ class TestSingleWritePath:
         assert (REPO_ROOT / ITEM_COPIES_MODULE).is_file()
         # The exemption must not match a same-named file in another package.
         assert "app/routers/item_copies.py" != ITEM_COPIES_MODULE
+
+    def test_deleted_at_is_written_by_exactly_four_functions(self):
+        """The Trash twin of the insert/update source pins.
+
+        `deleted_at` is the column the whole soft-delete program rests on, and
+        a fifth writer anywhere under `app/` would put a row into Trash
+        without the demote, the seam settle or the guarded rowcount that make
+        the collision rules hold. The claim is about **functions**, not files:
+        a file-level pin would wave through a new writer added to either
+        module, which is exactly where one would be added.
+
+        Behaviour, not only spelling — both funnels also refuse `deleted_at`
+        as a caller-supplied field name (`_MANAGED` / `_MANAGED_ON_UPDATE` in
+        each module), so the column cannot be reached through
+        `update_item_fields(db, id, {"deleted_at": ...})` either. Those are
+        pinned by the managed-column parametrisations below.
+        """
+        pattern = DELETED_AT_ASSIGNMENT
+        expected = {
+            "app/services/item_write.py": {"trash_item", "restore_item"},
+            "app/services/item_copies.py": {"trash_copy", "restore_copy"},
+        }
+        found: dict[str, list[str]] = {}
+        for path in APP_DIR.rglob("*.py"):
+            rel = str(path.relative_to(REPO_ROOT))
+            buf, line_for = _normalised_source(path)
+            for m in pattern.finditer(buf):
+                line_no = line_for(m.start())
+                fn = _enclosing_function(path, line_no)
+                found.setdefault(rel, []).append(f"{fn} ({rel}:{line_no})")
+
+        assert set(found) == set(expected), (
+            "`deleted_at` is assigned outside the two funnel modules — it may "
+            "be written only by item_write.trash_item/restore_item and "
+            "item_copies.trash_copy/restore_copy:\n  "
+            + "\n  ".join(
+                f"{rel}: {hits}" for rel, hits in sorted(found.items())
+                if rel not in expected
+            )
+        )
+        for rel, names in expected.items():
+            hits = found[rel]
+            assert len(hits) == 2, (
+                f"{rel} holds {len(hits)} `deleted_at` assignments, expected "
+                f"2 (one per funnel function): {hits}"
+            )
+            enclosing = {h.split(" (")[0] for h in hits}
+            assert enclosing == names, (
+                f"{rel}'s `deleted_at` assignments must live in {sorted(names)}, "
+                f"found {sorted(enclosing)}"
+            )
+
+    def test_the_deleted_at_guard_is_exempted_by_path_not_by_basename(self, tmp_path):
+        """G88's bypass, checked for this guard rather than assumed from the
+        others: the exemption is a repo-relative path, so a same-named file in
+        another package must still be seen."""
+        fake_pkg = tmp_path / "services"
+        fake_pkg.mkdir()
+        impostor = fake_pkg / "item_write.py"
+        impostor.write_text(
+            'def sneak(db, item_id):\n'
+            '    db.execute("UPDATE items SET deleted_at = NULL WHERE id = ?")\n'
+        )
+        buf, line_for = _normalised_source(impostor)
+        hits = list(DELETED_AT_ASSIGNMENT.finditer(buf))
+        assert len(hits) == 1
+        # Seen, and attributed to its real enclosing function — not waved
+        # through because the basename matches an exempt module.
+        assert _enclosing_function(impostor, line_for(hits[0].start())) == "sneak"
+        assert str(impostor).endswith("item_write.py")
+        assert "app/services/item_write.py" not in str(impostor)
+
+    def test_the_deleted_at_guard_sees_an_adjacent_literal_split(self, tmp_path):
+        """The other half of G53/M1: a statement split across adjacent string
+        literals must not hide the assignment."""
+        split = tmp_path / "split.py"
+        split.write_text(
+            'def sneak(db):\n'
+            '    db.execute(\n'
+            '        "UPDATE items SET deleted"\n'
+            '        "_at = datetime(\'now\') WHERE id = ?"\n'
+            '    )\n'
+        )
+        buf, _ = _normalised_source(split)
+        assert DELETED_AT_ASSIGNMENT.search(buf), (
+            "the normalised buffer must join adjacent literals, or a writer "
+            "can split the column name across two of them and vanish"
+        )
+
+        # G53 still holds the other way: a comment is not a write.
+        quoted = tmp_path / "quoted.py"
+        quoted.write_text("# deleted_at = datetime('now') is described here\n")
+        buf2, _ = _normalised_source(quoted)
+        assert not DELETED_AT_ASSIGNMENT.search(buf2)
+
+    def test_items_rows_are_deleted_by_exactly_three_functions(self):
+        """The permanent-delete twin of the `deleted_at` pin.
+
+        After soft-delete-trash T4 every user-facing delete moves a row to
+        Trash. Three functions still remove an `items` row for real:
+        `merge_items` (the husk, after its children are reparented),
+        `_retire_kids_book` (a twin folded into its book), and
+        `trash.purge_item` (Trash's Delete permanently). A fourth is a new way
+        to lose data and should be a decision, not a drive-by — so the claim
+        is about functions, not files. Scanned through the normalised buffer
+        (G53: the explanatory comment at `items.py` that spells the statement
+        is not a delete; a docstring would be).
+        """
+        pattern = re.compile(r"DELETE\s+FROM\s+items\b", re.I)
+        expected = {
+            ("app/routers/items.py", "merge_items"),
+            ("app/database.py", "_retire_kids_book"),
+            ("app/services/trash.py", "purge_item"),
+        }
+        found = set()
+        for path in APP_DIR.rglob("*.py"):
+            rel = str(path.relative_to(REPO_ROOT))
+            buf, line_for = _normalised_source(path)
+            for m in pattern.finditer(buf):
+                found.add((rel, _enclosing_function(path, line_for(m.start()))))
+        assert found == expected, (
+            "`DELETE FROM items` may live only in merge_items, "
+            "_retire_kids_book and trash.purge_item — found: "
+            + ", ".join(f"{rel}::{fn}" for rel, fn in sorted(found, key=str))
+        )
+
+    def test_the_items_delete_guard_is_exempted_by_path_not_by_basename(self, tmp_path):
+        """G88: a same-named file elsewhere is attributed by its real path, so
+        a `trash.py` in another package gets no free pass."""
+        fake_pkg = tmp_path / "services"
+        fake_pkg.mkdir()
+        impostor = fake_pkg / "trash.py"
+        impostor.write_text(
+            'def purge_item(db, item_id):\n'
+            '    db.execute("DELETE FROM items WHERE id = ?", (item_id,))\n'
+        )
+        buf, line_for = _normalised_source(impostor)
+        hits = list(re.finditer(r"DELETE\s+FROM\s+items\b", buf))
+        assert len(hits) == 1
+        assert "app/services/trash.py" not in str(impostor)
+
+    def test_the_items_delete_guard_sees_an_adjacent_literal_split(self, tmp_path):
+        split = tmp_path / "split.py"
+        split.write_text(
+            'def sneak(db):\n'
+            '    db.execute(\n'
+            '        "DELETE FROM "\n'
+            '        "items WHERE id = ?"\n'
+            '    )\n'
+        )
+        buf, line_for = _normalised_source(split)
+        m = re.search(r"DELETE\s+FROM\s+items\b", buf)
+        assert m, "adjacent literals must join, or a delete can hide across two"
+        assert _enclosing_function(split, line_for(m.start())) == "sneak"
 
     def test_insert_detection_sees_adjacent_string_literals(self, tmp_path):
         """M1's second bypass: the insert guard scanned one physical line at a
@@ -442,9 +651,14 @@ class TestLoudFailures:
         assert "nonexistent_column" in message
         assert "SCHEMA and MIGRATIONS" in message
 
-    def test_managed_columns_are_refused(self, db):
+    @pytest.mark.parametrize("managed", ["id", "deleted_at"])
+    def test_managed_columns_are_refused(self, db, managed):
+        """`deleted_at` joins `id` here so "exactly four writers" is true of
+        behaviour, not only of the spelling the source pin greps for: the
+        funnel builds its column list from caller-supplied names, so without
+        this an insert could set the column directly."""
         with pytest.raises(ValueError, match="database"):
-            insert_item(db, title="X", id=999)
+            insert_item(db, title="X", **{managed: 999})
 
     def test_missing_title_raises(self, db):
         with pytest.raises(ValueError, match="title"):
@@ -694,8 +908,12 @@ class TestUpdateItemFields:
         with pytest.raises(ValueError, match="nonexistent_column"):
             update_item_fields(db, item_id, {"nonexistent_column": 1})
 
-    @pytest.mark.parametrize("managed", ["id", "created_at"])
+    @pytest.mark.parametrize("managed", ["id", "created_at", "deleted_at"])
     def test_managed_columns_are_refused(self, db, managed):
+        """`deleted_at` is the one that matters for Trash: without it,
+        `update_item_fields(db, id, {"deleted_at": ...})` would route around
+        `trash_item` entirely and the four-writer claim would be a statement
+        about source text rather than about what the code can do."""
         item_id = _insert_item(db)
         with pytest.raises(ValueError, match="database"):
             update_item_fields(db, item_id, {managed: 1})
@@ -941,3 +1159,64 @@ class TestTheRetiredMediaTypeAlias:
         """Canonicalising must not become a way to smuggle a bad value in."""
         with pytest.raises(UnknownMediaType):
             insert_item(db, title="X", media_type="not_a_type")
+
+
+#: The author index (#117b) is written only by `app/services/author_index.py`.
+AUTHOR_INDEX_WRITE = re.compile(
+    r"(INSERT\s+INTO|DELETE\s+FROM)\s+(authors|item_authors)\b", re.I)
+AUTHOR_INDEX_IMPORT = re.compile(
+    r"from\s+app\.services\s+import\s+[^\n]*\bauthor_index\b"
+    r"|from\s+app\.services\.author_index\s+import"
+    r"|import\s+app\.services\.author_index\b")
+AUTHOR_INDEX_WRITER = "app/services/author_index.py"
+AUTHOR_INDEX_IMPORTERS = {
+    "app/services/item_write.py",  # the funnel keeps the index in step
+    "app/database.py",             # the boot-time build
+    "app/routers/pages.py",        # read helpers for Browse and the item page
+}
+
+
+def _author_index_offenders(root: Path, repo_root: Path):
+    """(writers, importers) outside the allowed sets, by repo-relative path (G88)."""
+    writers, importers = [], []
+    for path in root.rglob("*.py"):
+        rel = path.relative_to(repo_root).as_posix()
+        buf, line_for = _normalised_source(path)
+        if rel != AUTHOR_INDEX_WRITER:
+            writers += [f"{rel}:{line_for(m.start())}"
+                        for m in AUTHOR_INDEX_WRITE.finditer(buf)]
+        if rel not in AUTHOR_INDEX_IMPORTERS and rel != AUTHOR_INDEX_WRITER:
+            importers += [f"{rel}:{line_for(m.start())}"
+                          for m in AUTHOR_INDEX_IMPORT.finditer(buf)]
+    return writers, importers
+
+
+class TestAuthorIndexWritePath:
+    def test_only_author_index_writes_the_index(self):
+        writers, importers = _author_index_offenders(APP_DIR, REPO_ROOT)
+        assert not writers, (
+            "authors/item_authors are written only by "
+            f"{AUTHOR_INDEX_WRITER} (called from item_write):\n  "
+            + "\n  ".join(writers))
+        assert not importers, (
+            f"only {sorted(AUTHOR_INDEX_IMPORTERS)} may import author_index:\n  "
+            + "\n  ".join(importers))
+
+    def test_the_guard_sees_a_planted_writer_and_an_impostor(self, tmp_path):
+        """G31/G88: a write planted elsewhere — including in a file that only
+        shares the writer's basename — and a split literal are both caught."""
+        app = tmp_path / "app"
+        (app / "services").mkdir(parents=True)
+        (app / "routers").mkdir()
+        (app / "services" / "author_index.py").write_text(
+            'db.execute("INSERT INTO item_authors VALUES (1)")\n')
+        (app / "routers" / "author_index.py").write_text(
+            'db.execute("DELETE FROM authors WHERE id = ?")\n')
+        (app / "services" / "other.py").write_text(
+            'from app.services import author_index\n'
+            'db.execute("INSERT INTO "\n'
+            '           "item_authors (item_id) VALUES (?)")\n')
+        writers, importers = _author_index_offenders(app, tmp_path)
+        assert sorted(w.split(":")[0] for w in writers) == [
+            "app/routers/author_index.py", "app/services/other.py"]
+        assert [i.split(":")[0] for i in importers] == ["app/services/other.py"]

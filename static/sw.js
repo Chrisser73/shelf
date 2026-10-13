@@ -14,7 +14,7 @@
 // (scripts/stamp_sw_version.py) and verified by `make checks-fast`. Changing a
 // precached file therefore renames the cache on its own, which is what makes
 // activate() purge the stale one.
-const SW_VERSION = 'v415d5fc2';
+const SW_VERSION = 've9bb82e4';
 const CACHE = `shelf-store-${SW_VERSION}`;
 
 const PRECACHE = [
@@ -24,8 +24,9 @@ const PRECACHE = [
     '/static/vendor/html5-qrcode-2.3.8.min.js',
     '/static/vendor/zxing-browser-0.1.5.min.js',
     '/static/manifest.webmanifest',
-    '/static/icons/icon-192.png',
-    '/static/icons/icon-512.png',
+    '/static/icons/favicon.svg',
+    '/static/icons/android-chrome-192x192.png',
+    '/static/icons/android-chrome-512x512.png',
 ];
 
 self.addEventListener('install', function (event) {
@@ -34,7 +35,7 @@ self.addEventListener('install', function (event) {
             // /store is cached separately: an unauthenticated fetch redirects
             // to /login, and caching THAT as /store would break offline mode.
             const storePage = fetch('/store').then(function (resp) {
-                if (resp.ok && !resp.redirected) return cache.put('/store', resp);
+                if (resp.ok && !resp.redirected && resp.headers.get('X-Shelf-Store-Mode') === 'enabled') return cache.put('/store', resp);
             }).catch(function () { /* offline install — runtime handler will fill it */ });
             return Promise.all([cache.addAll(PRECACHE), storePage]);
         }).then(function () { return self.skipWaiting(); })
@@ -61,7 +62,7 @@ self.addEventListener('fetch', function (event) {
         event.respondWith(
             fetch(event.request).then(function (resp) {
                 // Never cache a redirected response (auth redirect = login page)
-                if (resp.ok && !resp.redirected) {
+                if (resp.ok && !resp.redirected && resp.headers.get('X-Shelf-Store-Mode') === 'enabled') {
                     const copy = resp.clone();
                     caches.open(CACHE).then(function (c) { c.put('/store', copy); });
                 }

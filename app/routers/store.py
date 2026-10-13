@@ -15,11 +15,13 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import HTTP_TIMEOUT
 from app.database import get_db, get_setting
 from app.services import covers
 from app.services import isbn as isbn_svc
 from app.services import lists
+from app.services import restore_report
 from app.services.item_write import insert_item, update_item_fields
 
 logger = logging.getLogger(__name__)
@@ -36,9 +38,13 @@ _RAW_CODE_MAX = 32
 
 
 @router.get("/store")
-async def store_page(request: Request, _=Depends(require_role("viewer"))):
+async def store_page(request: Request, _=Depends(require_role("viewer")),
+                     __=Depends(require_feature("store", redirect_page_to_home=True))):
     templates = request.app.state.templates
-    return templates.TemplateResponse(request, "store.html", {})
+    response = templates.TemplateResponse(request, "store.html", {})
+    # The service worker only caches a real Store page, never a disabled page.
+    response.headers["X-Shelf-Store-Mode"] = "enabled"
+    return response
 
 
 @router.get("/sw.js")
@@ -49,7 +55,8 @@ async def service_worker():
 
 
 @router.get("/api/store/data")
-async def store_data(_=Depends(require_role("viewer"))):
+async def store_data(_=Depends(require_role("viewer")),
+                     __=Depends(require_feature("store"))):
     """Compact offline dataset: every owned or wishlisted item with an ISBN,
     plus all barcode forms it can be matched by (stored ISBN/ISBN-10 and
     their conversions). A row that is neither owned nor wishlisted is not in
@@ -92,7 +99,8 @@ async def store_data(_=Depends(require_role("viewer"))):
 
 
 @router.post("/api/store/queue")
-async def store_queue(request: Request, _=Depends(require_role("editor"))):
+async def store_queue(request: Request, _=Depends(require_role("editor")),
+                      __=Depends(require_feature("store"))):
     """Flush queued store scans: add each ISBN as a wishlist item.
 
     A queued scan is never lost — if metadata lookup fails for any reason
@@ -197,27 +205,45 @@ async def store_queue(request: Request, _=Depends(require_role("editor"))):
             item_id = None
             if metadata:
                 try:
-                    item_id = items_common._save_item(metadata, isbn13, "book", None, source, hc_ids)
-                    with get_db() as db:
-                        update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
+                    # The Store queue is always wishlist mode; the intent
+                    # rides the insert so a restoring funnel is told it.
+                    item_id = items_common._save_item(metadata, isbn13, "book", None,
+                                                      source, hc_ids, owned=False)
                     try:
-                        hc_cover = metadata.get("cover_url") if source == "hardcover" else hc_ids.get("cover_url")
-                        cover_path = await covers.download_cover(
-                            item_id, isbn13,
-                            metadata.get("cover_url") if source != "hardcover" else None,
-                            metadata.get("cover_id"), client,
-                            hardcover_cover_url=hc_cover,
-                        )
-                        if cover_path:
-                            with get_db() as db:
-                                db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
+                        # A restored row keeps its stored cover — the download
+                        # writes `<item_id>.jpg`, so it would overwrite the
+                        # user's file on disk as well as the column.
+                        if not restore_report.keeps_stored_cover(item_id):
+                            hc_cover = metadata.get("cover_url") if source == "hardcover" else hc_ids.get("cover_url")
+                            cover_path = await covers.download_cover(
+                                item_id, isbn13,
+                                metadata.get("cover_url") if source != "hardcover" else None,
+                                metadata.get("cover_id"), client,
+                                hardcover_cover_url=hc_cover,
+                            )
+                            if cover_path:
+                                with get_db() as db:
+                                    db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
                     except Exception:
                         logger.warning("Store queue: cover download failed for %s", isbn13)
-                    items_common._log_scan(isbn13, "book", "wishlisted", item_id, "wishlist")
-                    results.append({
-                        "isbn": isbn13, "status": "wishlisted",
-                        "title": metadata["title"], "item_id": item_id,
-                    })
+                    status = restore_report.restored_status(item_id, "wishlisted")
+                    items_common._log_scan(isbn13, "book", status, item_id, "wishlist")
+                    entry = {"isbn": isbn13, "status": status,
+                             "title": metadata["title"], "item_id": item_id}
+                    if status == "restored":
+                        # The stored row, and its real ownership — store.js
+                        # must not infer `owned` from the status, because a
+                        # restored row can be either (G73: it indexes what
+                        # it is told, and a wrong value here makes the next
+                        # scan of the same book answer wrongly).
+                        card = restore_report.restored_card(item_id)
+                        with get_db() as db:
+                            owned = db.execute(
+                                "SELECT owned FROM items_live WHERE id = ?",
+                                (item_id,),
+                            ).fetchone()["owned"]
+                        entry.update(title=card["title"], owned=bool(owned))
+                    results.append(entry)
                     continue
                 except Exception:
                     logger.exception("Store queue: save failed for %s, falling back to bare add", isbn13)
@@ -233,7 +259,19 @@ async def store_queue(request: Request, _=Depends(require_role("editor"))):
                     wishlisted=True,
                     source="store_queue",
                 )
-            items_common._log_scan(isbn13, "book", "wishlisted", item_id, "wishlist")
-            results.append({"isbn": isbn13, "status": "added_bare", "item_id": item_id})
+            status = restore_report.restored_status(item_id, "wishlisted")
+            items_common._log_scan(isbn13, "book", status, item_id, "wishlist")
+            if status == "restored":
+                card = restore_report.restored_card(item_id)
+                with get_db() as db:
+                    owned = db.execute(
+                        "SELECT owned FROM items_live WHERE id = ?", (item_id,)
+                    ).fetchone()["owned"]
+                results.append({"isbn": isbn13, "status": "restored",
+                                "title": card["title"], "item_id": item_id,
+                                "owned": bool(owned)})
+            else:
+                results.append({"isbn": isbn13, "status": "added_bare",
+                                "item_id": item_id})
 
     return {"results": results}

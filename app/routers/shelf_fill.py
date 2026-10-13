@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, Form, Request
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import MEDIA_TYPES
 from app.database import get_db, get_game_platforms
 from app.routers import items, items_common
@@ -177,7 +178,8 @@ def _render_error(request: Request, raw: str, message: str):
 
 
 @router.get("/shelf-fill")
-async def shelf_fill_page(request: Request, _=Depends(require_role("editor"))):
+async def shelf_fill_page(request: Request, _=Depends(require_role("editor")),
+                          __=Depends(require_feature("shelf_fill"))):
     with get_db() as db:
         locations = location_svc.location_tree(db)
         game_platforms = get_game_platforms(db)
@@ -197,6 +199,7 @@ async def shelf_fill_summary(
     request: Request,
     location_id: int = 0,
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("shelf_fill")),
 ):
     """What is already on the shelf you just picked, before you scan anything.
 
@@ -230,6 +233,7 @@ async def shelf_fill_place(
     item_id: int = Form(...),
     location_id: int = Form(...),
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("shelf_fill")),
 ):
     try:
         with get_db() as db:
@@ -248,7 +252,9 @@ async def shelf_fill_scan(
     platform: str = Form(""),
     legacy_confirm_isbn13: str = Form(""),
     legacy_supplement: str = Form(""),
+    tags: str = Form(""),
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("shelf_fill")),
 ):
     """Resolve one barcode and place its physical copy at ``location_id``."""
     raw = isbn.strip()
@@ -299,6 +305,8 @@ async def shelf_fill_scan(
         borrower_id=None,
         legacy_confirm_isbn13=legacy_confirm_isbn13,
         legacy_supplement=legacy_supplement,
+        tags=tags,
+        reading_status="",
         _=_,
     )
     context = getattr(response, "context", None) or {}
@@ -316,7 +324,11 @@ async def shelf_fill_scan(
             {**context, "scan_action": "/api/shelf-fill/scan"},
         )
 
-    if item_id and status in {"added", "duplicate"}:
+    # `restored` joins the set: a re-add of a trashed book is a successful
+    # placement, and a status this gate does not list falls straight through
+    # the whole post-processing block — the position assignment, the OOB
+    # summary refresh and _render_result (G103).
+    if item_id and status in {"added", "duplicate", "restored"}:
         try:
             with get_db() as db:
                 placed = _place_item(db, int(item_id), location_id)

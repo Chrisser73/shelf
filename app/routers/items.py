@@ -13,9 +13,9 @@ from app import nav
 from app.auth import require_role
 
 logger = logging.getLogger(__name__)
-from app.config import MEDIA_TYPES, HTTP_TIMEOUT, DEFAULT_PAGE_SIZE, canonical_media_type
+from app.config import MEDIA_TYPES, BOOK_MEDIA_TYPES, HTTP_TIMEOUT, DEFAULT_PAGE_SIZE, canonical_media_type, status_labels
 from app.database import (get_db, get_setting, gc_orphaned_series_meta,
-                          get_reading_history)
+                          get_reading_history, get_game_platforms)
 from app.routers.series import MAX_SERIES_NAME
 from app.routers import items_common
 from app.routers import items_scan_modes
@@ -23,16 +23,19 @@ from app.routers.items_common import SORT_OPTIONS  # re-exported for pages.py
 from app.services import isbn as isbn_svc
 from app.services import browse_counts
 from app.services import lists
-from app.services.item_write import (ItemValueError, insert_item, update_item_fields,
+from app.services.item_write import (IdentifierInTrash, ItemValueError,
+                                     insert_item, update_item_fields,
                                      update_items_fields, validate_item_fields,
                                      validated_location_id)
-from app.services import item_write  # _coerce_owned (bulk update), promote_wishlisted (scan)
+from app.services import item_write  # _coerce_owned (bulk update), promote_wishlisted (scan), trash_item (delete)
 from app.services import openlibrary, googlebooks, hardcover, covers, national
 from app.services import detect
 from app.services import cover_queue
 from app.services import legacy_book
 from app.services import scan_outcome
 from app.services import item_merge
+from app.services import restore_report
+from app.services import tags as tags_svc
 from app.services import item_template
 from app.services import upc as upc_svc, tmdb, igdb
 from app.services import synopsis as synopsis_svc
@@ -100,7 +103,8 @@ def _find_item_by_barcode(raw: str) -> dict | None:
         if isbn13:
             item = db.execute(
                 "SELECT i.*, l.name as location_name FROM items i "
-                "LEFT JOIN locations l ON i.location_id = l.id WHERE i.isbn = ?",
+                "LEFT JOIN locations l ON i.location_id = l.id WHERE i.isbn = ? "
+                "ORDER BY i.deleted_at IS NOT NULL, i.id",  # live wins over Trash
                 (isbn13,),
             ).fetchone()
             if item:
@@ -108,7 +112,8 @@ def _find_item_by_barcode(raw: str) -> dict | None:
         if upc_norm:
             item = db.execute(
                 "SELECT i.*, l.name as location_name FROM items i "
-                "LEFT JOIN locations l ON i.location_id = l.id WHERE i.upc = ?",
+                "LEFT JOIN locations l ON i.location_id = l.id WHERE i.upc = ? "
+                "ORDER BY i.deleted_at IS NOT NULL, i.id",  # live wins over Trash
                 (upc_norm,),
             ).fetchone()
             if item:
@@ -237,8 +242,21 @@ async def scan_isbn(
     mode: str = Form("add"), borrower_id: int | None = Form(None),
     legacy_confirm_isbn13: str = Form(""),
     legacy_supplement: str = Form(""),
+    tags: str = Form(""), reading_status: str = Form(""),
     _=Depends(require_role("editor")),
 ):
+    """Thin wrapper: whatever `_scan_isbn_inner` files takes the default tags and reading status in its own transaction (G118)."""
+    try:
+        with tags_svc.default_tags(tags), item_write.default_reading_status(reading_status):
+            return await _scan_isbn_inner(request, isbn, media_type, location_id, platform, mode,
+                                          borrower_id, legacy_confirm_isbn13, legacy_supplement, tags, reading_status)
+    except item_write.InvalidReadingStatus as e:
+        return request.app.state.templates.TemplateResponse(
+            request, "fragments/scan_result.html", {"status": "error", "isbn": isbn, "message": str(e)})
+
+
+async def _scan_isbn_inner(request, isbn, media_type, location_id, platform, mode, borrower_id,
+                            legacy_confirm_isbn13, legacy_supplement, tags, reading_status):
     """Scan a barcode: mode-aware dispatch for add, lend, return, move, inventory, lookup, quick_rate."""
     templates = request.app.state.templates
     raw = isbn.strip()
@@ -309,6 +327,8 @@ async def scan_isbn(
                         "platform": platform,
                         "mode": mode,
                         "borrower_id": borrower_id,
+                        "tags": tags,
+                        "reading_status": reading_status,
                     },
                 )
 
@@ -368,6 +388,8 @@ async def scan_isbn(
     if mode in _EXISTING_ITEM_MODES:
         lookup_barcode = legacy_isbn13 if legacy_candidates else raw
         item = _find_item_by_barcode(lookup_barcode)
+        if item and item.get("deleted_at"):  # in Trash: report, never act
+            return items_scan_modes._scan_mode_in_trash(request, templates, item, raw, mode)
         # inventory mode handles not-found specially
         if mode == "inventory":
             return items_scan_modes._scan_mode_inventory(
@@ -427,6 +449,8 @@ async def scan_isbn(
                     "platform": platform,
                     "mode": mode,
                     "borrower_id": borrower_id,
+                    "tags": tags,
+                    "reading_status": reading_status,
                 },
             )
 
@@ -580,12 +604,31 @@ async def scan_isbn(
                 },
             )
 
-        item_id = items_common._save_item(metadata, isbn13, media_type, location_id, source, hc_ids)
-
-        # Wishlist mode: set owned = 0
-        if mode == "wishlist":
+        try:
+            item_id = items_common._save_item(metadata, isbn13, media_type, location_id,
+                                              source, hc_ids, owned=mode != "wishlist")
+        except sqlite3.IntegrityError:
+            # A second scan of the same ISBN — a double submit, or two
+            # devices — can win the insert during this request's own
+            # metadata lookup: the same race the duplicate check above
+            # defends against under its write lock, just a wider window.
+            # Re-run that exact check rather than let the UNIQUE violation
+            # reach the caller as a 500 (F-BUG-1).
             with get_db() as db:
-                update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
+                db.execute("BEGIN IMMEDIATE")
+                existing = db.execute(
+                    "SELECT id, title FROM items_live WHERE isbn = ? AND media_type = ?",
+                    (isbn13, media_type),
+                ).fetchone()
+                promoted = bool(existing) and mode != "wishlist" and item_write.promote_wishlisted(db, existing["id"])
+            if existing is None:
+                raise
+            status = "promoted" if promoted else "duplicate"
+            items_common._log_scan(isbn13, media_type, status, existing["id"], mode)
+            return templates.TemplateResponse(
+                request, "fragments/scan_result.html",
+                {"status": status, "isbn": isbn13, "title": existing["title"], "item_id": existing["id"]},
+            )
 
         # Queue the cover instead of downloading it in-request. The
         # hints are the exact three inputs the download used to take, so
@@ -598,21 +641,23 @@ async def scan_isbn(
         })
 
 
-    status = "wishlisted" if mode == "wishlist" else "added"
+    # Read the restore flag before the id is used for anything else.
+    status = restore_report.restored_status(
+        item_id, "wishlisted" if mode == "wishlist" else "added")
     items_common._log_scan(isbn13, media_type, status, item_id, mode)
 
+    card = ({"title": metadata["title"], "authors": metadata.get("authors"),
+             "cover_path": None, "cover_pending": True}
+            if status != "restored" else restore_report.restored_card(item_id))
     resp = templates.TemplateResponse(
         request, "fragments/scan_result.html",
         {
             "status": status,
             "isbn": isbn13,
-            "title": metadata["title"],
-            "authors": metadata.get("authors"),
-            "cover_path": None,
-            "cover_pending": True,
+            **card,
             "item_id": item_id,
             "source": source,
-            "media_type_label": MEDIA_TYPES.get(media_type, media_type),
+            "media_type_label": MEDIA_TYPES.get(media_type, media_type), "media_type": media_type,
             # T5 renders these; T4 only has to carry them.
             "detect_reason": detect_reason,
             "detect_overrode": detect_overrode,
@@ -643,7 +688,7 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
     # Defaulted to "add" to match /api/scan's own Form("add") at :233 — the
     # value reaches scan_log.mode, so an absent field must log what the scan
     # route would log for the same submission.
-    mode = form.get("mode", "add")
+    mode = "wishlist" if form.get("mode") == "wishlist" else "add"
 
     # A UPC belongs in items.upc, never in items.isbn (#20). to_isbn13()
     # will happily zero-pad a 12-digit UPC-A into something ISBN-shaped, so
@@ -681,6 +726,7 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
         pub_year = None
 
     platform = (form.get("platform") or "").strip() or None
+    collector_condition = (form.get("collector_condition") or "").strip() or None
     language = form.get("language", "").strip() or None
 
     # #19 "copy from" prefill: series_name + location_id are optional and
@@ -707,22 +753,30 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
         db.execute("BEGIN IMMEDIATE")
         existing = _find_duplicate_item(db, isbn13, upc_code, media_type)
         if existing is None:
+            # Wishlist intent rides the insert, not a second transaction: a
+            # restoring funnel has to be told it, and the demote this
+            # replaced also sat outside the lock above.
+            wishlist = {"owned": 0, "wishlisted": True} if mode == "wishlist" else {}
             try:
-                item_id = insert_item(
-                    db,
-                    title=title,
-                    authors=form.get("authors"),
-                    isbn=isbn13,
-                    upc=upc_code,
-                    media_type=media_type,
-                    publisher=form.get("publisher"),
-                    publish_year=pub_year,
-                    platform=platform,
-                    series_name=series_name,
-                    location_id=location_id,
-                    language=language,
-                    source="manual",
-                )
+                with tags_svc.default_tags(form.get("tags") or ""), \
+                        item_write.default_reading_status(form.get("reading_status") or ""):
+                    item_id = insert_item(
+                        db,
+                        **wishlist,
+                        title=title,
+                        authors=form.get("authors"),
+                        isbn=isbn13,
+                        upc=upc_code,
+                        media_type=media_type,
+                        publisher=form.get("publisher"),
+                        publish_year=pub_year,
+                        platform=platform,
+                        collector_condition=collector_condition,
+                        series_name=series_name,
+                        location_id=location_id,
+                        language=language,
+                        source="manual",
+                    )
             except ItemValueError as e:
                 value_error = str(e)
             except sqlite3.IntegrityError:
@@ -752,12 +806,9 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
              "item_id": existing["id"]},
         )
 
-    # Wishlist mode: set owned = 0 (mirrors /api/scan, items.py:538-540).
-    if mode == "wishlist":
-        with get_db() as db:
-            update_item_fields(db, item_id, {"owned": 0, "wishlisted": True})
 
-    status = "wishlisted" if mode == "wishlist" else "added"
+    status = restore_report.restored_status(
+        item_id, "wishlisted" if mode == "wishlist" else "added")
 
     # Handle cover upload.
     #
@@ -779,8 +830,9 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
             if content and len(content) > 100:
                 cover_path = covers.save_uploaded_cover(item_id, content)
 
-        # If no upload, check for preview cover from scan, then try Amazon
-        if not cover_path and isbn13:
+        # If no upload, check for preview cover from scan, then try Amazon —
+        # unless this restored a row that keeps its stored cover.
+        if not cover_path and isbn13 and not restore_report.keeps_stored_cover(item_id):
             preview_path = covers.COVERS_DIR / f"preview_{isbn13}.jpg"
             if preview_path.exists():
                 # Rename preview to permanent cover
@@ -808,12 +860,16 @@ async def manual_add(request: Request, _=Depends(require_role("editor"))):
         {
             "status": status,
             "isbn": isbn13 or upc_code or "",
-            "title": title,
-            "authors": form.get("authors"),
-            "cover_path": cover_path,
+            # A restored row shows its stored title and authors; an
+            # explicitly uploaded cover still wins over the stored one.
+            **({"title": title, "authors": form.get("authors"),
+                "cover_path": cover_path}
+               if status != "restored"
+               else {**restore_report.restored_card(item_id),
+                     **({"cover_path": cover_path} if cover_path else {})}),
             "item_id": item_id,
             "source": "manual",
-            "media_type_label": MEDIA_TYPES.get(media_type, media_type),
+            "media_type_label": MEDIA_TYPES.get(media_type, media_type), "media_type": media_type,
         },
     )
     toast_message = f"Added to wishlist: {title[:50]}" if mode == "wishlist" else f"Added: {title[:50]}"
@@ -884,11 +940,13 @@ async def search_items(
     sort = values["sort"]
     view = values["view"]
 
-    where, params = browse_filters.build_where(values)
     _, order_clause = SORT_OPTIONS.get(sort, SORT_OPTIONS["newest"])
     offset = (max(page, 1) - 1) * per_page
 
     with get_db() as db:
+        from app.services import game_metadata
+        missing_fields = game_metadata.configured_missing_fields(db)
+        where, params = browse_filters.build_where(values, missing_fields=missing_fields)
         total = db.execute(
             f"SELECT COUNT(*) as c FROM items_live i {where}", params
         ).fetchone()["c"]
@@ -905,12 +963,35 @@ async def search_items(
             f"{where} ORDER BY {order_clause} LIMIT ? OFFSET ?",
             [get_overdue_days(db)] + params + [per_page, offset],
         ).fetchall()
+        tags_by_item = tags_svc.tags_for_items(db, [row["id"] for row in items])
 
         # Cross-filter counts for dropdowns (page 1 only). Each group is the
         # same where-clause with its own filter excluded, so the number beside
         # an option says what selecting it would yield. Shared with /browse so
         # the two routes cannot disagree.
-        counts = browse_counts.filter_counts(db, values, total) if page <= 1 else None
+        counts = browse_counts.filter_counts(db, values, total, missing_fields=missing_fields) if page <= 1 else None
+        from app.services.user_preferences import get_preference
+        always_show_game_title = get_preference(
+            db, request.state.user["id"], "always_show_game_title"
+        ) == "1"
+        show_platform_logo_in_collection = get_preference(
+            db, request.state.user["id"], "show_platform_logo_in_collection"
+        ) == "1"
+        show_collector_condition_in_collection = get_preference(
+            db, request.state.user["id"], "show_collector_condition_in_collection"
+        ) == "1"
+        show_region_in_collection = get_preference(
+            db, request.state.user["id"], "show_region_in_collection"
+        ) == "1"
+        show_new_label_in_collection = get_preference(
+            db, request.state.user["id"], "show_new_label_in_collection", "1"
+        ) == "1"
+        show_wishlist_icon_in_collection = get_preference(
+            db, request.state.user["id"], "show_wishlist_icon_in_collection", "1"
+        ) == "1"
+        from app.services.user_preferences import platform_logo_map
+        platform_logo_paths = platform_logo_map(db, request.state.user["id"])
+        game_platforms = get_game_platforms(db)
 
     has_more = (offset + per_page) < total
 
@@ -929,13 +1010,23 @@ async def search_items(
     from datetime import datetime, timedelta
     ctx = {
         "items": items,
+        "search_query": values["q"],
+        "tags_by_item": tags_by_item,
         "media_types": MEDIA_TYPES,
         "has_more": has_more,
         "load_more_url": load_more_url,
         "page": page,
         "total": total,
-        "has_filters": browse_filters.has_active_filters(values),
+        "has_filters": browse_filters.has_active_filters(values), "active_sort": sort,
         "seven_days_ago": (datetime.now(tz=None) - timedelta(days=7)).strftime("%Y-%m-%d"),
+        "always_show_game_title": always_show_game_title,
+        "show_platform_logo_in_collection": show_platform_logo_in_collection,
+        "show_collector_condition_in_collection": show_collector_condition_in_collection,
+        "show_region_in_collection": show_region_in_collection,
+        "show_new_label_in_collection": show_new_label_in_collection,
+        "show_wishlist_icon_in_collection": show_wishlist_icon_in_collection,
+        "platform_logo_paths": platform_logo_paths,
+        "game_platforms": game_platforms,
     }
     if counts:
         ctx.update(counts)
@@ -959,7 +1050,7 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
     except (ValueError, TypeError):
         return {"ok": False, "message": "Invalid item IDs"}
 
-    allowed = {"media_type", "location_id", "reading_status", "owned", "wishlisted", "series_name"}
+    allowed = {"media_type", "location_id", "reading_status", "owned", "wishlisted", "series_name", "language", "region", "platform", "collector_condition"}
     filtered = {k: v for k, v in updates.items() if k in allowed}
     if not filtered:
         return {"ok": False, "message": "No valid fields to update"}
@@ -969,6 +1060,10 @@ async def bulk_update(request: Request, _=Depends(require_role("admin"))):
             filtered["series_name"] = None
         elif not str(filtered["series_name"]).strip():
             return {"ok": False, "message": "Series name cannot be empty"}
+
+    if "language" in filtered:
+        lang = str(filtered["language"] or "").strip()
+        filtered["language"] = None if lang in ("", "__clear__") else lang
 
     placeholders = ",".join("?" for _ in item_ids)
 
@@ -1065,6 +1160,11 @@ async def merge_items(request: Request, _=Depends(require_role("admin"))):
                 # would refuse the copy.
                 try:
                     fill = validate_item_fields(db, fill)
+                    # Collision preflight here, not at the write below: that
+                    # runs after the DELETE, so a refusal there would arrive
+                    # with the husk gone and roll the merge back. The husk is
+                    # live, so only a third, trashed row can collide.
+                    item_write.refuse_trash_collision(db, "id = ?", [keep_id], fill)
                 except ItemValueError as e:
                     # Name the row: the loop stops on the first bad one, and a
                     # multi-row merge otherwise reports a value with no way to
@@ -1090,6 +1190,133 @@ async def merge_items(request: Request, _=Depends(require_role("admin"))):
     return {"ok": True, "merged": merged}
 
 
+@router.post("/items/{item_id}/alternate-title")
+async def update_alternate_title(request: Request, item_id: int, _=Depends(require_role("editor"))):
+    """Save the optional alternate name without sending the user to the full edit form."""
+    form = await request.form()
+    alternate_title = (form.get("alternate_title") or "").strip() or None
+    try:
+        with get_db() as db:
+            if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
+                return JSONResponse(
+                    {"ok": False, "message": "Item not found"}, status_code=404,
+                    headers={"HX-Trigger": items_common._toast_header("Item not found", "error")},
+                )
+            update_item_fields(db, item_id, {"alternate_title": alternate_title})
+    except (ItemValueError, ValueError) as exc:
+        return JSONResponse(
+            {"ok": False, "message": str(exc) or "Alternate name could not be saved"}, status_code=400,
+            headers={"HX-Trigger": items_common._toast_header("Alternate name could not be saved", "error")},
+        )
+    return JSONResponse(
+        {"ok": True, "alternate_title": alternate_title or ""},
+        headers={"HX-Trigger": json.dumps({
+            "showToast": {"message": "Alternate name saved", "type": "success"},
+            "alternateNameSaved": {"item_id": item_id},
+        })},
+    )
+
+
+@router.post("/items/{item_id}/wishlist")
+async def toggle_wishlist(request: Request, item_id: int, _=Depends(require_role("editor"))):
+    """Move an item between owned, wishlist, or neither from its detail page."""
+    form = await request.form()
+    mark_owned = form.get("mark_owned") == "1"
+    try:
+        with get_db() as db:
+            item = db.execute(
+                f"SELECT i.id, i.owned, {lists.WISHLISTED_SQL} AS wishlisted "
+                "FROM items_live i WHERE i.id = ?",
+                (item_id,),
+            ).fetchone()
+            if item is None:
+                return JSONResponse(
+                    {"ok": False, "message": "Item not found"}, status_code=404,
+                    headers={"HX-Trigger": items_common._toast_header("Item not found", "error")},
+                )
+
+            if item["wishlisted"]:
+                # Removing a wishlist entry leaves it in neither list unless
+                # the user explicitly chooses to mark it owned again.
+                updates = {"owned": 1, "wishlisted": False} if mark_owned else {
+                    "owned": 0, "wishlisted": False,
+                }
+                label = "Marked as owned" if mark_owned else "Removed from wishlist"
+            else:
+                # Wishlist is exclusive: heart-clicking an owned item moves
+                # it from Owned to Wishlist in one validated write.
+                updates = {"owned": 0, "wishlisted": True}
+                label = "Moved to wishlist"
+            update_item_fields(db, item_id, updates)
+    except (ItemValueError, ValueError) as exc:
+        return JSONResponse(
+            {"ok": False, "message": str(exc) or "Wishlist could not be updated"}, status_code=400,
+            headers={"HX-Trigger": items_common._toast_header(str(exc) or "Wishlist could not be updated", "error")},
+        )
+
+    return JSONResponse(
+        {"ok": True, "wishlisted": bool(updates["wishlisted"]), "owned": bool(updates["owned"])},
+        headers={"HX-Trigger": json.dumps({
+            "wishlistToggled": {
+                "item_id": item_id,
+                "wishlisted": bool(updates["wishlisted"]),
+                "owned": bool(updates["owned"]),
+            },
+            "showToast": {"message": label, "type": "success"},
+        })},
+    )
+
+
+@router.post("/items/{item_id}/quick-metadata")
+async def update_quick_metadata(request: Request, item_id: int, _=Depends(require_role("editor"))):
+    """Save one top-of-page metadata field for the compact item editor."""
+    form = await request.form()
+    field = (form.get("field") or "").strip()
+    value = (form.get("value") or "").strip()
+    allowed = {"title", "authors", "publisher", "platform", "region", "language", "publish_year", "location_id"}
+    if field not in allowed:
+        return JSONResponse({"ok": False, "message": "Unknown metadata field"}, status_code=400)
+    if field == "publish_year":
+        try:
+            value = int(value) if value else None
+        except ValueError:
+            return JSONResponse({"ok": False, "message": "Year must be a number"}, status_code=400)
+    else:
+        value = value or None
+    try:
+        with get_db() as db:
+            if not db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone():
+                return JSONResponse({"ok": False, "message": "Item not found"}, status_code=404)
+            update_item_fields(db, item_id, {field: value})
+            if field == "location_id":
+                if value is None:
+                    display = "No location"
+                else:
+                    location = db.execute(
+                        "SELECT name FROM locations WHERE id = ?", (value,)
+                    ).fetchone()
+                    display = location["name"] if location else "No location"
+                    from app.services.user_preferences import get_preference
+                    if str(value) == get_preference(
+                        db, request.state.user["id"], "default_location_id"
+                    ):
+                        display += " (default)"
+            elif field == "platform" and value:
+                display = get_game_platforms(db).get(value, value)
+            elif field == "language" and value:
+                from app.services.national import SEARCH_LANGS
+                display = SEARCH_LANGS.get(value, value)
+            else:
+                display = str(value) if value is not None else "—"
+    except (ItemValueError, ValueError) as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400,
+                            headers={"HX-Trigger": items_common._toast_header(str(exc), "error")})
+    return JSONResponse({"ok": True, "field": field, "display": display}, headers={"HX-Trigger": json.dumps({
+        "itemMetadataSaved": {"item_id": item_id, "field": field, "display": display},
+        "showToast": {"message": "Details saved", "type": "success"},
+    })})
+
+
 @router.post("/items/{item_id}")
 async def update_item(request: Request, item_id: int, _=Depends(require_role("editor"))):
     form = await request.form()
@@ -1101,9 +1328,13 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
     # code — G58). Nothing is saved on any refusal.
     edit_url = f"/item/{item_id}/edit" + (f"?from={back_key}" if back_key else "")
 
-    def _refused(code):
-        return RedirectResponse(url=f"{edit_url}{'&' if '?' in edit_url else '?'}error={code}",
-                                status_code=303)
+    def _refused(code, **extra):
+        url = f"{edit_url}{'&' if '?' in edit_url else '?'}error={code}"
+        # `trashed=<id>` only: the template resolves the title itself, so no
+        # user text is ever echoed back through the query string (G58).
+        for key, value in extra.items():
+            url += f"&{key}={value}"
+        return RedirectResponse(url=url, status_code=303)
 
     fields = {}
     try:
@@ -1111,7 +1342,7 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
                     "publish_year", "page_count", "description", "series_name",
                     "series_position", "narrator", "duration_mins", "location_id", "notes",
                     "reading_status", "date_started", "date_finished", "owned", "wishlisted",
-                    "platform", "manual_value", "language"):
+                    "platform", "collector_condition", "manual_value", "language", "region", "alternate_title"):
             val = form.get(key)
             if val is not None:
                 if key == "wishlisted":
@@ -1134,14 +1365,15 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         # A non-numeric year/count/value used to be a 500.
         return _refused("invalid_number")
 
-    # Handle cover upload
+    # Cover upload: validated here, written only after every refusal below
+    # has had its chance — a refused save must not touch the file (#127).
+    cover_content = None
     cover_file = form.get("cover")
     if cover_file and hasattr(cover_file, "read"):
-        content = await cover_file.read()
-        if content and len(content) > 100:
-            cover_path = covers.save_uploaded_cover(item_id, content)
-            if cover_path:
-                fields["cover_path"] = cover_path
+        content = await cover_file.read(covers.MAX_COVER_SIZE + 1)
+        if content and len(content) > 100 and covers.validate_uploaded_cover(content):
+            cover_content = content
+            fields["cover_path"] = f"covers/{item_id}.jpg"
 
     if not fields:
         return RedirectResponse(url=redirect_url, status_code=303)
@@ -1151,7 +1383,10 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
             "SELECT isbn, upc, media_type, series_name FROM items_live WHERE id = ?",
             (item_id,),
         ).fetchone()
-        old_series_name = row["series_name"] if row else None
+        # Missing or in Trash — a stale edit form must not write to either.
+        if row is None:
+            return HTMLResponse("Not found", status_code=404)
+        old_series_name = row["series_name"]
 
         # #87: the edit form re-posts every named control on every save,
         # including a stored ISBN/UPC that predates the validator — which
@@ -1168,13 +1403,12 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         # correct, since an unchanged identifier cannot newly collide, but
         # worth re-reading if a future branch is added below this guard
         # that answers the same "did this identifier change" question (G68).
-        if row is not None:
-            if (fields.get("isbn") is not None and fields["isbn"] == row["isbn"]
-                    and isbn_svc.canonical_isbn_pair(fields["isbn"]) is None):
-                del fields["isbn"]
-            if (fields.get("upc") is not None and fields["upc"] == row["upc"]
-                    and not upc_svc.canonical_retail_barcode(fields["upc"])[0]):
-                del fields["upc"]
+        if (fields.get("isbn") is not None and fields["isbn"] == row["isbn"]
+                and isbn_svc.canonical_isbn_pair(fields["isbn"]) is None):
+            del fields["isbn"]
+        if (fields.get("upc") is not None and fields["upc"] == row["upc"]
+                and not upc_svc.canonical_retail_barcode(fields["upc"])[0]):
+            del fields["upc"]
 
         if not fields:
             return RedirectResponse(url=redirect_url, status_code=303)
@@ -1195,8 +1429,6 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         if fields.get("upc"):
             effective_media_type = fields.get("media_type")
             if effective_media_type is None:
-                if row is None:
-                    return HTMLResponse("Not found", status_code=404)
                 effective_media_type = row["media_type"]
             conflict = db.execute(
                 "SELECT id FROM items_live WHERE upc = ? AND media_type = ? AND id != ? LIMIT 1",
@@ -1209,6 +1441,8 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
         # rewrites isbn10 too — #54's second half.
         try:
             update_item_fields(db, item_id, fields)
+        except IdentifierInTrash as e:
+            return _refused(e.code, trashed=e.item_id)
         except ItemValueError as e:
             return _refused(e.code)
         except sqlite3.IntegrityError:
@@ -1223,6 +1457,10 @@ async def update_item(request: Request, item_id: int, _=Depends(require_role("ed
             new_series_name = fields["series_name"]
             if old_series_name.strip().casefold() != (new_series_name or "").strip().casefold():
                 gc_orphaned_series_meta(db, old_series_name)
+
+        # Inside the block: a failed write rolls the row update back (G118).
+        if cover_content is not None:
+            covers.write_uploaded_cover(item_id, cover_content)
 
     return RedirectResponse(url=redirect_url, status_code=303)
 
@@ -1279,11 +1517,11 @@ async def set_reading_status(request: Request, item_id: int, status: str = Form(
         # history or a status toggle swaps in a section whose history vanished.
         reading_history = get_reading_history(db, item_id)
 
-    # Fire-and-forget: push status to Hardcover if linked
-    if item["hardcover_user_book_id"]:
+    # Fire-and-forget: push to Hardcover if linked; a retyped disc or game keeps its IDs
+    if item["hardcover_user_book_id"] and item["media_type"] in BOOK_MEDIA_TYPES:
         asyncio.create_task(_push_status_to_hardcover(item_id, status))
 
-    label = {"want_to_read": "Want to Read", "reading": "Reading", "read": "Read"}.get(status, "Cleared")
+    label = status_labels(item["media_type"]).label(status) or "Cleared"
     resp = templates.TemplateResponse(
         request, "fragments/reading_status.html",
         {"item": item, "reading_history": reading_history},
@@ -1421,45 +1659,19 @@ async def backfill_synopses_stream(request: Request, _=Depends(require_role("adm
 
 @router.delete("/items/{item_id}")
 async def delete_item(item_id: int, _=Depends(require_role("editor"))):
+    """Move one item to Trash. Reversible from the Trash page: its copies,
+    loans, tags, links and scan history stay attached and return with it.
+    A second call on the same id is a no-op and still answers 200."""
     with get_db() as db:
         row = db.execute("SELECT title FROM items_live WHERE id = ?", (item_id,)).fetchone()
         title = row["title"] if row else "Item"
-        # Clear scan_log FK (no ON DELETE CASCADE on that table)
-        db.execute("UPDATE scan_log SET item_id = NULL WHERE item_id = ?", (item_id,))
-        db.execute("DELETE FROM items WHERE id = ?", (item_id,))
-    resp = HTMLResponse('{"ok": true}', headers={"Content-Type": "application/json"})
-    resp.headers["HX-Trigger"] = items_common._toast_header(f"Deleted: {title[:50]}")
+        item_write.trash_item(db, item_id)
+    # This response is swapped into the initiating button just before the
+    # client sends the user back to the collection.  Keep that brief state
+    # human-readable instead of exposing the old JSON API payload.
+    resp = HTMLResponse("Moved to trash")
+    resp.headers["HX-Trigger"] = items_common._toast_header(f"Moved to Trash: {title[:50]}")
     return resp
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 @router.get("/recent-scans")
@@ -1472,7 +1684,7 @@ async def recent_scans(
     templates = request.app.state.templates
     with get_db() as db:
         scans = db.execute(
-            "SELECT sl.*, i.title, i.authors, i.cover_path "
+            "SELECT sl.*, i.id AS live_item_id, i.title, i.authors, i.cover_path "
             "FROM scan_log sl LEFT JOIN items_live i ON sl.item_id = i.id "
             "WHERE sl.mode = ? ORDER BY sl.created_at DESC LIMIT 20",
             (mode,),
@@ -1511,7 +1723,7 @@ async def inventory_missing(
         # inner join alone would silently drop those rows from every audit.
         # For an item with no copies the seam is the only answer there is.
         items = db.execute(
-            "SELECT i.id, i.title, i.authors, i.cover_path, COUNT(c.id) AS copy_count "
+            "SELECT i.id, i.title, i.authors, i.cover_path, i.media_type, COUNT(c.id) AS copy_count "
             "FROM items_live i LEFT JOIN copies_live c "
             "  ON c.item_id = i.id AND c.location_id = ? "
             "WHERE c.id IS NOT NULL "
@@ -1523,28 +1735,11 @@ async def inventory_missing(
 
     missing = [dict(i) for i in items if i["id"] not in scanned]
 
-    html_parts = []
-    if not missing:
-        html_parts.append(
-            f'<p class="text-sm text-shelf-success">All items at {loc_name} accounted for!</p>'
-        )
-    else:
-        html_parts.append(
-            f'<p class="text-sm text-shelf-warning mb-3">{len(missing)} item(s) at {loc_name} not scanned:</p>'
-        )
-        for item in missing:
-            cover = f'<img src="/covers/{item["id"]}.jpg" class="w-10 h-14 object-cover rounded" alt="">' if item["cover_path"] else '<div class="w-10 h-14 bg-shelf-hover rounded flex items-center justify-center text-shelf-muted text-xs">?</div>'
-            title = item["title"] or "Untitled"
-            authors = f'<p class="text-xs text-shelf-muted truncate">{item["authors"]}</p>' if item.get("authors") else ""
-            copy_count = f' <span class="text-xs text-shelf-muted">({item["copy_count"]} copies)</span>' if item["copy_count"] > 1 else ""
-            html_parts.append(
-                f'<div class="bg-shelf-card rounded-lg border border-shelf-border p-3 flex items-center gap-3">'
-                f'{cover}<div class="flex-1 min-w-0"><p class="font-medium text-sm truncate">'
-                f'<a href="/item/{item["id"]}" class="hover:text-shelf-accent2">{title}</a>{copy_count}</p>{authors}</div>'
-                f'<span class="text-xs px-2 py-1 rounded-full shrink-0 bg-shelf-error/20 text-shelf-error">missing</span></div>'
-            )
-
-    return HTMLResponse("\n".join(html_parts))
+    return templates.TemplateResponse(
+        request,
+        "fragments/inventory_missing.html",
+        {"missing": missing, "loc_name": loc_name},
+    )
 
 
 @router.post("/igdb/test-key")
@@ -1562,5 +1757,3 @@ async def test_igdb_key(request: Request, _=Depends(require_role("admin"))):
         return {"ok": False, "message": "Both Client ID and Client Secret are required"}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         return await igdb.test_credentials(client_id, client_secret, client)
-
-

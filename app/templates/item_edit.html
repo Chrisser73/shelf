@@ -27,6 +27,14 @@
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
         That UPC / EAN isn't a valid retail barcode — correct it or clear the field. Nothing was saved.
     </div>
+    {% elif error == "identifier_in_trash" %}
+    <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
+        {% if trashed_title %}
+        “{{ trashed_title }}” is in Trash and already uses that identifier. Restore it from Trash, or delete it permanently, before using it here. Nothing was saved.
+        {% else %}
+        That identifier belongs to an item in Trash. Restore that item, or delete it permanently, before using it here. Nothing was saved.
+        {% endif %}
+    </div>
     {% elif error == "upc_conflict" %}
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
         That UPC / EAN is already assigned to another item of this media type. Nothing was saved.
@@ -45,7 +53,7 @@
     </div>
     {% elif error == "invalid_reading_status" %}
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
-        That reading status isn't one of Want to Read, Reading or Read. Nothing was saved.
+        That status isn't one Shelf recognises. Nothing was saved.
     </div>
     {% elif error == "invalid_owned" %}
     <div data-testid="edit-error" role="alert" class="mb-4 rounded-lg border border-shelf-error/40 bg-shelf-error/10 px-4 py-3 text-sm text-shelf-error">
@@ -63,11 +71,12 @@
 
     <nav aria-label="Edit sections" data-testid="edit-section-nav" class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-6">
         <a href="#edit-general" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">General</a>
-        <a href="#edit-artwork" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Artwork</a>
+        <a href="#edit-artwork" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Cover</a>
         <a href="#edit-series" data-section-nav="series" data-media-types="book audiobook ebook comic manga" data-always-visible="{{ 'true' if item.series_name or item.series_position is not none or item.page_count is not none else 'false' }}" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Series</a>
         <a href="#edit-identifiers" data-section-nav="identifiers" data-media-types="book audiobook ebook comic manga dvd cd video_game" data-always-visible="{{ 'true' if item.isbn or item.upc else 'false' }}" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Identifiers</a>
         <a href="#edit-location" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Location</a>
         <a href="#edit-media" data-section-nav="media" data-media-types="video_game audiobook" data-always-visible="{{ 'true' if item.platform or item.narrator or item.duration_mins is not none else 'false' }}" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Media Details</a>
+        <a href="#edit-tags" class="px-3 py-2 bg-shelf-card border border-shelf-border rounded-lg text-sm text-shelf-muted hover:text-shelf-text hover:border-shelf-accent/50 transition-colors">Tags</a>
     </nav>
 
     <form id="item-edit-form" action="/api/items/{{ item.id }}" method="post" enctype="multipart/form-data" class="space-y-4">
@@ -88,8 +97,9 @@
             </div>
 
             {{ field("title", "Title", item.title) }}
+            {{ field("alternate_title", "Alternate name", item.alternate_title) }}
             {{ field("subtitle", "Subtitle", item.subtitle) }}
-            {{ field("authors", "Authors", item.authors) }}
+            {{ field("authors", creator_label(item.media_type), item.authors) }}
 
             <div>
                 <label for="media_type" class="block text-sm font-medium text-shelf-muted mb-1">Media Type</label>
@@ -106,7 +116,7 @@
                 {{ field("publish_year", "Year", item.publish_year, type="number") }}
             </div>
 
-            <div data-media-types="book audiobook ebook comic manga" data-always-visible="{{ 'true' if item.language else 'false' }}">
+            <div data-media-types="book audiobook ebook comic manga video_game dvd cd vinyl cassette" data-always-visible="{{ 'true' if item.language else 'false' }}">
                 <label for="language" class="block text-sm font-medium text-shelf-muted mb-1">Language</label>
                 <select id="language" name="language"
                         class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
@@ -120,15 +130,16 @@
                 </select>
             </div>
 
-            <div data-media-types="book audiobook ebook comic manga" data-always-visible="{{ 'true' if item.reading_status or item.date_started or item.date_finished else 'false' }}" class="space-y-4">
+            <div data-media-types="book audiobook ebook comic manga dvd video_game" data-always-visible="{{ 'true' if item.reading_status or item.date_started or item.date_finished else 'false' }}" class="space-y-4">
                 <div>
-                    <label for="reading_status" class="block text-sm font-medium text-shelf-muted mb-1">Reading Status</label>
+                    <label for="reading_status" class="block text-sm font-medium text-shelf-muted mb-1">Status</label>
+                    {% set sl = status_labels(item.media_type) %}
                     <select id="reading_status" name="reading_status"
                             class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                         <option value="">None</option>
-                        <option value="want_to_read" {% if item.reading_status == 'want_to_read' %}selected{% endif %}>Want to Read</option>
-                        <option value="reading" {% if item.reading_status == 'reading' %}selected{% endif %}>Reading</option>
-                        <option value="read" {% if item.reading_status == 'read' %}selected{% endif %}>Read</option>
+                        <option value="want_to_read" {% if item.reading_status == 'want_to_read' %}selected{% endif %}>{{ sl.want }}</option>
+                        <option value="reading" {% if item.reading_status == 'reading' %}selected{% endif %}>{{ sl.doing }}</option>
+                        <option value="read" {% if item.reading_status == 'read' %}selected{% endif %}>{{ sl.done }}</option>
                     </select>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
@@ -151,16 +162,16 @@
         </section>
         <section id="edit-artwork" data-testid="edit-section-artwork" class="bg-shelf-card rounded-xl border border-shelf-border p-6 space-y-4">
             <div>
-                <h2 class="text-lg font-semibold">Artwork</h2>
+                <h2 class="text-lg font-semibold">Cover</h2>
                 <p class="text-sm text-shelf-muted mt-1">Preview the current cover, upload a replacement, or use a public image URL.</p>
             </div>
 
             <div x-data="coverDrop">
                 <div class="flex items-center gap-4">
                     {% if item.cover_path %}
-                    <img :src="preview || '/{{ item.cover_path }}'" class="w-16 h-24 object-cover rounded" alt="Current cover">
+                    <img :src="preview || '/{{ item.cover_path }}'" class="w-16 h-24 object-cover rounded" alt="Current cover" data-cover-shape="{{ cover_shape(item.media_type) }}">
                     {% else %}
-                    <img x-show="preview" :src="preview" class="w-16 h-24 object-cover rounded" alt="Cover preview" style="display:none">
+                    <img x-show="preview" :src="preview" class="w-16 h-24 object-cover rounded" alt="Cover preview" style="display:none" data-cover-shape="{{ cover_shape(item.media_type) }}">
                     <div x-show="!preview" class="w-16 h-24 bg-shelf-hover rounded flex items-center justify-center text-shelf-muted text-xs">None</div>
                     {% endif %}
                     <div class="flex-1">
@@ -196,6 +207,15 @@
                 </div>
                 <p class="text-xs text-shelf-muted">Public HTTPS image links only. Use URL applies the cover immediately; your other edits are still saved with Save Changes.</p>
             </div>
+            <div class="border-t border-shelf-border pt-4 flex flex-wrap gap-2">
+                <button type="button" hx-get="/api/items/{{ item.id }}/cover-search" hx-target="#edit-cover-candidates" hx-swap="innerHTML"
+                        class="px-4 py-2 bg-shelf-hover text-shelf-text border border-shelf-border rounded-lg text-sm hover:border-shelf-accent/50 transition-colors">Find cover</button>
+                {% if item.cover_path %}
+                <button type="button" hx-post="/api/items/{{ item.id }}/cover-remove" hx-swap="none" data-after-request="reload"
+                        class="px-4 py-2 bg-shelf-error/10 text-shelf-error border border-shelf-error/30 rounded-lg text-sm hover:bg-shelf-error/20 transition-colors">Remove cover</button>
+                {% endif %}
+            </div>
+            <div id="edit-cover-candidates"></div>
         </section>
 
         <section id="edit-series" data-testid="edit-section-series" data-media-types="book audiobook ebook comic manga" data-always-visible="{{ 'true' if item.series_name or item.series_position is not none or item.page_count is not none else 'false' }}" class="bg-shelf-card rounded-xl border border-shelf-border p-6 space-y-4">
@@ -348,6 +368,28 @@
                 </select>
             </div>
 
+            <div data-media-types="video_game" data-always-visible="{{ 'true' if item.region else 'false' }}">
+                <label for="region" class="block text-sm font-medium text-shelf-muted mb-1">Region</label>
+                <select id="region" name="region" class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                    <option value="unknown" {% if item.region == 'unknown' %}selected{% endif %}>Unknown</option>
+                    <option value="PAL" {% if item.region == 'PAL' %}selected{% endif %}>PAL</option>
+                    <option value="NTSC" {% if item.region == 'NTSC' %}selected{% endif %}>NTSC</option>
+                    <option value="NTSC-J" {% if item.region == 'NTSC-J' %}selected{% endif %}>NTSC-J</option>
+                    <option value="PAL-M" {% if item.region == 'PAL-M' %}selected{% endif %}>PAL-M</option>
+                </select>
+            </div>
+
+            <div data-media-types="video_game dvd cd vinyl cassette comic manga" data-always-visible="{{ 'true' if item.collector_condition else 'false' }}">
+                <label for="collector_condition" class="block text-sm font-medium text-shelf-muted mb-1">Collector state</label>
+                <select id="collector_condition" name="collector_condition"
+                        class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                    <option value="">Not specified</option>
+                    <option value="cib" {% if item.collector_condition == 'cib' %}selected{% endif %}>CIB — Complete in Box</option>
+                    <option value="boxed" {% if item.collector_condition == 'boxed' %}selected{% endif %}>Boxed</option>
+                    <option value="loose" {% if item.collector_condition == 'loose' %}selected{% endif %}>Loose</option>
+                </select>
+            </div>
+
             <div data-media-types="audiobook" data-always-visible="{{ 'true' if item.narrator or item.duration_mins is not none else 'false' }}" class="grid grid-cols-2 gap-4">
                 {{ field("narrator", "Narrator", item.narrator) }}
                 {{ field("duration_mins", "Duration (min)", item.duration_mins, type="number") }}
@@ -363,6 +405,20 @@
             </a>
         </div>
     </form>
+
+    {# Outside the save form on purpose: it carries its own hx-post/hx-delete
+       controls, and nesting forms is invalid HTML that browsers silently
+       repair in ways that drop fields (design §3). #}
+    {# The heading below already names the section, so the fragment's own
+       label is hidden here; a class on the section survives the fragment's
+       outerHTML swaps, a flag passed to the include would not. #}
+    <section id="edit-tags" data-testid="edit-section-tags" class="bg-shelf-card rounded-xl border border-shelf-border p-6 space-y-4 [&_[data-tags-label]]:hidden">
+        <div>
+            <h2 class="text-lg font-semibold">Tags</h2>
+            <p class="text-sm text-shelf-muted mt-1">Tags save as you add or remove them.</p>
+        </div>
+        {% include "fragments/item_tags.html" %}
+    </section>
 </div>
 
 <script src="/static/js/scanner-engine.js"></script>

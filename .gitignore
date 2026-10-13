@@ -1,6 +1,6 @@
 data/
 data-dev/
-.env
+.env*
 __pycache__/
 .devdocs
 .coverage
@@ -11,9 +11,11 @@ htmlcov/
 .agents/
 # Node build tooling (tailwind CLI) — see package.json
 node_modules/
+static/icons/platforms/
 .temp/
 # Pipeline scratch — recon notes a stage leaves behind. Untracked and NOT
 # ignored, these are invisible to the release parity gate (both trees lack
 # them, so the diff is empty and they silently never ship). Archive anything
 # worth keeping under .devdocs/archive/completed/.
 .session/
+.idea/

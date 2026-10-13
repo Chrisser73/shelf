@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends openssl gosu \
+RUN apt-get update && apt-get install -y --no-install-recommends openssl gosu yaz \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1000 shelf
 
@@ -8,6 +8,9 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+COPY scripts/fetch_platform_logos.py ./scripts/fetch_platform_logos.py
+RUN python scripts/fetch_platform_logos.py
 
 COPY app/ ./app/
 COPY static/ ./static/

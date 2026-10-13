@@ -142,7 +142,7 @@ def test_viewer_sees_read_only_product_ui_without_editor_mutations(
         expect(page.locator('[data-testid="cover-controls"]')).to_have_count(0)
         expect(page.get_by_role("link", name="Edit", exact=True)).to_have_count(0)
         expect(page.get_by_role("button", name="Delete", exact=True)).to_have_count(0)
-        expect(page.locator("body")).to_contain_text("Reading Status")
+        expect(page.locator("#reading-status-section")).to_be_visible()
 
         # Nor should an available item advertise actions that the server rejects.
         page.goto(f"{base}/item/{available_item_id}")

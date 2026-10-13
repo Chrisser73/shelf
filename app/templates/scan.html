@@ -5,7 +5,7 @@
 <script src="/static/vendor/zxing-browser-0.1.5.min.js"></script>
 {% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto" x-data="scanPage">
+<div class="max-w-3xl mx-auto" x-data="scanPage" data-off-modes="{{ off_scan_modes }}" data-scan-page data-lending-enabled="{{ 'true' if lending_enabled else 'false' }}" data-status-labels='{{ status_label_sets | tojson }}'>
 
     <!-- Mode Switcher -->
     <div class="flex flex-wrap gap-2 mb-4">
@@ -87,6 +87,12 @@
            the panel lives in its own x-data scope, and a cross-scope Alpine
            read under the CSP build fails silently. #}
         <input type="hidden" id="scan-mode" name="mode" :value="mode">
+        {# A default button, visually hidden: Enter in the barcode field submits a
+           form implicitly only while it has a single text field or has a
+           submit button. The Default tags field is a second text field, so
+           without this Enter would do nothing (tag-suggest.js stops Enter in
+           the tags field itself from submitting a blank scan). #}
+        <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Scan</button>
         <div class="bg-shelf-card rounded-xl border border-shelf-border p-6 mb-6">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
@@ -141,7 +147,7 @@
                 <!-- Borrower (lend only) -->
                 <div x-show="mode === 'lend'" x-transition style="display:none">
                     <label class="block text-sm font-medium text-shelf-muted mb-1">Borrower</label>
-                    <select name="borrower_id" x-model="borrowerId"
+                    <select name="borrower_id" x-model="borrowerId" :disabled="mode !== 'lend'"
                             class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2.5 text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none">
                         <option value="">Select borrower...</option>
                         {% for b in borrowers %}
@@ -161,6 +167,41 @@
                            :placeholder="['lend','return','move','inventory','lookup','quick_rate'].includes(mode) ? 'Scan barcode...' : mediaType === 'auto' ? 'Scan any barcode...' : mediaType === 'video_game' ? 'Scan UPC barcode...' : 'Scan or type ISBN...'"
                            class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2.5 text-shelf-text text-lg font-mono focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50">
                 </div>
+            </div>
+
+            <!-- Default tags (add/wishlist only) -->
+            {# Sticky per device; tag-suggest.js restores it and fills the
+               datalist from GET /api/tags. :disabled, not only x-show, keeps it
+               out of other modes' submissions (G90). No x-model: every reader
+               reads the DOM value (G91). #}
+            <div x-show="mode === 'add' || mode === 'wishlist'" x-transition class="mt-4">
+                <label for="default-tags" class="block text-sm font-medium text-shelf-muted mb-1">Default tags</label>
+                <input type="text" id="default-tags" name="tags" list="tag-suggestions"
+                       data-tag-suggest data-storage-key="shelf_tags" data-type-source="#media-type"
+                       :disabled="mode !== 'add' && mode !== 'wishlist'" autocomplete="off"
+                       placeholder="e.g. Cookbook; Signed"
+                       class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2.5 text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none placeholder-shelf-muted/50">
+                <datalist id="tag-suggestions"></datalist>
+                <p class="text-xs text-shelf-muted mt-1">Added to every new item. Separate several with <code>;</code>.</p>
+            </div>
+
+            <!-- Default reading status (add/wishlist only) -->
+            {# Sticky per device (shelf_reading_status). :disabled keeps it out
+               of other modes' submissions and off types with no status (G90);
+               the server checks the type again. The option words follow the
+               media type, from data-status-labels on the root. #}
+            <div x-show="mode === 'add' || mode === 'wishlist'" x-transition class="mt-4">
+                <label for="default-reading-status" class="block text-sm font-medium text-shelf-muted mb-1">Default status</label>
+                <select id="default-reading-status" name="reading_status"
+                        x-model="readingStatus" @change="persistReadingStatus()"
+                        :disabled="statusDisabled"
+                        class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2.5 text-shelf-text focus:ring-2 focus:ring-shelf-accent focus:border-transparent outline-none disabled:opacity-50">
+                    <option value="">None</option>
+                    <option value="want_to_read" x-text="statusWant">Want to</option>
+                    <option value="reading" x-text="statusDoing">In progress</option>
+                    <option value="read" x-text="statusDone">Finished</option>
+                </select>
+                <p class="text-xs text-shelf-muted mt-1">Set on every new item. No dates are recorded.</p>
             </div>
 
             <!-- Validation warnings -->
@@ -242,7 +283,7 @@
                 mode === 'move' ? 'Moved' :
                 mode === 'inventory' ? 'Scanned Items' :
                 mode === 'lookup' ? 'Lookup Results' :
-                mode === 'quick_rate' ? 'Marked as Read' : 'Results'">
+                mode === 'quick_rate' ? 'Marked as finished' : 'Results'">
     </h2>
     <div id="scan-results" class="space-y-3"
          hx-get="/api/recent-scans" hx-trigger="load" hx-swap="innerHTML"
@@ -252,4 +293,5 @@
 
 <script src="/static/js/scanner-engine.js"></script>
 <script src="/static/js/scan.js"></script>
+<script src="/static/js/tag-suggest.js"></script>
 {% endblock %}

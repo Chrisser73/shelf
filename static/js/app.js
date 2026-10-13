@@ -26,11 +26,11 @@
 // successful scan in red (issue #116).
 var SCAN_OK_STATUSES = [
     'added', 'wishlisted', 'returned', 'confirmed', 'marked_read',
-    'checked_out', 'moved', 'found', 'relocated', 'promoted'
+    'checked_out', 'moved', 'found', 'relocated', 'promoted', 'restored'
 ];
 var SCAN_WARN_STATUSES = [
     'duplicate', 'already_checked_out', 'not_checked_out', 'legacy_ambiguous',
-    'legacy_incomplete'
+    'legacy_incomplete', 'in_trash'
 ];
 // Neither success nor failure: the scan worked and the answer is a report.
 // 'elsewhere' is Inventory mode declining to guess which of several copies
@@ -92,15 +92,68 @@ function scanCardToast(root) {
 // --- Toast notifications ---
 function showToast(message, type) {
     var container = document.getElementById('toast-container');
-    var colors = {success: 'bg-shelf-success', error: 'bg-shelf-error', warning: 'bg-shelf-warning', info: 'bg-shelf-accent'};
+    if (!container) return;
+    var variants = {
+        success: { title: 'Success', accent: 'border-l-shelf-success', icon: 'text-shelf-success', ring: 'border-shelf-success/35' },
+        error: { title: 'Error', accent: 'border-l-shelf-error', icon: 'text-shelf-error', ring: 'border-shelf-error/35' },
+        warning: { title: 'Warning', accent: 'border-l-shelf-warning', icon: 'text-shelf-warning', ring: 'border-shelf-warning/35' },
+        info: { title: 'Info', accent: 'border-l-shelf-accent', icon: 'text-shelf-accent2', ring: 'border-shelf-accent/35' }
+    };
+    var variant = variants[type] || variants.success;
     var el = document.createElement('div');
-    el.className = (colors[type] || 'bg-shelf-accent') + ' text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium transition-opacity duration-300';
+    el.setAttribute('role', type === 'error' || type === 'warning' ? 'alert' : 'status');
+    el.className = 'pointer-events-auto flex items-start gap-3 rounded-lg border border-l-4 bg-shelf-card p-4 shadow-xl transition-all duration-300 ease-out -translate-y-4 opacity-0 ' + variant.accent + ' ' + variant.ring;
+
+    var icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 20 20');
+    icon.setAttribute('fill', 'currentColor');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('class', 'mt-0.5 h-5 w-5 shrink-0 ' + variant.icon);
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    if (type === 'error') {
+        path.setAttribute('fill-rule', 'evenodd'); path.setAttribute('d', 'M10 18a8 8 0 100-16 8 8 0 000 16zm-1.06-10.94a1.5 1.5 0 112.12 2.12L10 10.24l1.06 1.06a1.5 1.5 0 11-2.12 2.12L7.88 12.36 6.82 13.42A1.5 1.5 0 114.7 11.3l1.06-1.06L4.7 9.18A1.5 1.5 0 116.82 7.06l1.06 1.06 1.06-1.06z');
+    } else if (type === 'warning') {
+        path.setAttribute('fill-rule', 'evenodd'); path.setAttribute('d', 'M8.257 3.099c.765-1.36 2.72-1.36 3.486 0l6.518 11.59C19.01 16.02 18.05 17.5 16.52 17.5H3.48c-1.53 0-2.49-1.48-1.74-2.81l6.517-11.59zM10 7a1 1 0 00-1 1v3a1 1 0 002 0V8a1 1 0 00-1-1zm0 7a1.125 1.125 0 100-2.25A1.125 1.125 0 0010 14z');
+    } else if (type === 'info') {
+        path.setAttribute('fill-rule', 'evenodd'); path.setAttribute('d', 'M18 10A8 8 0 112 10a8 8 0 0116 0zm-7-3a1 1 0 10-2 0 1 1 0 002 0zm-2 3a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-.5v-3a1 1 0 00-1-1H9z');
+    } else {
+        path.setAttribute('fill-rule', 'evenodd'); path.setAttribute('d', 'M16.707 5.293a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3.5-3.5a1 1 0 011.414-1.414l2.793 2.793 6.793-6.793a1 1 0 011.414 0z');
+    }
+    path.setAttribute('clip-rule', 'evenodd');
+    icon.appendChild(path);
+    el.appendChild(icon);
+
+    var copy = document.createElement('div');
+    copy.className = 'min-w-0 flex-1';
+    var heading = document.createElement('p');
+    heading.className = 'text-sm font-semibold text-shelf-text';
+    heading.textContent = variant.title;
+    copy.appendChild(heading);
+    var detail = document.createElement('p');
+    detail.className = 'mt-0.5 text-sm text-shelf-muted';
     // Structural, not belt-and-braces: makes a pill with nothing in it impossible from any caller.
     message = (message || '').toString().trim() || 'Done';
-    el.textContent = message;
+    detail.textContent = message;
+    copy.appendChild(detail);
+    el.appendChild(copy);
+
+    var dismiss = document.createElement('button');
+    dismiss.type = 'button'; dismiss.setAttribute('aria-label', 'Dismiss notification');
+    dismiss.className = 'shrink-0 rounded p-1 text-shelf-muted hover:bg-shelf-hover hover:text-shelf-text transition-colors';
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', function () { dismissToast(); });
+    el.appendChild(dismiss);
     container.appendChild(el);
-    setTimeout(function() { el.style.opacity = '0'; }, 2700);
-    setTimeout(function() { el.remove(); }, 3000);
+    requestAnimationFrame(function () { el.classList.remove('-translate-y-4', 'opacity-0'); });
+    var removed = false;
+    function dismissToast() {
+        if (removed) return;
+        removed = true;
+        el.classList.add('-translate-y-4', 'opacity-0');
+        setTimeout(function () { el.remove(); }, 300);
+    }
+    // A short entrance, 2.5 seconds of reading time, then a matching exit.
+    setTimeout(dismissToast, 2800);
 }
 
 // Listen for HX-Trigger showToast events from server
@@ -109,16 +162,179 @@ document.body.addEventListener('showToast', function(e) {
     showToast(d.message || 'Done', d.type || 'success');
 });
 
+// The alternate-name mini editor uses an HTMX request but deliberately keeps
+// its form in place on errors. On success, replay its own Cancel action so
+// Alpine returns to the read-only line exactly as if the user had cancelled.
+document.body.addEventListener('alternateNameSaved', function(e) {
+    var id = e.detail && e.detail.item_id;
+    var form = id && document.querySelector('[data-alternate-name-form="' + id + '"]');
+    var display = id && document.querySelector('[data-alternate-name-display="' + id + '"]');
+    var input = form && form.elements && form.elements.alternate_title;
+    // Do not route this value through Alpine/x-text: Alpine's CSP evaluator
+    // can turn a JSON-style \u00e9 escape into literal text. The input has the
+    // browser-decoded value, so it is the authoritative UI value here.
+    if (display) display.textContent = (input && input.value.trim()) || '—';
+    var cancel = id && document.querySelector('[data-alternate-name-cancel="' + id + '"]');
+    if (cancel) cancel.click();
+});
+document.body.addEventListener('itemMetadataSaved', function(e) {
+    var d = e.detail || {};
+    var key = d.item_id + '-' + d.field;
+    var display = document.querySelector('[data-inline-display="' + key + '"]');
+    if (display) display.textContent = d.display || '—';
+    var cancel = document.querySelector('[data-inline-field-cancel="' + key + '"]');
+    if (cancel) cancel.click();
+});
+document.body.addEventListener('wishlistToggled', function(e) {
+    var d = e.detail || {};
+    var id = d.item_id;
+    var button = id && document.querySelector('[data-wishlist-toggle="' + id + '"]');
+    if (!button) return;
+
+    var wishlisted = !!d.wishlisted;
+    button.dataset.wishlisted = wishlisted ? '1' : '0';
+    button.setAttribute('aria-pressed', wishlisted ? 'true' : 'false');
+    button.classList.toggle('border-shelf-accent', wishlisted);
+    button.classList.toggle('bg-shelf-accent', wishlisted);
+    button.classList.toggle('text-white', wishlisted);
+    button.classList.toggle('hover:bg-shelf-accent2', wishlisted);
+    button.classList.toggle('border-shelf-border', !wishlisted);
+    button.classList.toggle('bg-shelf-bg', !wishlisted);
+    button.classList.toggle('text-shelf-accent2', !wishlisted);
+    button.classList.toggle('hover:border-shelf-accent', !wishlisted);
+    button.classList.toggle('hover:bg-shelf-accent/10', !wishlisted);
+
+    var action = wishlisted ? 'Remove from wishlist' : 'Add to wishlist';
+    button.setAttribute('title', action);
+    button.setAttribute('aria-label', action);
+    var heart = document.querySelector('[data-wishlist-heart="' + id + '"]');
+    if (heart) heart.setAttribute('fill', wishlisted ? 'currentColor' : 'none');
+});
+document.addEventListener('click', function(e) {
+    var remove = e.target.closest && e.target.closest('[data-wishlist-remove]');
+    if (remove) {
+        var dialog = document.getElementById('wishlist-owned-dialog-' + remove.getAttribute('data-wishlist-remove'));
+        if (dialog && dialog.showModal) dialog.showModal();
+        return;
+    }
+    var dialogButton = e.target.closest && e.target.closest('[data-wishlist-dialog-confirm]');
+    if (!dialogButton) return;
+    var parentDialog = dialogButton.closest('dialog');
+    if (parentDialog && parentDialog.open) parentDialog.close();
+});
+function setWishlistToggleLoading(button, loading) {
+    var id = button && button.getAttribute('data-wishlist-toggle');
+    var heart = id && document.querySelector('[data-wishlist-heart="' + id + '"]');
+    var spinner = id && document.querySelector('[data-wishlist-spinner="' + id + '"]');
+    if (heart) heart.classList.toggle('hidden', loading);
+    if (spinner) spinner.classList.toggle('hidden', !loading);
+}
+document.body.addEventListener('htmx:beforeRequest', function(e) {
+    var button = e.detail.elt;
+    if (button && button.matches && button.matches('[data-wishlist-toggle]')) {
+        setWishlistToggleLoading(button, true);
+    }
+});
+document.body.addEventListener('htmx:afterRequest', function(e) {
+    var button = e.detail.elt;
+    if (button && button.matches && button.matches('[data-wishlist-toggle]')) {
+        setWishlistToggleLoading(button, false);
+    }
+});
+document.body.addEventListener('htmx:beforeRequest', function(e) {
+    var form = e.detail.elt;
+    if (!form || !form.matches || !form.matches('[data-alternate-name-form]')) return;
+    var id = form.getAttribute('data-alternate-name-form');
+    var icon = document.querySelector('[data-alternate-name-icon="' + id + '"]');
+    var spinner = document.querySelector('[data-alternate-name-spinner="' + id + '"]');
+    if (icon) icon.classList.add('hidden');
+    if (spinner) spinner.classList.remove('hidden');
+});
+document.body.addEventListener('htmx:afterRequest', function(e) {
+    var form = e.detail.elt;
+    if (!form || !form.matches || !form.matches('[data-alternate-name-form]')) return;
+    var id = form.getAttribute('data-alternate-name-form');
+    var icon = document.querySelector('[data-alternate-name-icon="' + id + '"]');
+    var spinner = document.querySelector('[data-alternate-name-spinner="' + id + '"]');
+    if (icon) icon.classList.remove('hidden');
+    if (spinner) spinner.classList.add('hidden');
+});
+
 // --- Loading bar ---
 (function() {
     var bar = document.getElementById('htmx-indicator');
-    document.body.addEventListener('htmx:beforeRequest', function() {
+    document.body.addEventListener('htmx:beforeRequest', function(evt) {
+        // A request a form listener cancelled gets no afterRequest to hide the bar.
+        if (evt.defaultPrevented) return;
         bar.style.opacity = '1';
         bar.style.width = (30 + Math.random() * 30) + '%';
     });
     document.body.addEventListener('htmx:afterRequest', function() {
         bar.style.width = '100%';
         setTimeout(function() { bar.style.opacity = '0'; bar.style.width = '0'; }, 300);
+    });
+})();
+
+// --- Per-control busy state ---
+// The control that issued an htmx request is marked aria-busy (and disabled,
+// if it is a button) until htmx:afterRequest, which fires on 2xx, error,
+// abort and timeout alike — never release on afterSwap/afterSettle (G6).
+// - A cancelled beforeRequest (scan.js, shelf-fill.js) gets no afterRequest,
+//   so a defaultPrevented request is never marked.
+// - Ownership is keyed on detail.xhr: htmx rewrites detail.elt per dispatch
+//   and re-fires afterRequest elsewhere when the issuer was swapped out.
+// - Text inputs are marked, never disabled; a control already disabled is
+//   never re-enabled. hx-disabled-elt elements are not skipped: htmx restores
+//   its own disabled state before afterRequest, and its `this, #x` list form
+//   never disables `this` in 2.0.4, so skipping left buttons unguarded.
+(function() {
+    var owned = new WeakMap();
+
+    function controlsFor(elt, evt) {
+        var tag = elt.tagName;
+        var trig = evt.detail.requestConfig && evt.detail.requestConfig.triggeringEvent;
+        if (tag === 'FORM') {
+            if (trig && trig.submitter) return [trig.submitter];
+            return Array.prototype.filter.call(elt.elements, function(c) { return c.type === 'submit'; });
+        }
+        if (tag === 'BUTTON') return [elt];
+        if (tag === 'INPUT' && trig && trig.type === 'keyup') return [elt];
+        return [];
+    }
+
+    document.body.addEventListener('htmx:beforeRequest', function(evt) {
+        if (evt.defaultPrevented || !evt.detail.xhr) return;
+        var elt = evt.detail.elt;
+        if (!elt || !elt.tagName) return;
+        var recs = [];
+        controlsFor(elt, evt).forEach(function(c) {
+            var rec = { el: c, busy: false, disabled: false };
+            if (c.getAttribute('aria-busy') !== 'true') {
+                c.setAttribute('aria-busy', 'true');
+                rec.busy = true;
+            }
+            var disableable = c.tagName === 'BUTTON' || (c.tagName === 'INPUT' && c.type === 'submit');
+            if (disableable && !c.disabled) {
+                c.disabled = true;
+                c.setAttribute('data-busy-owned', '');
+                rec.disabled = true;
+            }
+            if (rec.busy || rec.disabled) recs.push(rec);
+        });
+        if (recs.length) owned.set(evt.detail.xhr, recs);
+    });
+
+    document.body.addEventListener('htmx:afterRequest', function(evt) {
+        var recs = evt.detail.xhr && owned.get(evt.detail.xhr);
+        if (!recs) return;
+        owned.delete(evt.detail.xhr);
+        recs.forEach(function(rec) {
+            if (rec.busy) rec.el.removeAttribute('aria-busy');
+            if (rec.disabled) {
+                rec.el.disabled = false;
+                rec.el.removeAttribute('data-busy-owned');
+            }
+        });
     });
 })();
 
@@ -185,6 +401,35 @@ document.body.addEventListener('htmx:afterSwap', function() {
             el.value = plat.value;
         });
     }
+    syncDefaultTags();
+    syncDefaultReadingStatus();
+});
+
+// The default-tags field can change after the results are on screen, so it is
+// mirrored on its own input/change too, not only on swap. A disabled field
+// (a mode that takes no tags) mirrors as empty.
+function syncDefaultTags() {
+    var tags = document.getElementById('default-tags');
+    var value = tags && !tags.disabled ? tags.value : '';
+    document.querySelectorAll('.tags-sync').forEach(function(el) {
+        el.value = value;
+    });
+}
+// The default reading status, mirrored the same way into each result's
+// .reading-status-sync. Disabled (another mode, or a type with no status)
+// mirrors as empty; the server checks the type again.
+function syncDefaultReadingStatus() {
+    var sel = document.getElementById('default-reading-status');
+    var value = sel && !sel.disabled ? sel.value : '';
+    document.querySelectorAll('.reading-status-sync').forEach(function(el) {
+        el.value = value;
+    });
+}
+['input', 'change'].forEach(function(type) {
+    document.body.addEventListener(type, function(e) {
+        if (e.target && e.target.id === 'default-tags') syncDefaultTags();
+        if (e.target && e.target.id === 'default-reading-status') syncDefaultReadingStatus();
+    });
 });
 
 // CSP: hx-on:: attributes and hx-vals='js:...' need unsafe-eval, which the CSP
@@ -220,6 +465,9 @@ document.body.addEventListener('htmx:afterRequest', function (evt) {
         location.reload();
     } else if (action === 'goto-browse' && ok) {
         window.location = '/browse';
+    } else if (action === 'toast-reload' && ok) {
+        showToast('Details saved', 'success');
+        window.setTimeout(function () { window.location.reload(); }, 350);
     }
 });
 
@@ -229,4 +477,37 @@ document.body.addEventListener('htmx:configRequest', function (evt) {
     if (el && el.getAttribute && el.getAttribute('data-vals-scan-mode') !== null) {
         evt.detail.parameters.mode = localStorage.getItem('shelf_scan_mode') || 'add';
     }
+    // Manual forms are nested in their own Alpine component. Read the live
+    // scan-mode input from the page scope at submission time, so choosing
+    // Wishlist cannot silently fall back to the route's Add default.
+    if (el && el.matches && el.matches('[data-scan-mode-submit]')) {
+        var mode = document.getElementById('scan-mode');
+        evt.detail.parameters.mode = (mode && mode.value === 'wishlist') ? 'wishlist' : 'add';
+    }
+});
+
+document.addEventListener('click', function (evt) {
+    var button = evt.target.closest('[data-retry-missing-covers]');
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    var icon = button.querySelector('svg, i');
+    if (icon) icon.classList.add('animate-spin');
+    var es = new EventSource('/api/covers/bulk-retry/stream');
+    es.onmessage = function (event) {
+        var data = JSON.parse(event.data);
+        if (data.type === 'done') {
+            es.close();
+            showToast('Cover retry finished: ' + data.success + ' found, ' + data.failed + ' not found', data.failed ? 'warning' : 'success');
+            window.setTimeout(function () { window.location.reload(); }, 1000);
+        } else if (data.type === 'error') {
+            es.close(); button.disabled = false;
+            if (icon) icon.classList.remove('animate-spin');
+            showToast(data.message || 'Cover retry failed', 'error');
+        }
+    };
+    es.onerror = function () {
+        es.close(); button.disabled = false;
+        if (icon) icon.classList.remove('animate-spin');
+        showToast('Cover retry connection lost', 'error');
+    };
 });

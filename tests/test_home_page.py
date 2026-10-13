@@ -39,6 +39,25 @@ def test_home_renders_summary_and_recent_items(admin_client, db):
     assert "Wishlist" in html
 
 
+def test_home_renders_platform_tiles_linking_to_the_platform_filter(admin_client, db):
+    _insert_item(db, title="Mario", media_type="video_game", platform="switch")
+    _insert_item(db, title="Zelda", isbn="9780000000040", media_type="video_game", platform="switch")
+    _insert_item(db, title="Astro", isbn="9780000000057", media_type="video_game", platform="ps5")
+    _insert_item(db, title="Not A Game", isbn="9780000000064", media_type="book", platform="switch")
+    db.commit()
+
+    html = admin_client.get("/").text
+    assert 'data-testid="home-platforms"' in html
+    assert "Nintendo Switch" in html
+    assert "/browse?platform_filter=switch" in html
+
+    filtered = admin_client.get("/browse?platform_filter=switch").text
+    assert "Mario" in filtered
+    assert "Zelda" in filtered
+    assert "Astro" not in filtered
+    assert "Not A Game" not in filtered
+
+
 def test_viewer_home_does_not_offer_scan_action(viewer_client):
     html = viewer_client.get("/").text
     assert "Browse collection" in html

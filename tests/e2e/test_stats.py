@@ -95,7 +95,7 @@ def test_stats_dashboard_reflects_real_collection_and_links_back_to_item(
         # The headline numbers must describe the seeded collection, not merely render.
         expect(page.get_by_text("Owned", exact=True).locator("..")).to_contain_text("2")
         expect(page.get_by_text("Wishlist", exact=True).locator("..")).to_contain_text("1")
-        expect(page.get_by_text(f"Read in {current_year}", exact=True).locator("..")).to_contain_text("1")
+        expect(page.get_by_text(f"Finished in {current_year}", exact=True).locator("..")).to_contain_text("1")
         expect(page.get_by_text("Without ISBN", exact=True).locator("..")).to_contain_text("2")
         # The wishlist disc's 15 no longer counts — the valuation is owned-only (#125).
         expect(page.get_by_text("Est. Value", exact=True).locator("..")).to_contain_text("40")

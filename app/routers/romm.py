@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Request
 from starlette.responses import RedirectResponse, StreamingResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.services import romm_client, romm_sync
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,9 @@ async def save_platforms(request: Request):
     return {"ok": True, "message": "RomM platform selection saved"}
 
 
-@router.get("/sync/stream", dependencies=[Depends(require_role("admin"))])
+@router.get("/sync/stream", dependencies=[
+    Depends(require_role("admin")), Depends(require_feature("romm")),
+])
 async def sync_stream():
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -138,7 +141,9 @@ async def sync_stream():
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
-@router.get("/items/{item_id}/action", dependencies=[Depends(require_role("viewer"))])
+@router.get("/items/{item_id}/action", dependencies=[
+    Depends(require_role("viewer")), Depends(require_feature("romm")),
+])
 async def item_action(item_id: int):
     try:
         url = romm_sync.item_action(item_id)
@@ -148,7 +153,9 @@ async def item_action(item_id: int):
     return {"ok": bool(url), "url": url}
 
 
-@router.get("/items/{item_id}/open", dependencies=[Depends(require_role("viewer"))])
+@router.get("/items/{item_id}/open", dependencies=[
+    Depends(require_role("viewer")), Depends(require_feature("romm")),
+])
 async def open_item(item_id: int):
     """Open a RomM-backed item without making Browse construct provider URLs.
 

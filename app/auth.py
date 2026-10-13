@@ -1,5 +1,4 @@
 import logging
-import os
 import secrets
 import sqlite3
 import time
@@ -10,7 +9,9 @@ import jwt
 from fastapi import Request, Response
 from fastapi.responses import RedirectResponse, HTMLResponse
 
-from app.config import SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRY_SECONDS
+from app.config import (
+    SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRY_SECONDS,
+)
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,10 @@ def get_secret_key() -> str:
     return _cached_secret_key
 
 
+# settings key: the highest token_version a deleted user held, so a restore still outranks it.
+TOKEN_VERSION_HIGH_WATER = "token_version_high_water"
+
+
 def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
@@ -164,7 +169,15 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
-def create_token(user_id: int, username: str, role: str, display_name: str | None = None, token_version: int = 1) -> str:
+def create_token(
+    user_id: int,
+    username: str,
+    role: str,
+    display_name: str | None = None,
+    token_version: int = 1,
+    expiry_seconds: int = JWT_EXPIRY_SECONDS,
+    persistent: bool = True,
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
@@ -173,7 +186,11 @@ def create_token(user_id: int, username: str, role: str, display_name: str | Non
         "display_name": display_name or username,
         "tv": token_version,
         "iat": now,
-        "exp": now + timedelta(seconds=JWT_EXPIRY_SECONDS),
+        "exp": now + timedelta(seconds=expiry_seconds),
+        # Keep the browser-cookie choice in the signed token so a sliding
+        # refresh cannot silently turn a session-only login into a persisted
+        # one. Old tokens predate the field and remain persistent.
+        "persistent": persistent,
     }
     return jwt.encode(payload, get_secret_key(), algorithm=JWT_ALGORITHM)
 
@@ -189,21 +206,36 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
-def set_auth_cookie(response: Response, token: str, csrf_token: str | None = None) -> None:
-    secure = not os.environ.get("SHELF_DEV_INSECURE_COOKIES")
-    if os.environ.get("SHELF_DEV_INSECURE_COOKIES"):
-        logger.warning(
-            "SHELF_DEV_INSECURE_COOKIES is set — auth cookie is NOT secure. "
-            "Never use this in production."
-        )
+def _token_lifetime(token: str) -> int:
+    """Return a signed token's own lifetime, falling back to the configured session."""
+    payload = decode_token(token) or {}
+    try:
+        return int(payload["exp"] - payload["iat"])
+    except (KeyError, TypeError, ValueError):
+        return JWT_EXPIRY_SECONDS
+
+
+def _token_is_persistent(token: str) -> bool:
+    """Whether the signed token may outlive the current browser session."""
+    payload = decode_token(token) or {}
+    # Preserve current behaviour for tokens minted before this flag existed.
+    return payload.get("persistent", True) is not False
+
+
+def set_auth_cookie(request: Request, response: Response, token: str, csrf_token: str | None = None) -> None:
+    # The browser-facing scheme: uvicorn rewrites it from X-Forwarded-Proto only
+    # for SHELF_TRUST_PROXY peers, so an untrusted peer cannot claim https.
+    secure = request.url.scheme == "https"
+    lifetime = _token_lifetime(token)
+    cookie_options = {"max_age": lifetime} if _token_is_persistent(token) else {}
     response.set_cookie(
         key="access_token",
         value=token,
         httponly=True,
         secure=secure,
         samesite="strict",
-        max_age=JWT_EXPIRY_SECONDS,
         path="/",
+        **cookie_options,
     )
     # Set a paired CSRF token cookie (readable by JS for double-submit)
     if csrf_token is None:
@@ -214,8 +246,8 @@ def set_auth_cookie(response: Response, token: str, csrf_token: str | None = Non
         httponly=False,
         secure=secure,
         samesite="strict",
-        max_age=JWT_EXPIRY_SECONDS,
         path="/",
+        **cookie_options,
     )
 
 
@@ -225,7 +257,12 @@ def clear_auth_cookie(response: Response) -> None:
 
 
 def get_current_user(request: Request) -> dict | None:
-    """Read user from JWT cookie. Returns dict with id, username, role, display_name or None."""
+    """Resolve the session to its users row: id, username, role, display_name, token_version.
+
+    The JWT proves the session; identity and role come from the row. A token whose
+    version or username no longer matches the row (a password change, a role
+    change, an id reused after a restore) resolves to no session.
+    """
     token = request.cookies.get("access_token")
     if not token:
         return None
@@ -233,26 +270,28 @@ def get_current_user(request: Request) -> dict | None:
     if not payload:
         return None
 
-    # Check token version against DB to detect invalidated tokens
-    token_tv = payload.get("tv", 1)
     user_id = int(payload["sub"])
     with get_db() as db:
-        row = db.execute("SELECT token_version FROM users WHERE id = ?", (user_id,)).fetchone()
-        if not row:
-            return None
-        if row["token_version"] != token_tv:
-            return None
+        row = db.execute(
+            "SELECT username, role, display_name, token_version FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    if not row or row["token_version"] != payload.get("tv", 1):
+        return None
+    if row["username"].casefold() != str(payload.get("username", "")).casefold():
+        return None
 
     return {
         "id": user_id,
-        "username": payload["username"],
-        "role": payload["role"],
-        "display_name": payload.get("display_name", payload["username"]),
+        "username": row["username"],
+        "role": row["role"],
+        "display_name": row["display_name"] or row["username"],
+        "token_version": row["token_version"],
     }
 
 
-def should_refresh_token(request: Request) -> str | None:
-    """If token is past half-life, return a fresh token. Otherwise None."""
+def should_refresh_token(request: Request, user: dict) -> str | None:
+    """If the token is past half-life, return a fresh one minted from the resolved user."""
     token = request.cookies.get("access_token")
     if not token:
         return None
@@ -265,8 +304,9 @@ def should_refresh_token(request: Request) -> str | None:
     half_life = (exp - iat) / 2
     if now > iat + half_life:
         return create_token(
-            int(payload["sub"]), payload["username"], payload["role"],
-            payload.get("display_name"), payload.get("tv", 1),
+            user["id"], user["username"], user["role"], user["display_name"], user["token_version"],
+            expiry_seconds=JWT_EXPIRY_SECONDS,
+            persistent=_token_is_persistent(token),
         )
     return None
 

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from typing import Sequence
 
 from app.config import DATABASE_PATH, COVERS_DIR
+from app.services.search_text import fold as fold_search_text
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +249,82 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
     # up without the column (G1).
     (39, "Add tags media_type scope column",
      "ALTER TABLE tags ADD COLUMN media_type TEXT DEFAULT NULL"),
+    # Versions 40 and 41 are already used below by the fork's platform-logo
+    # migrations. Keep those historic ids stable for existing databases; the
+    # upstream price-history additions are appended as 48/49 below instead.
+    (40, "Add game platform logo mappings",
+     """CREATE TABLE IF NOT EXISTS game_platform_logos (
+            platform_slug TEXT PRIMARY KEY REFERENCES game_platforms(slug) ON DELETE CASCADE,
+            svg_path TEXT NOT NULL
+        )"""),
+    (41, "Add per-user appearance and platform logo settings",
+     """CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY(user_id, key)
+        )"""),
+    (42, "Add per-user platform logo mappings",
+     """CREATE TABLE IF NOT EXISTS user_platform_logos (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            platform_slug TEXT NOT NULL REFERENCES game_platforms(slug) ON DELETE CASCADE,
+            svg_path TEXT NOT NULL,
+            PRIMARY KEY(user_id, platform_slug)
+        )"""),
+    (43, "Add collector packaging state",
+     "ALTER TABLE items ADD COLUMN collector_condition TEXT DEFAULT NULL"),
+    (44, "Add alternate title", "ALTER TABLE items ADD COLUMN alternate_title TEXT DEFAULT NULL"),
+    (45, "Add release region", "ALTER TABLE items ADD COLUMN region TEXT DEFAULT NULL"),
+    (46, "Repair malformed Unicode in alternate titles",
+     "UPDATE items SET alternate_title = REPLACE(alternate_title, 'u00e9', 'é') "
+     "WHERE alternate_title LIKE '%u00e9%'"),
+    # A vision response may have been saved after migration 46 had already
+    # run. Apply the same repair again for those later values.
+    (47, "Repair later malformed Unicode in alternate titles",
+     "UPDATE items SET alternate_title = REPLACE(alternate_title, 'u00e9', 'é') "
+     "WHERE alternate_title LIKE '%u00e9%'"),
+    # 48 is a new table, so it follows 33/34 rather than 37/38: the CREATE is
+    # numbered and also lives in MIGRATION_TABLES. The numbered copy upgrades
+    # existing databases; MIGRATION_TABLES covers a fresh bootstrap.
+    (48, "Add price history",
+     "CREATE TABLE IF NOT EXISTS price_history ("
+     " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+     " item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,"
+     " price REAL,"
+     " source TEXT NOT NULL DEFAULT 'isbndb',"
+     " observed_at TEXT NOT NULL DEFAULT (datetime('now')))"),
+    # Keep price alerts off where Valuation was explicitly disabled.
+    (49, "Start price alerts off where Valuation is off",
+     """INSERT OR IGNORE INTO settings (key, value)
+        SELECT 'feature.price_alerts', '0'
+        WHERE EXISTS (SELECT 1 FROM settings
+                      WHERE key = 'feature.valuation' AND value = '0')"""),
+    # A database that previously used upstream's 40/41 has those version rows
+    # but not the fork's logo/preferences tables. These idempotent bridge
+    # migrations restore them without changing the established 40–42 ledger.
+    (50, "Ensure game platform logo mappings",
+     """CREATE TABLE IF NOT EXISTS game_platform_logos (
+            platform_slug TEXT PRIMARY KEY REFERENCES game_platforms(slug) ON DELETE CASCADE,
+            svg_path TEXT NOT NULL
+        )"""),
+    (51, "Ensure per-user appearance settings",
+     """CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY(user_id, key)
+        )"""),
+    (52, "Ensure per-user platform logo mappings",
+     """CREATE TABLE IF NOT EXISTS user_platform_logos (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            platform_slug TEXT NOT NULL REFERENCES game_platforms(slug) ON DELETE CASCADE,
+            svg_path TEXT NOT NULL,
+            PRIMARY KEY(user_id, platform_slug)
+        )"""),
+    # Ocean originally named the blue/petrol variant. Preserve that choice
+    # while freeing the Ocean name for the new greener palette.
+    (53, "Rename blue Ocean theme to Navi",
+     "UPDATE user_preferences SET value = 'navi' WHERE key = 'theme' AND value = 'ocean'"),
 )
 
 MIGRATION_TABLES = """
@@ -277,6 +354,15 @@ CREATE TABLE IF NOT EXISTS valuation_history (
     priced_count INTEGER NOT NULL,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS price_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id     INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    price       REAL,
+    source      TEXT NOT NULL DEFAULT 'isbndb',
+    observed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_price_history_item ON price_history(item_id, observed_at);
 
 CREATE TABLE IF NOT EXISTS borrowers (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -365,6 +451,25 @@ CREATE TABLE IF NOT EXISTS game_platforms (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS game_platform_logos (
+    platform_slug TEXT PRIMARY KEY REFERENCES game_platforms(slug) ON DELETE CASCADE,
+    svg_path TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY(user_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS user_platform_logos (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform_slug TEXT NOT NULL REFERENCES game_platforms(slug) ON DELETE CASCADE,
+    svg_path TEXT NOT NULL,
+    PRIMARY KEY(user_id, platform_slug)
+);
+
 -- media_type is also added via ALTER in MIGRATIONS (39) for upgrades of a
 -- database that already has this table; baked in here too (same pattern as
 -- series_meta below) because this CREATE runs after the MIGRATIONS loop, so
@@ -385,6 +490,27 @@ CREATE TABLE IF NOT EXISTS item_tags (
     PRIMARY KEY (item_id, tag_id)
 );
 CREATE INDEX IF NOT EXISTS idx_item_tags_tag ON item_tags(tag_id);
+
+-- The author index (#117b). An index over items.authors, which stays the
+-- record: app/services/author_index.py is the only writer, called from the
+-- item_write funnel and the boot rebuild. AUTOINCREMENT so an author id freed
+-- by garbage collection is never reused by a different person — a kept
+-- /browse?author_filter= URL must not silently point at someone else.
+CREATE TABLE IF NOT EXISTS authors (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    name_key   TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS item_authors (
+    item_id   INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    author_id INTEGER NOT NULL REFERENCES authors(id) ON DELETE CASCADE,
+    position  INTEGER NOT NULL,
+    role      TEXT,
+    PRIMARY KEY (item_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_item_authors_author ON item_authors(author_id);
 
 -- complete/hc_total/hc_missing/hc_checked_at are also added via ALTER in
 -- MIGRATIONS (16-19) for upgrades of a database that already has this
@@ -677,14 +803,15 @@ def _run_migrations(db: sqlite3.Connection) -> list[str]:
     retired = _retire_kids_book(db)
     if retired:
         logs.append(retired)
+    from app.services import author_index  # deferred, like item_merge above
+    built = author_index.rebuild_all(db)
+    if built:
+        logs.append(built)
     return logs
 
 
 def _seed_game_platforms(db: sqlite3.Connection) -> None:
-    """Seed game_platforms table from config defaults if empty."""
-    count = db.execute("SELECT COUNT(*) as c FROM game_platforms").fetchone()["c"]
-    if count > 0:
-        return
+    """Add config defaults without changing a user's existing platform list."""
     from app.config import GAME_PLATFORMS
     for i, (slug, name) in enumerate(GAME_PLATFORMS.items()):
         db.execute(
@@ -827,6 +954,19 @@ def get_setting(db, key: str) -> str:
     return get_setting_value(key, raw)
 
 
+def set_setting(db, key: str, value: str) -> None:
+    """Write one setting row, replacing any stored value.
+
+    Non-sensitive keys only: this stores `value` as given. A key in
+    `crypto.SENSITIVE_KEYS` goes through `routers/settings._upsert_setting`,
+    which encrypts it first and then calls this.
+    """
+    db.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
+        (key, value, value),
+    )
+
+
 def get_all_settings(db) -> dict[str, str]:
     """Get all settings as a dict with env var overrides applied.
 
@@ -921,10 +1061,49 @@ def init_db():
         logger.info("%s", line)
 
 
+class _Connection(sqlite3.Connection):
+    """A connection that runs registered callbacks after each successful commit.
+
+    A process cache invalidated inside a transaction can be refilled from the
+    pre-commit state before the commit lands; `after_commit` lets the writer
+    invalidate again once its rows are visible to other connections.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._after_commit = []
+
+    def commit(self):
+        super().commit()
+        callbacks, self._after_commit = self._after_commit, []
+        for callback in callbacks:
+            callback()
+
+    def rollback(self):
+        super().rollback()
+        self._after_commit = []
+
+
+def after_commit(conn, callback) -> None:
+    """Run `callback` once `conn`'s current transaction commits; drop it on rollback.
+
+    A connection `get_db()` did not open has no hook, so the callback runs now.
+    """
+    hooks = getattr(conn, "_after_commit", None)
+    if hooks is None:
+        callback()
+    elif callback not in hooks:
+        hooks.append(callback)
+
+
 @contextmanager
 def get_db():
-    conn = sqlite3.connect(str(DATABASE_PATH))
+    conn = sqlite3.connect(str(DATABASE_PATH), factory=_Connection)
     conn.row_factory = sqlite3.Row
+    # SQLite's built-in NOCASE/LIKE is ASCII-only, so e.g. a Collection search
+    # for "Poke" misses "Pokémon".  Register the shared Unicode fold on every
+    # connection; queries deliberately call it only for an active search.
+    conn.create_function("search_fold", 1, fold_search_text, deterministic=True)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     # The soft-delete read seam. Every read of items in app/ goes through this

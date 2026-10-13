@@ -1,17 +1,344 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(none);
+
+/* Shelf is server-rendered, so make its template and browser-side source
+   directories explicit instead of relying on framework-specific discovery. */
+@source "../../app/templates";
+@source "../js";
+
+/* Former tailwind.config.js theme, now expressed as native CSS theme tokens. */
+@theme {
+    --color-white: #ffffff;
+    --color-shelf-bg: #0f1117;
+    --color-shelf-card: #1a1d27;
+    --color-shelf-hover: #242836;
+    --color-shelf-accent: #6366f1;
+    --color-shelf-accent2: #818cf8;
+    --color-shelf-text: #e2e8f0;
+    --color-shelf-muted: #94a3b8;
+    --color-shelf-border: #2d3148;
+    --color-shelf-success: #22c55e;
+    --color-shelf-warning: #eab308;
+    --color-shelf-error: #ef4444;
+}
+
+/* Keep Shelf's existing class-based dark-mode contract. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* App-wide styles previously inlined in base.html */
-body { background-color: #0f1117; color: #e2e8f0; }
-.cover-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1.25rem; }
-.cover-card { aspect-ratio: 2/3; }
-.cover-card img { width: 100%; height: 100%; object-fit: cover; border-radius: 0.5rem; }
-.scan-result { animation: slideIn 0.3s ease-out; }
-@keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+body {
+    background-color: var(--color-shelf-bg);
+    color: var(--color-shelf-text);
+}
+
+/* Themes only replace the neutral and accent palette. Semantic success,
+   warning and error colours intentionally stay the same across themes. */
+:root[data-theme="light"] {
+    --color-shelf-bg: #f5f7fb;
+    --color-shelf-card: #ffffff;
+    --color-shelf-hover: #e8ecf5;
+    --color-shelf-accent: #4f46e5;
+    --color-shelf-accent2: #6366f1;
+    --color-shelf-text: #172033;
+    --color-shelf-muted: #64748b;
+    --color-shelf-border: #d7ddea;
+}
+
+/* Navi keeps Shelf's dark contrast, replacing its violet accents with a
+   balanced blue/petrol palette. */
+:root[data-theme="navi"] {
+    --color-shelf-bg: #0a1018;
+    --color-shelf-card: #111c2a;
+    --color-shelf-hover: #192b3b;
+    --color-shelf-accent: #0d8fb5;
+    --color-shelf-accent2: #38bdf8;
+    --color-shelf-text: #e4eef8;
+    --color-shelf-muted: #91a9c3;
+    --color-shelf-border: #283b54;
+}
+
+/* Ocean is the richer green-petrol counterpart to Navi. */
+:root[data-theme="ocean"] {
+    --color-shelf-bg: #0b1418;
+    --color-shelf-card: #10252c;
+    --color-shelf-hover: #16343a;
+    --color-shelf-accent: #0ea5a8;
+    --color-shelf-accent2: #38bdf8;
+    --color-shelf-text: #e1f4f3;
+    --color-shelf-muted: #8fb6b5;
+    --color-shelf-border: #25464e;
+}
+
+/* Sakura uses a deep plum surface with soft pink accents. */
+:root[data-theme="sakura"] {
+    --color-shelf-bg: #1a1018;
+    --color-shelf-card: #2a1425;
+    --color-shelf-hover: #3a1c33;
+    --color-shelf-accent: #ec4899;
+    --color-shelf-accent2: #f472b6;
+    --color-shelf-text: #fff0f7;
+    --color-shelf-muted: #d8a2ba;
+    --color-shelf-border: #59314d;
+}
+
+/* Coffee combines espresso surfaces with warm caramel highlights. */
+:root[data-theme="coffee"] {
+    --color-shelf-bg: #1a120f;
+    --color-shelf-card: #2b1c17;
+    --color-shelf-hover: #402a20;
+    --color-shelf-accent: #c77a3d;
+    --color-shelf-accent2: #e6a563;
+    --color-shelf-text: #fff1e5;
+    --color-shelf-muted: #d0a989;
+    --color-shelf-border: #624332;
+}
+
+/* Retro has warm arcade-brown panels and a classic amber accent. */
+:root[data-theme="retro"] {
+    --color-shelf-bg: #241c12;
+    --color-shelf-card: #382b1b;
+    --color-shelf-hover: #514026;
+    --color-shelf-accent: #e0a72f;
+    --color-shelf-accent2: #f3c75b;
+    --color-shelf-text: #fff4ce;
+    --color-shelf-muted: #d1bd80;
+    --color-shelf-border: #705a31;
+}
+
+/* Matrix is a near-black interface with luminous terminal-green accents. */
+:root[data-theme="matrix"] {
+    --color-shelf-bg: #07110b;
+    --color-shelf-card: #0b1d12;
+    --color-shelf-hover: #12301d;
+    --color-shelf-accent: #22c55e;
+    --color-shelf-accent2: #4ade80;
+    --color-shelf-text: #e4ffe9;
+    --color-shelf-muted: #8bc69a;
+    --color-shelf-border: #1d5a32;
+}
+
+/* Text-white is used for the active navigation entry. In the light palette
+   its neutral hover background needs the normal foreground instead. */
+:root[data-theme="light"] .bg-shelf-hover.text-white {
+    color: var(--color-shelf-text);
+}
+
+:root[data-theme="light"] .hover\:text-white:hover {
+    color: var(--color-shelf-text);
+}
+
+/* The bundled platform logos are white SVGs. Give their dedicated stage a
+   stable dark surface in the light palette without darkening the whole card. */
+:root[data-theme="light"] .platform-logo-surface {
+    background-color: #334155;
+    border-color: #475569;
+}
+
+a, button, select {
+    cursor: pointer;
+}
+
+button:disabled, select:disabled {
+    cursor: not-allowed;
+}
+
+.nav-icon {
+    display: block;
+    width: 20px;
+    height: 20px;
+    flex: none;
+    stroke: currentColor;
+}
+
+.cover-grid {
+    display: grid;
+    /* Grid +N adds exactly N cards at every breakpoint, including phones. */
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+    gap: 1.25rem;
+}
+
+.cover-grid[data-grid-size="plus1"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cover-grid[data-grid-size="plus2"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cover-grid[data-grid-size="plus3"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (min-width: 40rem) {
+    .cover-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus1"] {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus2"] {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus3"] {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 48rem) {
+    .cover-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus1"] {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus2"] {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus3"] {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 64rem) {
+    .cover-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus1"] {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus2"] {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus3"] {
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 80rem) {
+    .cover-grid {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus1"] {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus2"] {
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+
+    .cover-grid[data-grid-size="plus3"] {
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+    }
+}
+
+.cover-card {
+    aspect-ratio: 2/3;
+}
+
+.cover-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 0.5rem;
+}
+
+[data-cover-shape="square"] {
+    aspect-ratio: 1 / 1;
+    height: auto;
+}
+
+/* Square artwork (music). Keeps each box's width and derives its height, so
+   it overrides .cover-card's 2:3, aspect-[2/3] and any fixed h-* utility. */
+.scan-result {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 /* Scrollbar */
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #0f1117; }
-::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 4px; }
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--color-shelf-bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--color-shelf-border);
+    border-radius: 4px;
+}
+
 /* Hide Alpine-controlled elements until Alpine initializes */
-[x-cloak] { display: none !important; }
+[x-cloak] {
+    display: none !important;
+}
+
+/* Busy state: static/js/app.js sets aria-busy on the htmx control that issued a
+   request. An Alpine control can opt into the same look with :aria-busy="<flag>". */
+button[aria-busy="true"]::after {
+    content: "";
+    display: inline-block;
+    width: 0.9em;
+    height: 0.9em;
+    margin-left: 0.4em;
+    vertical-align: -0.125em;
+    border: 2px solid #2d3148;
+    border-top-color: #6366f1;
+    border-radius: 9999px;
+    animation: busy-spin 0.7s linear infinite;
+}
+
+/* The alternate-name editor has its own spinner so it can replace the save
+   icon. Do not add the shared busy spinner beside it. */
+button[data-alternate-name-save][aria-busy="true"]::after {
+    display: none;
+}
+
+/* The detail-page wishlist toggle also replaces its icon with its own
+   spinner. Suppress the generic adjacent spinner for the same reason. */
+button[data-wishlist-toggle][aria-busy="true"]::after {
+    display: none;
+}
+
+input[aria-busy="true"] {
+    padding-right: 2.25rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='none' stroke='%232d3148' stroke-width='3'/%3E%3Cpath d='M12 3a9 9 0 0 1 9 9' fill='none' stroke='%236366f1' stroke-width='3' stroke-linecap='round'%3E%3CanimateTransform attributeName='transform' type='rotate' from='0 12 12' to='360 12 12' dur='0.7s' repeatCount='indefinite'/%3E%3C/path%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem 1rem;
+}
+
+@keyframes busy-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button[aria-busy="true"]::after {
+        animation: none;
+    }
+
+    input[aria-busy="true"] {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='none' stroke='%232d3148' stroke-width='3'/%3E%3Cpath d='M12 3a9 9 0 0 1 9 9' fill='none' stroke='%236366f1' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
+    }
+}

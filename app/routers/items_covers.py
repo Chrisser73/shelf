@@ -18,7 +18,7 @@ from app.auth import require_role
 from app.config import COVERS_DIR, HTTP_TIMEOUT
 from app.database import get_db, get_setting
 from app.routers import items_common
-from app.services import covers, cover_queue, manual_cover, openlibrary, scan_outcome
+from app.services import covers, cover_queue, item_write, manual_cover, openlibrary, scan_outcome
 from app.services import isbn as isbn_svc
 
 logger = logging.getLogger(__name__)
@@ -42,16 +42,17 @@ async def cover_status(request: Request, item_id: int, attempt: int = 0, _=Depen
     attempt = max(0, min(attempt, MAX_COVER_POLLS))
     with get_db() as db:
         row = db.execute(
-            "SELECT cover_path FROM items_live WHERE id = ?", (item_id,)
+            "SELECT cover_path, media_type FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
     if not row:
         return templates.TemplateResponse(
             request, "fragments/cover_thumb.html",
-            {"item_id": item_id, "cover_path": None, "attempt": MAX_COVER_POLLS},
+            {"item_id": item_id, "cover_path": None, "media_type": None, "attempt": MAX_COVER_POLLS},
         )
     return templates.TemplateResponse(
         request, "fragments/cover_thumb.html",
-        {"item_id": item_id, "cover_path": row["cover_path"], "attempt": attempt},
+        {"item_id": item_id, "cover_path": row["cover_path"], "media_type": row["media_type"],
+         "attempt": attempt},
     )
 
 @router.post("/items/{item_id}/retry-cover")
@@ -135,12 +136,13 @@ def _cover_search_credentials(db, media_type: str | None) -> dict[str, str]:
 
 
 @router.get("/items/{item_id}/cover-search")
-async def cover_search(request: Request, item_id: int, query: str | None = None, _=Depends(require_role("editor"))):
+async def cover_search(request: Request, item_id: int, query: str | None = None,
+                       use_alternate: bool = False, _=Depends(require_role("editor"))):
     """Search for cover candidates by title/author. Returns HTMX fragment."""
     templates = request.app.state.templates
     with get_db() as db:
         item = db.execute(
-            "SELECT title, authors, cover_path, media_type, publish_year, platform "
+            "SELECT title, alternate_title, authors, isbn, cover_path, media_type, publish_year, platform "
             "FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         # Key-by-key through get_setting, never the bulk settings accessor:
@@ -150,25 +152,35 @@ async def cover_search(request: Request, item_id: int, query: str | None = None,
         creds = {} if not item else _cover_search_credentials(db, item["media_type"])
     if not item:
         return HTMLResponse("Not found", status_code=404)
+    item = dict(item)
+    item["alternate_title"] = item_write.repair_malformed_unicode(item.get("alternate_title"))
 
-    search_query = (query or "").strip() or item["title"]
+    search_query = (query or "").strip()
+    if not search_query and use_alternate:
+        search_query = (item["alternate_title"] or "").strip()
+    search_query = search_query or item["title"]
 
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         result = await covers.search_covers(item, search_query, client, creds=creds)
 
     search_status, search_provider = _search_status(result)
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request, "fragments/cover_search.html",
         {
             "candidates": result.payload or [],
             "item_id": item_id,
             "cover_path": item["cover_path"],
+            "media_type": item["media_type"],
             "query": search_query,
+            "alternate_title": item["alternate_title"],
             "search_note": _search_note(item["media_type"], creds),
             "search_status": search_status,
             "search_provider": search_provider,
         },
     )
+    if not result.payload and not _search_note(item["media_type"], creds) and not search_status:
+        response.headers["HX-Trigger"] = items_common._toast_header("No covers found for this title", "error")
+    return response
 
 @router.post("/items/{item_id}/cover-select")
 async def cover_select(
@@ -193,7 +205,7 @@ async def cover_select(
     templates = request.app.state.templates
     with get_db() as db:
         item = db.execute(
-            "SELECT title, authors, cover_path, media_type, publish_year, platform "
+            "SELECT title, alternate_title, authors, isbn, cover_path, media_type, publish_year, platform "
             "FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         # Same key-by-key build as cover_search — this failure path re-renders
@@ -215,7 +227,9 @@ async def cover_select(
             "candidates": result.payload or [],
             "item_id": item_id,
             "cover_path": item["cover_path"],
+            "media_type": item["media_type"],
             "query": search_query,
+            "alternate_title": item["alternate_title"],
             "search_note": _search_note(item["media_type"], creds),
             "search_status": search_status,
             "search_provider": search_provider,
@@ -347,23 +361,49 @@ async def cover_remove(item_id: int, _=Depends(require_role("editor"))):
 # Pinned by test_cover_review.py::TestRetryMissingCoversStaysDismissalBlind.
 # Revisit when un-dismissing from the UI ships.
 #
-# Bulk cover retry is restricted to book media types for the same reason the
-# startup requeue is (GOTCHAS G29): items_common.resolve_missing_cover's fallback is a
-# book-catalogue title search that accepts the first Open Library hit when the
-# item has no authors, then writes that book's ISBN onto the row. Sweeping a
-# cover-less DVD or video game through it attaches a novel's cover and ISBN to
-# the disc. Non-book cover misses are re-fetched from the item page instead.
+# Books use the existing Open Library retry. DVDs and games use their own
+# configured providers (TMDb and IGDB), never the book fallback: otherwise a
+# game could be given a novel cover and ISBN. The title is the primary query;
+# the item's platform and year travel with the row to IGDB/TMDb as tie-breakers.
 _COVER_RETRY_PLACEHOLDERS = ", ".join(
     "?" for _ in cover_queue.COVER_REQUEUE_MEDIA_TYPES
 )
 
+
+async def _retry_missing_cover(item, client: httpx.AsyncClient) -> str | None:
+    """Fetch one missing cover through the provider appropriate to its type."""
+    media_type = item["media_type"]
+    if media_type in cover_queue.COVER_REQUEUE_MEDIA_TYPES:
+        return await items_common.resolve_missing_cover(item["id"], client)
+    if media_type not in covers.MEDIA_TYPE_PROVIDERS:
+        return None
+    with get_db() as db:
+        creds = _cover_search_credentials(db, media_type)
+    result = await covers.search_covers(item, item["title"], client, creds=creds)
+    candidates = result.payload or []
+    if not candidates:
+        return None
+    cover_path = await covers._download_to_item(item["id"], candidates[0]["url"], client)
+    if cover_path:
+        with get_db() as db:
+            db.execute("UPDATE items SET cover_path = ?, updated_at = datetime('now') WHERE id = ?",
+                       (cover_path, item["id"]))
+    return cover_path
+
+
+_COVER_RETRY_SELECT = (
+    "SELECT id, title, authors, media_type, publish_year, platform FROM items_live "
+    "WHERE (cover_path IS NULL OR TRIM(cover_path) = '') AND cover_review_dismissed = 0 "
+    "AND (media_type IN (" + _COVER_RETRY_PLACEHOLDERS + ") "
+    "OR media_type IN ('video_game', 'dvd'))"
+)
+
 @router.post("/covers/bulk-retry")
 async def bulk_retry_covers(request: Request, _=Depends(require_role("admin"))):
-    """Retry downloading covers for all book items missing them."""
+    """Retry missing covers through each item's appropriate metadata provider."""
     with get_db() as db:
         items = db.execute(
-            f"SELECT id FROM items_live WHERE cover_path IS NULL "
-            f"AND media_type IN ({_COVER_RETRY_PLACEHOLDERS})",
+            _COVER_RETRY_SELECT,
             cover_queue.COVER_REQUEUE_MEDIA_TYPES,
         ).fetchall()
 
@@ -372,7 +412,7 @@ async def bulk_retry_covers(request: Request, _=Depends(require_role("admin"))):
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         for item in items:
             try:
-                if await items_common.resolve_missing_cover(item["id"], client):
+                if await _retry_missing_cover(item, client):
                     results["success"] += 1
                 else:
                     results["failed"] += 1
@@ -391,8 +431,7 @@ async def bulk_retry_covers_stream(request: Request, _=Depends(require_role("adm
     """SSE endpoint for bulk cover retry with progress updates."""
     with get_db() as db:
         items = db.execute(
-            f"SELECT id, isbn, title FROM items_live WHERE cover_path IS NULL "
-            f"AND media_type IN ({_COVER_RETRY_PLACEHOLDERS})",
+            _COVER_RETRY_SELECT,
             cover_queue.COVER_REQUEUE_MEDIA_TYPES,
         ).fetchall()
 
@@ -409,7 +448,7 @@ async def bulk_retry_covers_stream(request: Request, _=Depends(require_role("adm
             async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
                 for i, item in enumerate(items, 1):
                     try:
-                        if await items_common.resolve_missing_cover(item["id"], client):
+                        if await _retry_missing_cover(item, client):
                             results["success"] += 1
                             status = "found"
                         else:
@@ -426,7 +465,7 @@ async def bulk_retry_covers_stream(request: Request, _=Depends(require_role("adm
 
                     await queue.put({
                         "type": "progress", "current": i, "total": len(items),
-                        "title": item["title"] or item["isbn"], "status": status,
+                        "title": item["title"], "status": status,
                     })
 
             await queue.put({"type": "done", **results})

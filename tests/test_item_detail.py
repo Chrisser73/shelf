@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.services.item_copies import insert_copy
-from app.services.item_write import update_item_fields
+from app.services.item_write import insert_item, update_item_fields
 from tests.conftest import _insert_item, _insert_location
 
 
@@ -133,6 +133,16 @@ class TestReadingHistory:
         assert "Read 2 times" in html
         assert "2025-01-20" in html
         assert "2026-02-10" in html
+
+    def test_a_game_history_says_played(self, viewer_client, db):
+        item_id = _insert_item(db, title="Replayed Game", isbn=None, media_type="video_game")
+        self._log(db, item_id, "2025-01-01", "2025-01-20")
+        self._log(db, item_id, "2026-02-01", "2026-02-10")
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert "Played 2 times" in html
         # newest first
         assert html.index("2026-02-10") < html.index("2025-01-20")
 
@@ -301,11 +311,11 @@ class TestBookShapedControls:
     RETRY = "retry-cover"
     PUSH = "Push to Hardcover"
     SYNCED = "Synced to Hardcover"
-    HEADING = ">Reading Status</p>"
+    HEADING = ">Status</p>"
     SECTION = 'id="reading-status-section"'
     CLEAR = 'title="Clear status"'
 
-    @pytest.mark.parametrize("media_type", ["cd", "video_game"])
+    @pytest.mark.parametrize("media_type", ["cd"])
     def test_a_disc_or_cartridge_loses_all_three_and_keeps_the_page(
         self, editor_client, db, monkeypatch, media_type,
     ):
@@ -325,6 +335,38 @@ class TestBookShapedControls:
         assert 'data-testid="cover-controls"' in html
         assert f'href="/item/{item_id}/edit' in html
         assert "hx-delete=" in html
+
+    @pytest.mark.parametrize("media_type, want, doing, done", [
+        ("dvd", "Want to Watch", "Watching", "Watched"),
+        ("video_game", "Want to Play", "Playing", "Played"),
+    ])
+    def test_a_disc_or_game_gets_its_own_status_words(
+        self, editor_client, db, media_type, want, doing, done,
+    ):
+        item_id = _insert_item(db, title="Own Verb", isbn=None, media_type=media_type)
+        db.commit()
+
+        html = editor_client.get(f"/item/{item_id}").text
+
+        assert self.HEADING in html
+        section = re.search(r'<div id="reading-status-section">.*?</div>\s*</div>', html, re.S)
+        assert section
+        for word in (want, doing, done):
+            assert word in section.group(0)
+        assert "Want to Read" not in section.group(0)
+
+    def test_the_toggle_rerenders_a_disc_in_its_own_words(self, viewer_client, db):
+        """The route renders the fragment with only `item` in context, so the
+        words must reach it through the status_labels global."""
+        item_id = _insert_item(db, title="Toggle DVD", isbn=None, media_type="dvd")
+        db.commit()
+
+        resp = viewer_client.post(f"/api/items/{item_id}/reading-status", data={"status": "read"})
+
+        assert resp.status_code == 200
+        assert "Watched" in resp.text
+        assert ">Read<" not in resp.text
+        assert "Status: Watched" in resp.headers["HX-Trigger"]
 
     def test_a_book_without_an_isbn_keeps_reading_status_only(
         self, editor_client, db, monkeypatch,
@@ -372,9 +414,10 @@ class TestBookShapedControls:
 
     def test_a_disc_with_a_stale_status_can_still_clear_it(self, viewer_client, db):
         """The undo path — and the G65 pin: the toggle route renders the
-        fragment without book_media_types in context and must not care."""
+        fragment without status_media_types in context and must not care. A CD,
+        because a DVD now keeps its section after clearing."""
         item_id = _insert_item(
-            db, title="Read DVD", isbn=None, media_type="dvd", reading_status="read",
+            db, title="Read CD", isbn=None, media_type="cd", reading_status="read",
         )
         db.commit()
 
@@ -491,6 +534,21 @@ class TestCopiesBlock:
     seam (issue #116). A merged item legitimately has copies in two places;
     before this the page showed only the first."""
 
+    def test_inline_location_editor_updates_the_item_location(self, admin_client, db):
+        basement = _insert_location(db, "Basement")
+        item_id = _insert_item(db, title="Location editor", isbn="9789000020011")
+        db.commit()
+
+        response = admin_client.post(
+            f"/api/items/{item_id}/quick-metadata",
+            data={"field": "location_id", "value": str(basement)},
+        )
+
+        assert response.json()["display"] == "Basement"
+        assert db.execute(
+            "SELECT location_id FROM items_live WHERE id = ?", (item_id,)
+        ).fetchone()["location_id"] == basement
+
     def test_one_placed_copy_renders_the_single_location_line(self, viewer_client, db):
         office = _insert_location(db, "Office / Bookcase 2 / Shelf 3")
         item_id = _insert_item(db, title="One Copy", isbn="9789000020034",
@@ -557,7 +615,7 @@ class TestCopiesBlock:
         assert "No location" in html
         assert "None" not in html
 
-    def test_an_item_with_no_copies_renders_neither_line_nor_heading(
+    def test_an_item_with_no_copies_keeps_the_location_line(
         self, viewer_client, db
     ):
         item_id = _insert_item(db, title="Unplaced", isbn="9789000020089")
@@ -565,7 +623,8 @@ class TestCopiesBlock:
 
         html = viewer_client.get(f"/item/{item_id}").text
 
-        assert "Location:" not in html
+        assert "Location:" in html
+        assert "No location" in html
         assert ">Copies<" not in html
 
     def test_a_located_item_with_no_copies_still_shows_its_location(
@@ -590,7 +649,7 @@ class TestCopiesBlock:
         assert ">Copies<" not in html
         assert 'id="item-copies" class="hidden"' not in html
 
-    def test_clearing_a_location_leaves_no_false_location_line(self, viewer_client, db):
+    def test_clearing_a_location_keeps_an_editable_no_location_line(self, viewer_client, db):
         """`update_item_fields(..., location_id=None)` keeps the primary copy
         and nulls its location (pinned in tests/test_item_copies.py). The page
         must show the same clean empty state it showed before this fragment
@@ -607,9 +666,59 @@ class TestCopiesBlock:
 
         html = viewer_client.get(f"/item/{item_id}").text
 
-        assert "Location:" not in html
+        assert "Location:" in html
+        assert "No location" in html
         assert ">Copies<" not in html
         assert "None" not in html
+
+    def test_a_lone_unlocated_copy_shows_its_details_and_edit(self, admin_client, db):
+        """An import can give an item one copy with a condition and a price
+        but no location (LibraryThing). Nothing on the page showed that data
+        or opened the copy's editor (test-drive imports-lt-libib, Obs 2)."""
+        decoy = _insert_item(db, title="Decoy", isbn="9789000020300")
+        insert_copy(db, {"item_id": decoy, "copy_number": 1, "is_primary": 1})
+        item_id = _insert_item(db, title="Imported", isbn="9789000020317")
+        db.execute("DELETE FROM item_copies WHERE item_id = ?", (item_id,))
+        only = insert_copy(db, {"item_id": item_id, "copy_number": 1, "is_primary": 1,
+                                "condition": "Fair", "acquired_date": "2019-11-02",
+                                "acquisition_source": "Library sale",
+                                "acquisition_price": 2.5})
+        db.commit()
+
+        html = admin_client.get(f"/item/{item_id}").text
+
+        assert "No location</span> · Fair · 2019-11-02 · Library sale · " in html
+        assert f'data-testid="edit-copy-{only}"' in html
+        assert "Location:" in html
+        assert ">Copies<" not in html
+
+    def test_a_lone_unlocated_copy_with_details_is_shown_to_a_viewer(
+        self, viewer_client, db
+    ):
+        item_id = _insert_item(db, title="Imported", isbn="9789000020324")
+        db.execute("DELETE FROM item_copies WHERE item_id = ?", (item_id,))
+        insert_copy(db, {"item_id": item_id, "copy_number": 1, "is_primary": 1,
+                         "condition": "Good"})
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert 'id="item-copies" class="hidden"' not in html
+        assert "No location</span> · Good" in html
+        assert "edit-copy-" not in html
+
+    def test_a_lone_placed_copy_shows_its_details(self, viewer_client, db):
+        office = _insert_location(db, "Office")
+        item_id = _insert_item(db, title="Placed", isbn="9789000020331",
+                               location_id=office)
+        db.execute("DELETE FROM item_copies WHERE item_id = ?", (item_id,))
+        insert_copy(db, {"item_id": item_id, "copy_number": 1, "is_primary": 1,
+                         "location_id": office, "condition": "Very good"})
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert "Office</a> · Very good" in html
 
     def test_a_viewer_sees_the_block_and_it_carries_no_controls(
         self, viewer_client, db
@@ -676,17 +785,15 @@ class TestCopiesBlock:
                 f"the block is hidden from an editor on item {item_id}"
             )
 
-    def test_the_empty_state_stays_hidden_for_a_viewer(self, viewer_client, db):
-        """The wrapper is only `hidden` when there is nothing to show *and*
-        the user cannot edit — otherwise an empty grid cell shifts the cells
-        after it into the wrong column."""
+    def test_the_empty_state_shows_no_location_for_a_viewer(self, viewer_client, db):
         item_id = _insert_item(db, title="Nothing", isbn="9789000020164")
         db.execute("DELETE FROM item_copies WHERE item_id = ?", (item_id,))
         db.commit()
 
         html = viewer_client.get(f"/item/{item_id}").text
 
-        assert 'id="item-copies" class="hidden"' in html
+        assert 'id="item-copies" class="hidden"' not in html
+        assert "Location:" in html and "No location" in html
 
     def test_the_add_form_offers_every_location_and_a_no_location_option(
         self, admin_client, db
@@ -822,3 +929,70 @@ class TestCopiesBlock:
 
         assert "No location" in html
         assert "/browse?location_filter=None" not in html
+
+
+class TestAuthorLinks:
+    """T7 — each author of a co-authored item links separately to Browse's
+    per-author filter, rather than one link searching the whole joined
+    string (which for a co-authored book matched only that exact pairing)."""
+
+    @staticmethod
+    def _author_ids(db, item_id):
+        return [r[0] for r in db.execute(
+            "SELECT author_id FROM item_authors WHERE item_id = ? ORDER BY position",
+            (item_id,))]
+
+    def test_two_authors_render_separate_links_in_order_with_role(
+        self, viewer_client, db
+    ):
+        item_id = insert_item(
+            db, title="Three-Body", authors="Cixin Liu, Ken Liu - translator")
+        db.commit()
+        ids = self._author_ids(db, item_id)
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        first = html.index(f"/browse?author_filter={ids[0]}")
+        second = html.index(f"/browse?author_filter={ids[1]}")
+        assert first < second
+        assert "Cixin Liu" in html
+        assert "Ken Liu" in html
+        assert "&middot; translator" in html
+        assert "?q=" not in html
+
+    def test_single_author_renders_exactly_one_link(self, viewer_client, db):
+        item_id = insert_item(db, title="Solo", authors="Kent Beck")
+        db.commit()
+        author_id = self._author_ids(db, item_id)[0]
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert html.count("/browse?author_filter=") == 1
+        assert f"/browse?author_filter={author_id}" in html
+        assert "Kent Beck" in html
+
+    def test_index_rows_missing_falls_back_to_unlinked_text(
+        self, viewer_client, db
+    ):
+        """The index is derived; if its rows are gone (should not happen),
+        the page still shows the stored string, just without a link."""
+        item_id = insert_item(db, title="Orphaned", authors="Some Author")
+        db.commit()
+        db.execute("DELETE FROM item_authors WHERE item_id = ?", (item_id,))
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert "Some Author" in html
+        assert "/browse?author_filter=" not in html
+
+    def test_author_name_is_html_escaped(self, viewer_client, db):
+        item_id = insert_item(db, title="Escaped", authors='<b>Evil</b>, "Quoted" Name')
+        db.commit()
+
+        html = viewer_client.get(f"/item/{item_id}").text
+
+        assert "<b>Evil</b>" not in html
+        assert "&lt;b&gt;Evil&lt;/b&gt;" in html
+        assert '"Quoted" Name' not in html
+        assert "&#34;Quoted&#34; Name" in html or "&quot;Quoted&quot; Name" in html

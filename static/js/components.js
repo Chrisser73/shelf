@@ -52,10 +52,32 @@ document.addEventListener('alpine:init', function () {
             tab: 'profile',
             displayName: '',
             nameResult: false, nameSaving: false,
+            userSymbolBackground: '', userSymbolText: '', userSymbolShowInitial: false,
+            userSymbolBackgroundPicker: '#242836', userSymbolTextPicker: '#818cf8',
+            userSymbolResult: false, userSymbolSaving: false,
             current: '', newPw: '', confirm: '',
             pwResult: false, pwSaving: false,
             init() {
                 this.displayName = this.$el.dataset.displayName || '';
+                this.userSymbolBackground = this.$el.dataset.userSymbolBackground || '';
+                this.userSymbolText = this.$el.dataset.userSymbolText || '';
+                this.userSymbolBackgroundPicker = this.userSymbolBackground || '#242836';
+                this.userSymbolTextPicker = this.userSymbolText || '#818cf8';
+                this.userSymbolShowInitial = this.$el.dataset.userSymbolShowInitial === '1';
+            },
+            setUserSymbolBackground(event) {
+                this.userSymbolBackground = event.target.value;
+                this.userSymbolBackgroundPicker = event.target.value;
+            },
+            setUserSymbolText(event) {
+                this.userSymbolText = event.target.value;
+                this.userSymbolTextPicker = event.target.value;
+            },
+            syncUserSymbolBackgroundPicker(event) {
+                if (/^#[0-9a-fA-F]{6}$/.test(event.target.value)) this.userSymbolBackgroundPicker = event.target.value;
+            },
+            syncUserSymbolTextPicker(event) {
+                if (/^#[0-9a-fA-F]{6}$/.test(event.target.value)) this.userSymbolTextPicker = event.target.value;
             },
             get mismatch() { return this.confirm && this.newPw !== this.confirm },
             get tooShort() { return this.newPw && this.newPw.length < 8 },
@@ -67,6 +89,17 @@ document.addEventListener('alpine:init', function () {
                 this.nameResult = await r.json();
                 this.nameSaving = false;
                 if (this.nameResult.ok) setTimeout(() => location.reload(), 800);
+            },
+            async saveUserSymbol() {
+                this.userSymbolSaving = true; this.userSymbolResult = false;
+                const form = new FormData();
+                form.append('background', this.userSymbolBackground);
+                form.append('text', this.userSymbolText);
+                if (this.userSymbolShowInitial) form.append('show_initial', 'true');
+                const r = await fetch('/api/account/user-symbol', { method: 'POST', headers: { 'X-CSRF-Token': window.csrfToken() }, body: form });
+                this.userSymbolResult = await r.json();
+                this.userSymbolSaving = false;
+                if (this.userSymbolResult.ok) setTimeout(() => location.reload(), 500);
             },
             async savePw() {
                 this.pwSaving = true; this.pwResult = false;

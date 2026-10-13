@@ -1,6 +1,5 @@
 """E2E tests: item detail, edit, and delete."""
 import sqlite3
-from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
@@ -53,11 +52,9 @@ def _cover_search_fragment(item_id: int, *, with_current: bool = True) -> str:
     Rendering the template keeps the stub honest: only the *candidate data* is
     faked, never the markup.
     """
-    from jinja2 import Environment, FileSystemLoader
+    from tests.e2e.conftest import template_env
 
-    templates_dir = Path(__file__).resolve().parents[2] / "app" / "templates"
-    env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=True)
-    return env.get_template("fragments/cover_search.html").render(
+    return template_env().get_template("fragments/cover_search.html").render(
         item_id=item_id,
         candidates=[
             {
@@ -68,6 +65,7 @@ def _cover_search_fragment(item_id: int, *, with_current: bool = True) -> str:
             for i in range(2)
         ],
         cover_path=f"covers/{item_id}.jpg" if with_current else None,
+        media_type="book",
         query="stub query",
         failed_url=None,
     )
@@ -75,10 +73,8 @@ def _cover_search_fragment(item_id: int, *, with_current: bool = True) -> str:
 
 def _stub_cover_search(authed_page, item_id: int, *, with_current: bool = True):
     """Intercept the picker's GET so the test never reaches
-    covers.search_cover_by_title — which calls googleapis.com and
-    openlibrary.org for real on two 10s timeouts and swallows every
-    exception (app/services/covers.py:113-160), so a flaky leg would just
-    render an empty grid instead of failing loudly. `make test-e2e` is a
+    covers.search_book_covers, which calls googleapis.com and
+    openlibrary.org for real with 10s timeouts. `make test-e2e` is a
     release gate; a leg whose outcome depends on the network is a defect.
 
     Returns (handled, offenders): `handled["count"]` proves our route — not
@@ -209,6 +205,62 @@ def test_item_edit_save(live_server, authed_page):
     expect(authed_page.locator("body")).to_contain_text("Updated Title")
 
 
+def test_edit_page_tag_island_adds_and_removes_without_reload(live_server, authed_page):
+    """The edit-page tag island (#item-tags) adds and removes a tag purely
+    via HTMX — no navigation — and adds no field of its own to the Save
+    form, so the rest of the edit still saves normally afterward."""
+    item_id = insert_item(
+        live_server["data_dir"],
+        title="Tag Island Probe",
+        media_type="book",
+        isbn="9780000091253",
+    )
+    tag_name = "E2E Island Tag 9f2"
+
+    authed_page.goto(f"{live_server['url']}/item/{item_id}/edit")
+    authed_page.wait_for_load_state("networkidle")
+
+    # A marker that only a full navigation would clear.
+    authed_page.evaluate("window.__e2eTagIslandMarker = 'still-here'")
+
+    name_input = authed_page.locator("#item-tags input[name=name]")
+    name_input.fill(tag_name)
+    with authed_page.expect_response(
+        lambda r: r.url.split("?")[0].endswith(f"/api/items/{item_id}/tags")
+        and r.request.method == "POST"
+    ):
+        name_input.press("Enter")
+
+    chip = authed_page.locator("#item-tags").get_by_text(tag_name, exact=True)
+    expect(chip).to_be_visible()
+    assert authed_page.evaluate("window.__e2eTagIslandMarker") == "still-here"
+    # The section heading names the island, so the fragment's own label is
+    # hidden — and stays hidden after the add swapped the fragment out.
+    label = authed_page.locator("#edit-tags [data-tags-label]")
+    expect(label).to_have_count(1)
+    expect(label).to_be_hidden()
+    remove_box = authed_page.locator("#item-tags button[title='Remove tag']").bounding_box()
+    assert remove_box["width"] >= 24 and remove_box["height"] >= 24, remove_box
+
+    with authed_page.expect_response(
+        lambda r: f"/api/items/{item_id}/tags/" in r.url.split("?")[0]
+        and r.request.method == "DELETE"
+    ):
+        authed_page.locator("#item-tags button[title='Remove tag']").click()
+
+    expect(
+        authed_page.locator("#item-tags").get_by_text(tag_name, exact=True)
+    ).to_have_count(0)
+    assert authed_page.evaluate("window.__e2eTagIslandMarker") == "still-here"
+
+    # The island added no field to the save form — the rest of the edit
+    # still saves normally.
+    authed_page.locator("input[name=title]").fill("Tag Island Probe Updated")
+    authed_page.locator("[data-testid=save-btn]").click()
+    authed_page.wait_for_url(f"{live_server['url']}/item/{item_id}", timeout=10_000)
+    expect(authed_page.locator("body")).to_contain_text("Tag Island Probe Updated")
+
+
 def test_owned_box_disables_and_clears_the_wishlist_box(live_server, authed_page):
     """#125: the two ownership boxes are independent, except that an owned
     item cannot be wishlisted — checking "I own this" clears and disables the
@@ -334,7 +386,7 @@ def test_item_delete(live_server, authed_page):
     with authed_page.expect_navigation():
         delete_btn.click()
 
-    assert messages == ["Delete 'Book To Delete'?"]
+    assert messages == ["Move 'Book To Delete' to Trash?"]
 
     # Should be gone — either redirected to browse or item no longer shows
     if "/item/" not in authed_page.url:
@@ -409,10 +461,9 @@ def test_cover_picker_opens_on_item_that_already_has_a_cover(live_server, authed
     item that already has a cover, not just on cover-less items.
 
     The picker's GET is stubbed via page.route rather than hit for real:
-    covers.search_cover_by_title calls out to googleapis.com and
-    openlibrary.org on two 10s timeouts and swallows every exception, so a
-    flaky leg would silently render as an empty gallery instead of failing
-    this test where the bug would actually be. See _stub_cover_search's
+    covers.search_book_covers calls out to googleapis.com and
+    openlibrary.org on 10s timeouts, which could make the UI test flaky.
+    See _stub_cover_search's
     docstring for how "the server was never reached" is verified rather than
     assumed.
     """

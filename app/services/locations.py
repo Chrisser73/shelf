@@ -110,6 +110,38 @@ def create_location(db, label: str, *, parent_id: int | None = None,
     return cursor.lastrowid
 
 
+def find_by_path(db, name: str) -> int | None:
+    """Return the id of the location whose full path equals `name`, or None.
+
+    `locations.name` holds the whole tree path ("Office / Shelf 2"), so the
+    match is on that full path, case-insensitively, after stripping `name`.
+    """
+    row = db.execute(
+        "SELECT id FROM locations WHERE name = ? COLLATE NOCASE",
+        (name.strip(),),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def resolve_or_create(db, name: str) -> tuple[int, bool]:
+    """Match `name` to an existing full path, else create a top-level node.
+
+    Returns `(id, created)`. A blank name raises `LocationError`. A miss
+    whose name contains " / " raises `LocationError` and writes nothing: the
+    cell is never split into a chain of parents, because a foreign export's
+    free text is not known to be a path. Callers cache per request.
+    """
+    name = name.strip()
+    if not name:
+        raise LocationError("Location name cannot be blank")
+    found = find_by_path(db, name)
+    if found is not None:
+        return found, False
+    if " / " in name:
+        raise LocationError(f'location "{name}" not found')
+    return create_location(db, name), True
+
+
 def _rewrite_descendant_paths(db, parent_id: int) -> None:
     """Rebuild denormalised names below a renamed or moved node."""
     parent = _row(db, parent_id)
@@ -188,7 +220,7 @@ def location_tree(db):
 
     out: list[dict] = []
 
-    def visit(parent_id: int | None, depth: int) -> None:
+    def visit(parent_id: int | None, depth: int, path: tuple[int, ...]) -> None:
         for row in by_parent.get(parent_id, []):
             out.append({
                 "id": row["id"],
@@ -197,8 +229,9 @@ def location_tree(db):
                 "parent_id": row["parent_id"],
                 "sort_order": row["sort_order"],
                 "depth": depth,
+                "ancestor_ids": list(path),
             })
-            visit(row["id"], depth + 1)
+            visit(row["id"], depth + 1, path + (row["id"],))
 
-    visit(None, 0)
+    visit(None, 0, ())
     return out

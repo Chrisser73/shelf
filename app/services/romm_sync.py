@@ -186,7 +186,7 @@ async def sync(on_progress: ProgressCallback | None = None) -> dict[str, int]:
     if not server or not token:
         raise romm_client.RomMError("RomM URL and API token are required")
 
-    stats = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    stats = {"created": 0, "updated": 0, "skipped": 0, "in_trash": 0, "errors": 0}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         platforms = await romm_client.fetch_platforms(client, server, token)
         selected = [row for row in platforms if row["id"] not in config["excluded"]]
@@ -207,9 +207,12 @@ async def sync(on_progress: ProgressCallback | None = None) -> dict[str, int]:
                             result = romm_records.persist_candidate(db, candidate)
                         action = result["action"]
                         stats[action if action in stats else "updated"] += 1
-                        await _ingest_cover(
-                            client, server, token, result["item_id"], candidate.get("cover_url")
-                        )
+                        # No cover for a candidate left in Trash (G85) —
+                        # same reasoning as komga_sync.
+                        if action != "in_trash":
+                            await _ingest_cover(
+                                client, server, token, result["item_id"], candidate.get("cover_url")
+                            )
                         status = action
                     except (romm_records.RomMPersistenceError, ValueError):
                         logger.warning("Skipping unsafe RomM candidate %r", candidate.get("romm_id"), exc_info=True)

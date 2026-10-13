@@ -8,6 +8,7 @@ import pytest
 from playwright.sync_api import expect
 
 from tests.e2e.conftest import (
+    _run_setup_wizard,
     assert_page_clean,
     attach_page_guard,
     insert_item,
@@ -317,6 +318,30 @@ def test_scan_camera_uses_html5_qrcode_by_default(live_server, browser, setup_ad
         wait_for_video_ready(pg, "#camera-reader video")
         _expect_no_camera_error(pg)
         assert_page_clean(pg)
+    finally:
+        ctx.close()
+
+
+def test_scan_camera_denial_on_plain_http_loopback_is_not_an_https_error(
+    live_server, browser, setup_admin
+):
+    """http://127.0.0.1 is a secure context, so a refused camera is a
+    permission denial — not the "requires HTTPS" advice a URL-scheme check
+    would give."""
+    ctx = browser.new_context()
+    ctx.add_init_script(
+        "navigator.mediaDevices.getUserMedia = () => Promise.reject("
+        "Object.assign(new Error('denied'), {name: 'NotAllowedError'}));"
+    )
+    try:
+        pg = _login_page(live_server, ctx, setup_admin)
+        assert live_server["url"].startswith("http://")
+        _start_scan_camera(pg, live_server)
+        assert pg.evaluate("window.isSecureContext") is True
+
+        toasts = pg.locator("#toast-container")
+        expect(toasts).to_contain_text("Camera access denied")
+        expect(toasts).not_to_contain_text("Camera requires HTTPS")
     finally:
         ctx.close()
 
@@ -1351,7 +1376,7 @@ def test_a_wishlisted_isbn_scanned_in_add_mode_promotes_it(
 # paragraph inside the not_found arm's manual-add form — a hidden element
 # that still yields a (blank) textContent (`G51`).
 #
-# This section pins the fix across the router's full 19-status vocabulary,
+# This section pins the fix across the router's full 21-status vocabulary,
 # not just the one status that shipped broken, so a future status — or a
 # regressed data-scan-* attribute on an existing one — fails here instead of
 # reaching a user as a blank toast.
@@ -1399,6 +1424,7 @@ _TOAST = "(html) => { const d = document.createElement('div'); d.innerHTML = htm
 # the design plan's own evidence for this table.
 _STATUS_CASES = {
     "added": dict(title="Dune", authors="Frank Herbert", item_id=7, source="openlibrary"),
+    "restored": dict(title="Dune", authors="Frank Herbert", item_id=7, source="openlibrary"),
     "wishlisted": dict(title="Dune", authors="Frank Herbert", item_id=7, source="openlibrary"),
     "duplicate": dict(title="Dune", item_id=7),
     "promoted": dict(title="Dune", item_id=7),
@@ -1409,9 +1435,10 @@ _STATUS_CASES = {
     "relocated": dict(title="Dune", item_id=7, message="Was at Office Shelf, updated to Loft Box"),
     "elsewhere": dict(title="Dune", item_id=7, message="Copies at Office Shelf and Loft Box; none here."),
     "found": dict(title="Dune", item_id=7, message="Location: Office Shelf"),
-    "marked_read": dict(title="Dune", item_id=7, message="Marked as read"),
+    "marked_read": dict(title="Dune", item_id=7, media_type="dvd", message="Marked as watched"),
     "already_checked_out": dict(title="Dune", item_id=7, message="Already lent to Bea"),
     "not_checked_out": dict(title="Dune", item_id=7, message="Not currently checked out"),
+    "in_trash": dict(title="Dune", item_id=7, mode="lookup", deleted_at="2026-09-01 10:00:00"),
     "legacy_ambiguous": dict(
         legacy_candidates=[
             {"isbn13": "9780000000026", "isbn10": "0000000002", "title": "Dune", "authors": "Frank Herbert"}
@@ -1428,7 +1455,7 @@ _STATUS_CASES = {
 # Per app.js's SCAN_OK_STATUSES.
 _OK_STATUSES = {
     "added", "wishlisted", "returned", "confirmed", "marked_read",
-    "checked_out", "moved", "found", "relocated", "promoted",
+    "checked_out", "moved", "found", "relocated", "promoted", "restored",
 }
 
 # Per app.js's SCAN_INFO_STATUSES — the scan worked and the answer is a
@@ -1454,6 +1481,7 @@ _INFO_STATUSES = {"elsewhere"}
 # ship silently.
 _TOAST_MUST_CONTAIN = {
     "added": "Dune",
+    "restored": "Restored from Trash",
     "wishlisted": "Dune",
     "duplicate": "Dune",
     "promoted": "Dune",
@@ -1464,9 +1492,10 @@ _TOAST_MUST_CONTAIN = {
     "relocated": "Was at Office Shelf, updated to Loft Box",
     "elsewhere": "Copies at Office Shelf and Loft Box; none here.",
     "found": "Location: Office Shelf",
-    "marked_read": "Dune",
+    "marked_read": "Watched: Dune",
     "already_checked_out": "Already lent to Bea",
     "not_checked_out": "Not currently checked out",
+    "in_trash": "In Trash since 2026-09-01",
     "not_owned": "025192107801",
     "not_found": "025192107801",
     "error": "Invalid ISBN",
@@ -1475,9 +1504,9 @@ _TOAST_MUST_CONTAIN = {
 }
 
 assert set(_STATUS_CASES) == _OK_STATUSES | _INFO_STATUSES | {
-    "duplicate", "already_checked_out", "not_checked_out",
+    "duplicate", "already_checked_out", "not_checked_out", "in_trash",
     "not_owned", "not_found", "error", "legacy_ambiguous", "legacy_incomplete",
-}, "status table drifted from the 19-status vocabulary"
+}, "status table drifted from the 21-status vocabulary"
 assert not (_OK_STATUSES & _INFO_STATUSES), "a status is one class or the other"
 assert set(_TOAST_MUST_CONTAIN) == set(_STATUS_CASES), (
     "every status case needs the text its toast must carry"
@@ -1488,7 +1517,7 @@ assert set(_TOAST_MUST_CONTAIN) == set(_STATUS_CASES), (
 def test_every_scan_status_toasts_non_empty_text(live_server, authed_page, status):
     """The pin: every status in the router's vocabulary toasts *something*.
 
-    Parametrised over the full 19-status table so a future status — or a
+    Parametrised over the full 21-status table so a future status — or a
     regressed data-scan-* attribute on an existing one — fails here instead
     of shipping a blank toast."""
     authed_page.goto(f"{live_server['url']}/scan")
@@ -2215,3 +2244,368 @@ def test_look_it_up_refuses_an_empty_supplement_without_posting(
         ".checkValidity()"
     ) is False
     assert_page_clean(authed_page)
+
+
+# --- T7: default tags — persistence, manual-add wiring, datalist re-filter -
+
+
+def _insert_tag(data_dir: Path, name: str, media_type: "str | None" = None) -> int:
+    """Insert a tag row directly into the E2E SQLite DB; return its id.
+
+    There is no HTTP route that sets a tag's scope — inline creation via
+    `attach_tags` is always global — so a scoped tag for case 3 below has to
+    be seeded this way, mirroring `_insert_location`/`_insert_borrower` above.
+    """
+    db_path = data_dir / "shelf.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cur = conn.execute(
+            "INSERT INTO tags (name, media_type) VALUES (?, ?)", (name, media_type)
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def _item_tag_names(data_dir: Path, item_id: int) -> list:
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        rows = conn.execute(
+            "SELECT t.name FROM item_tags it JOIN tags t ON it.tag_id = t.id "
+            "WHERE it.item_id = ? ORDER BY t.name COLLATE NOCASE",
+            (item_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r[0] for r in rows]
+
+
+def test_default_tags_input_persists_across_reload(live_server, authed_page):
+    """Case 1: the sticky value survives a reload with no localStorage seeding
+    needed — `fill()` fires a real `input` event, which is what
+    tag-suggest.js saves on. Add mode is the fresh-context default, so the
+    field is already visible and enabled."""
+    authed_page.goto(f"{live_server['url']}/scan")
+    authed_page.wait_for_load_state("networkidle")
+    expect(authed_page.locator("#default-tags")).to_be_visible()
+
+    authed_page.fill("#default-tags", "Cookbook")
+    authed_page.reload()
+    authed_page.wait_for_load_state("networkidle")
+
+    expect(authed_page.locator("#default-tags")).to_have_value("Cookbook")
+    assert_page_clean(authed_page)
+
+
+def test_manual_add_panel_attaches_default_tags_to_the_new_item(
+    live_server, authed_page
+):
+    """Case 2: the manual-add panel's `hx-include="#scan-mode, #default-tags"`
+    actually reaches `/api/items/manual` in a real browser — the only test in
+    this file that exercises that include."""
+    data_dir = live_server["data_dir"]
+    title = "T7 Manual Wiring Subject"
+
+    authed_page.goto(f"{live_server['url']}/scan")
+    authed_page.wait_for_load_state("networkidle")
+
+    authed_page.fill("#default-tags", "Cookbook")
+
+    authed_page.click("button[data-manual-toggle]")
+    panel = authed_page.locator('[data-manual-host="panel"]')
+    expect(panel).to_be_visible()
+    panel.locator("input[name=title]").fill(title)
+
+    # G83: arm the waiter before the click — the assertion below reads the
+    # DB the response wrote to, not merely the swapped fragment.
+    with authed_page.expect_response(
+        lambda r: "/api/items/manual" in r.url and r.ok
+    ):
+        panel.locator("form button[type=submit]").click()
+
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        row = conn.execute(
+            "SELECT id FROM items WHERE title = ?", (title,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "manual add did not create the item"
+    assert _item_tag_names(data_dir, row[0]) == ["Cookbook"]
+    assert_page_clean(authed_page)
+
+
+_STATUS_SELECT = "#default-reading-status"
+
+
+def _status_words(page) -> list:
+    """The three option texts, read one option at a time (G51, G70)."""
+    return [
+        page.locator(f'{_STATUS_SELECT} option[value="{v}"]').text_content().strip()
+        for v in ("want_to_read", "reading", "read")
+    ]
+
+
+def _open_scan(page, live_server):
+    page.goto(f"{live_server['url']}/scan")
+    page.wait_for_load_state("networkidle")
+    expect(page.locator(_STATUS_SELECT)).to_be_attached()
+
+
+def test_default_reading_status_is_enabled_in_add_and_disabled_elsewhere(
+    live_server, authed_page
+):
+    """G90: the control is hidden outside add/wishlist, and hidden is not
+    enough: only `disabled` keeps it out of the POST."""
+    _open_scan(authed_page, live_server)
+    select = authed_page.locator(_STATUS_SELECT)
+    expect(select).to_be_visible()
+    expect(select).to_be_enabled()
+
+    switcher = authed_page.locator("div.flex.flex-wrap.gap-2.mb-4")
+    for label in ("Lend", "Move"):
+        switcher.get_by_role("button", name=label, exact=True).click()
+        expect(select).to_be_hidden()
+        expect(select).to_be_disabled()
+    switcher.get_by_role("button", name="Add", exact=True).click()
+    expect(select).to_be_visible()
+    expect(select).to_be_enabled()
+    assert_page_clean(authed_page)
+
+
+def test_default_reading_status_persists_across_reload(live_server, authed_page):
+    """A real `change` writes the sticky value; no localStorage seeding."""
+    _open_scan(authed_page, live_server)
+    authed_page.select_option(_STATUS_SELECT, "reading")
+    authed_page.reload()
+    authed_page.wait_for_load_state("networkidle")
+    expect(authed_page.locator(_STATUS_SELECT)).to_have_value("reading")
+    assert_page_clean(authed_page)
+
+
+def test_default_reading_status_words_follow_the_media_type(
+    live_server, authed_page
+):
+    _open_scan(authed_page, live_server)
+    select = authed_page.locator(_STATUS_SELECT)
+
+    expect(select.locator('option[value="want_to_read"]')).to_have_text("Want to")
+    assert _status_words(authed_page) == ["Want to", "In progress", "Finished"]
+
+    authed_page.select_option("#media-type", "dvd")
+    expect(select.locator('option[value="want_to_read"]')).to_have_text(
+        "Want to Watch"
+    )
+    assert _status_words(authed_page) == ["Want to Watch", "Watching", "Watched"]
+    expect(select).to_be_enabled()
+
+    authed_page.select_option("#media-type", "vinyl")
+    expect(select).to_be_disabled()
+
+    authed_page.select_option("#media-type", "auto")
+    expect(select).to_be_enabled()
+    assert _status_words(authed_page) == ["Want to", "In progress", "Finished"]
+    assert_page_clean(authed_page)
+
+
+def test_manual_add_panel_applies_the_default_reading_status(
+    live_server, authed_page
+):
+    """The panel's `hx-include` carries the status to /api/items/manual."""
+    data_dir = live_server["data_dir"]
+    title = "T5 Manual Status Subject"
+    _open_scan(authed_page, live_server)
+    authed_page.select_option(_STATUS_SELECT, "want_to_read")
+
+    authed_page.click("button[data-manual-toggle]")
+    panel = authed_page.locator('[data-manual-host="panel"]')
+    expect(panel).to_be_visible()
+    panel.locator("select[name=media_type]").select_option("book")
+    panel.locator("input[name=title]").fill(title)
+    with authed_page.expect_response(
+        lambda r: "/api/items/manual" in r.url and r.ok
+    ):
+        panel.locator("form button[type=submit]").click()
+
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        row = conn.execute(
+            "SELECT id, reading_status FROM items WHERE title = ?", (title,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "manual add did not create the item"
+    assert row[1] == "want_to_read"
+
+    authed_page.goto(f"{live_server['url']}/item/{row[0]}")
+    authed_page.wait_for_load_state("networkidle")
+    section = authed_page.locator("#reading-status-section")
+    expect(section.get_by_role("button", name="Want to Read")).to_be_visible()
+    assert_page_clean(authed_page)
+
+
+def _tag_suggestion_names(page) -> list:
+    return page.evaluate(
+        "() => Array.from(document.querySelectorAll("
+        "'#tag-suggestions option')).map(o => o.value)"
+    )
+
+
+def _wait_for_tag_names(page, predicate, timeout_ms: int = 10_000) -> list:
+    """G21 — poll from Python, never `page.wait_for_function` (the CSP
+    refuses its eval()). Returns the names seen once `predicate` is true."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    names = []
+    while time.monotonic() < deadline:
+        names = _tag_suggestion_names(page)
+        if predicate(names):
+            return names
+        page.wait_for_timeout(100)
+    raise AssertionError(
+        f"tag datalist never satisfied the expected condition; last saw {names}"
+    )
+
+
+def test_default_tags_datalist_refilters_by_media_type(server_factory, browser):
+    """Case 3 (rev 1 — codex-R2): its own server.
+
+    `live_server` is session-scoped, and the previous test above creates
+    `Cookbook` as a *global* tag on it — a global tag is offered for every
+    type, so asserting "dvd excludes Cookbook" against the shared server
+    would be G34's second face (a page whose datalist is built from the
+    whole table). A throwaway `server_factory` server with a `dvd`-scoped
+    `Movie` tag seeded directly (no HTTP route sets a tag's scope) and
+    `Cookbook` relied on only as the `book` starter (config.TAG_SUGGESTIONS)
+    keeps the two branches genuinely distinguishable.
+    """
+    server = server_factory()
+    base = server["url"]
+    credentials = _run_setup_wizard(browser, base)
+    _insert_tag(server["data_dir"], "Movie", media_type="dvd")
+
+    ctx = browser.new_context()
+    try:
+        pg = attach_page_guard(ctx.new_page())
+        csp_violations = _watch_csp_violations(pg)
+
+        pg.goto(f"{base}/login")
+        pg.fill("input[name=username]", credentials["username"])
+        pg.fill("input[name=password]", credentials["password"])
+        pg.click("button[type=submit]")
+        pg.wait_for_url(f"{base}/", timeout=10_000)
+
+        pg.goto(f"{base}/scan")
+        pg.wait_for_load_state("networkidle")
+        expect(pg.locator("#default-tags")).to_be_visible()
+
+        pg.select_option("#media-type", "book")
+        book_names = _wait_for_tag_names(pg, lambda names: "Cookbook" in names)
+        assert "Movie" not in book_names, book_names
+
+        pg.select_option("#media-type", "dvd")
+        dvd_names = _wait_for_tag_names(pg, lambda names: "Movie" in names)
+        assert "Cookbook" not in dvd_names, dvd_names
+
+        assert csp_violations == [], csp_violations
+        assert_page_clean(pg)
+    finally:
+        ctx.close()
+
+
+def test_enter_in_default_tags_does_not_submit_a_scan(live_server, authed_page):
+    """The scan form carries a hidden default button so Enter in the barcode
+    field still submits with the tags field beside it; Enter in the tags
+    field itself must not post a blank scan."""
+    posts = []
+    authed_page.on(
+        "request",
+        lambda r: posts.append(r.url) if r.method == "POST" and "/api/scan" in r.url else None,
+    )
+    authed_page.goto(f"{live_server['url']}/scan")
+    authed_page.wait_for_load_state("networkidle")
+
+    authed_page.fill("#default-tags", "Cookbook")
+    authed_page.press("#default-tags", "Enter")
+    authed_page.wait_for_timeout(500)
+
+    assert posts == []
+    assert_page_clean(authed_page)
+
+
+def test_shelf_fill_enter_submits_with_default_tags(live_server, authed_page):
+    """Shelf Fill's Default tags field is form-associated with the scan form,
+    making it the form's second text field — without the hidden default
+    button, Enter in the barcode field would submit nothing. The typed post
+    carries the tags; an item already in the library is placed, not tagged."""
+    data_dir = live_server["data_dir"]
+    loc_id = _insert_location(data_dir, "T7 Enter Shelf")
+    isbn = "9780000777775"
+    item_id = insert_item(data_dir, title="Shelf Fill Enter Subject", isbn=isbn)
+
+    authed_page.goto(f"{live_server['url']}/shelf-fill")
+    authed_page.wait_for_load_state("networkidle")
+    authed_page.select_option("#shelf-fill-location", str(loc_id))
+    authed_page.fill("#default-tags", "Cookbook")
+    authed_page.fill("#shelf-fill-barcode", isbn)
+
+    with authed_page.expect_response(
+        lambda r: "/api/shelf-fill/scan" in r.url
+    ) as resp_info:
+        authed_page.press("#shelf-fill-barcode", "Enter")
+    resp = resp_info.value
+    assert resp.ok
+    assert "tags=Cookbook" in (resp.request.post_data or "")
+
+    assert _item_tag_names(data_dir, item_id) == []
+    assert_page_clean(authed_page)
+
+
+def test_add_scan_after_lend_does_not_post_the_hidden_borrower(live_server, authed_page):
+    """G90: `x-show` hides the Lend-only borrower select but leaves it in the
+    form, and scan.js builds its body with `new FormData(form)`. Only
+    `:disabled` keeps a borrower picked in Lend out of an Add-mode POST.
+    The request is intercepted and answered here, so nothing is written."""
+    from urllib.parse import parse_qs
+
+    data_dir = live_server["data_dir"]
+    conn = sqlite3.connect(str(data_dir / "shelf.db"))
+    try:
+        borrower = conn.execute(
+            "INSERT INTO borrowers (name) VALUES ('Hidden Borrower')"
+        ).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    def _answer(route):
+        route.fulfill(status=200, content_type="text/html", body="")
+
+    try:
+        authed_page.route("**/api/scan", _answer)
+        authed_page.goto(f"{live_server['url']}/scan")
+        switcher = authed_page.locator("div.flex.flex-wrap.gap-2.mb-4")
+        switcher.get_by_role("button", name="Lend", exact=True).click()
+        borrower_select = authed_page.locator('select[name="borrower_id"]')
+        expect(borrower_select).to_be_visible()
+        borrower_select.select_option(str(borrower))
+
+        switcher.get_by_role("button", name="Add", exact=True).click()
+        expect(borrower_select).to_be_hidden()
+
+        authed_page.locator("#isbn-input").fill("9780000000002")
+        with authed_page.expect_request(
+            lambda r: r.method == "POST" and r.url.endswith("/api/scan")
+        ) as request_info:
+            authed_page.locator("#isbn-input").press("Enter")
+        posted = parse_qs(request_info.value.post_data or "", keep_blank_values=True)
+        assert posted.get("mode") == ["add"], posted
+        assert "borrower_id" not in posted, posted
+    finally:
+        authed_page.unroute("**/api/scan")
+        conn = sqlite3.connect(str(data_dir / "shelf.db"))
+        try:
+            conn.execute("DELETE FROM borrowers WHERE id = ?", (borrower,))
+            conn.commit()
+        finally:
+            conn.close()

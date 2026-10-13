@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import re
@@ -37,6 +38,7 @@ logging.getLogger("app").addHandler(_db_handler)
 logger = logging.getLogger(__name__)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -48,13 +50,18 @@ from app.config import (
     CREATOR_LABELS,
     DATA_DIR,
     MEDIA_TYPES,
+    browse_creator_label,
+    cover_shape,
     creator_label,
     get_client_ip,
+    status_labels,
 )
 from app.currency import CURRENCIES, format_money, get_currency
+from app.features import feature_enabled
 from app.services.national import SEARCH_LANGS
+from app.services.search_text import folded_match_ranges
 from app.database import init_db, get_db
-from app.routers import pages, items, item_copies, items_covers, cover_review, cover_review_actions, items_csv, items_catalog, locations, location_order, platforms, settings, sync, checkouts, valuation, hardcover, store, series, share, tags, intake, archive, shelf_fill, romm, komga, periodicals, music, related_media
+from app.routers import pages, items, item_copies, items_covers, cover_review, cover_review_actions, items_csv, items_catalog, locations, location_order, platforms, settings, sync, checkouts, valuation, hardcover, store, series, share, tags, intake, archive, shelf_fill, romm, komga, periodicals, music, related_media, trash, game_metadata
 from app.routers import auth_routes
 
 
@@ -62,7 +69,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # Browsers ignore HSTS over http://, and behind a trusted TLS proxy the scheme is already https.
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         # No 'unsafe-inline', no CDN hosts, and no 'unsafe-eval': all JS is
@@ -91,6 +100,38 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 _SKIP_AUTH_PATHS = frozenset({"/login", "/setup", "/logout", "/health", "/sw.js"})
 _SKIP_AUTH_PREFIXES = ("/static/", "/covers/", "/share/")
+
+
+def _cross_site_bounce(request: Request) -> Response | None:
+    """Re-request a cross-site page navigation once from the same origin.
+
+    The session cookie is SameSite=Strict, so a browser withholds it on any
+    navigation that starts on another site (a dashboard, a chat link). A
+    same-origin `Refresh` makes the browser ask again with the cookie (#149).
+    Never on /api/: its GET event streams do real work and CSRF skips GETs.
+    """
+    if request.method != "GET":
+        return None
+    if request.headers.get("sec-fetch-mode") != "navigate":
+        return None
+    if request.headers.get("sec-fetch-site") != "cross-site":
+        return None
+    path = request.url.path
+    if path == "/api" or path.startswith("/api/"):
+        return None
+    # The raw path keeps its percent-encoding, so a decoded CR LF cannot reach
+    # the header. A leading run of / and \ collapses to one /, so the target
+    # can never be protocol-relative (//evil.example).
+    raw = request.scope.get("raw_path")
+    raw = raw.decode("latin-1") if raw else path
+    target = "/" + raw.lstrip("/\\")
+    query = request.scope.get("query_string", b"")
+    if query:
+        target += "?" + query.decode("latin-1")
+    return Response(
+        status_code=200,
+        headers={"Refresh": f"0;url={target}", "Cache-Control": "no-store"},
+    )
 
 # Methods that mutate state and must carry a CSRF token
 _CSRF_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -165,18 +206,25 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return RedirectResponse(url="/setup", status_code=303)
 
         # Login redirect: if users exist but no session, redirect to /login
-        # (skip for POST /login, POST /setup to avoid blocking form submissions)
-        if path not in _SKIP_AUTH_PATHS and not user:
+        # (skip for POST /login, POST /setup to avoid blocking form submissions).
+        # A cross-site page navigation arrives without the Strict cookie, so it
+        # is re-requested once same-origin first — /login included, where a
+        # live session then goes on to /.
+        if not user and (path not in _SKIP_AUTH_PATHS or path == "/login"):
             if get_user_count() > 0:
-                return RedirectResponse(url="/login", status_code=303)
+                bounce = _cross_site_bounce(request)
+                if bounce:
+                    return bounce
+                if path != "/login":
+                    return RedirectResponse(url="/login", status_code=303)
 
         response = await call_next(request)
 
         # Sliding expiry: refresh token if past half-life, preserving CSRF token
         if user:
-            fresh_token = should_refresh_token(request)
+            fresh_token = should_refresh_token(request, user)
             if fresh_token:
-                set_auth_cookie(response, fresh_token, request.cookies.get("csrf_token"))
+                set_auth_cookie(request, response, fresh_token, request.cookies.get("csrf_token"))
 
         return response
 
@@ -227,81 +275,101 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-async def _periodic_abs_sync():
-    """Background task: run ABS sync on schedule if configured."""
+async def _abs_sync_pass() -> bool:
+    """One ABS-sync check-and-maybe-run. Returns True when it synced."""
     from app.services import audiobookshelf
+
+    if not feature_enabled("abs_sync"):
+        return False
 
     intervals = {"daily": 86400, "weekly": 604800}
 
+    with get_db() as db:
+        row = db.execute("SELECT value FROM settings WHERE key = 'abs_sync_interval'").fetchone()
+        interval = row["value"] if row else "off"
+        if interval == "off":
+            return False
+
+        # Check last sync time
+        last = db.execute("SELECT value FROM settings WHERE key = 'abs_last_sync'").fetchone()
+        now = time.time()
+        if last and last["value"]:
+            elapsed = now - float(last["value"])
+            if elapsed < intervals.get(interval, 86400):
+                return False
+
+        from app.database import get_setting
+        abs_url_val = get_setting(db, "abs_url")
+        abs_token_val = get_setting(db, "abs_token")
+
+    if abs_url_val and abs_token_val:
+        await audiobookshelf.sync(abs_url_val, abs_token_val)
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO settings (key, value) VALUES ('abs_last_sync', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = ?",
+                (str(now), str(now)),
+            )
+        logger.info("Periodic Audiobookshelf sync completed")
+        return True
+    return False
+
+
+async def _periodic_abs_sync():
+    """Background task: run ABS sync on schedule if configured."""
     while True:
         await asyncio.sleep(300)  # check every 5 minutes
         try:
-            with get_db() as db:
-                row = db.execute("SELECT value FROM settings WHERE key = 'abs_sync_interval'").fetchone()
-                interval = row["value"] if row else "off"
-                if interval == "off":
-                    continue
-
-                # Check last sync time
-                last = db.execute("SELECT value FROM settings WHERE key = 'abs_last_sync'").fetchone()
-                now = time.time()
-                if last and last["value"]:
-                    elapsed = now - float(last["value"])
-                    if elapsed < intervals.get(interval, 86400):
-                        continue
-
-                from app.database import get_setting
-                abs_url_val = get_setting(db, "abs_url")
-                abs_token_val = get_setting(db, "abs_token")
-
-            if abs_url_val and abs_token_val:
-                await audiobookshelf.sync(abs_url_val, abs_token_val)
-                with get_db() as db:
-                    db.execute(
-                        "INSERT INTO settings (key, value) VALUES ('abs_last_sync', ?) "
-                        "ON CONFLICT(key) DO UPDATE SET value = ?",
-                        (str(now), str(now)),
-                    )
-                logger.info("Periodic Audiobookshelf sync completed")
+            await _abs_sync_pass()
         except Exception:
             logger.exception("Periodic Audiobookshelf sync failed")
 
 
-async def _periodic_hardcover_sync():
-    """Background task: pull reading status changes from Hardcover on schedule."""
+async def _hardcover_sync_pass() -> bool:
+    """One Hardcover-sync check-and-maybe-run. Returns True when it synced."""
     from app.services import hardcover as hc_svc
+
+    if not feature_enabled("hardcover"):
+        return False
 
     intervals = {"daily": 86400, "weekly": 604800}
 
+    with get_db() as db:
+        row = db.execute("SELECT value FROM settings WHERE key = 'hc_sync_interval'").fetchone()
+        interval = row["value"] if row else "off"
+        if interval == "off":
+            return False
+
+        last = db.execute("SELECT value FROM settings WHERE key = 'hc_last_sync'").fetchone()
+        now = time.time()
+        if last and last["value"]:
+            elapsed = now - float(last["value"])
+            if elapsed < intervals.get(interval, 86400):
+                return False
+
+        from app.database import get_setting
+        token = get_setting(db, "hardcover_token")
+
+    token = token or None
+    if token:
+        await hc_svc.sync_reading_statuses(token)
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO settings (key, value) VALUES ('hc_last_sync', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = ?",
+                (str(now), str(now)),
+            )
+        logger.info("Periodic Hardcover sync completed")
+        return True
+    return False
+
+
+async def _periodic_hardcover_sync():
+    """Background task: pull reading status changes from Hardcover on schedule."""
     while True:
         await asyncio.sleep(300)  # check every 5 minutes
         try:
-            with get_db() as db:
-                row = db.execute("SELECT value FROM settings WHERE key = 'hc_sync_interval'").fetchone()
-                interval = row["value"] if row else "off"
-                if interval == "off":
-                    continue
-
-                last = db.execute("SELECT value FROM settings WHERE key = 'hc_last_sync'").fetchone()
-                now = time.time()
-                if last and last["value"]:
-                    elapsed = now - float(last["value"])
-                    if elapsed < intervals.get(interval, 86400):
-                        continue
-
-                from app.database import get_setting
-                token = get_setting(db, "hardcover_token")
-
-            token = token or None
-            if token:
-                await hc_svc.sync_reading_statuses(token)
-                with get_db() as db:
-                    db.execute(
-                        "INSERT INTO settings (key, value) VALUES ('hc_last_sync', ?) "
-                        "ON CONFLICT(key) DO UPDATE SET value = ?",
-                        (str(now), str(now)),
-                    )
-                logger.info("Periodic Hardcover sync completed")
+            await _hardcover_sync_pass()
         except Exception:
             logger.exception("Periodic Hardcover sync failed")
 
@@ -313,6 +381,9 @@ async def check_loan_reminders() -> bool:
     """One reminder pass: send a digest if overdue loans exist, a notify URL
     is configured, and no digest went out in the last 24h. Returns True when
     a digest was sent."""
+    if not feature_enabled("lending"):
+        return False
+
     from app.database import get_setting
     from app.routers.checkouts import get_overdue_loans
     from app.services.notify import send_notification
@@ -360,6 +431,76 @@ async def _periodic_loan_reminders():
             logger.exception("Loan reminder check failed")
 
 
+_PRICE_ALERT_INTERVAL = 86400  # at most one pass per day — each costs ISBNdb lookups
+
+
+async def check_price_alerts() -> bool:
+    """One price-alert pass: look up the list price of the wishlist's next
+    batch of books, record it, and send one digest of the drops. Returns True
+    when a pass ran.
+
+    Unlike the loan digest, the stamp is written whether or not the digest was
+    sent or accepted: the expensive part is the ISBNdb lookups, and re-running
+    them five minutes later is what the throttle exists to prevent.
+    """
+    if not feature_enabled("price_alerts"):
+        return False
+
+    from app.database import get_setting, set_setting
+    from app.services import price_alerts
+
+    with get_db() as db:
+        # get_setting, so the ISBNDB_API_KEY env override and decryption count (G15).
+        api_key = get_setting(db, "isbndb_api_key")
+        if not api_key:
+            return False
+        last = get_setting(db, "price_alert_last_run")
+        now = time.time()
+        try:
+            if last and now - float(last) < _PRICE_ALERT_INTERVAL:
+                return False
+        except ValueError:
+            pass  # an unreadable stamp runs the pass and is overwritten below
+        notify_url = get_setting(db, "notify_url")
+        notify_format = get_setting(db, "notify_format") or "ntfy"
+        threshold = price_alerts.get_threshold_pct(db)
+        cap = price_alerts.get_nightly_cap(db)
+
+    result = await price_alerts.run_pass(
+        api_key, threshold=threshold, cap=cap,
+        notify_url=notify_url, notify_format=notify_format,
+    )
+    with get_db() as db:
+        set_setting(db, "price_alert_last_run", str(now))
+        set_setting(db, "price_alert_last_summary", json.dumps({
+            "looked_up": result["looked_up"], "failed": result["failed"],
+            "status": result["failed_status"],
+        }))
+    logger.info(
+        "Price-alert pass: %d looked up, %d drop(s), digest sent: %s",
+        result["looked_up"], result["drops"], result["sent"],
+    )
+    if result["failed"]:
+        logger.warning(
+            "Price-alert pass: %d of %d ISBNdb lookup(s) failed (last status: %s)",
+            result["failed"], result["looked_up"], result["failed_status"],
+        )
+    return True
+
+
+async def _periodic_price_alerts():
+    """Background task: run the daily wishlist price-alert pass."""
+    # Tests and the E2E servers set this so no pass can call ISBNdb live.
+    if os.environ.get("SHELF_DISABLE_PRICE_ALERTS"):
+        return
+    while True:
+        await asyncio.sleep(300)  # check every 5 minutes
+        try:
+            await check_price_alerts()
+        except Exception:
+            logger.exception("Price-alert pass failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -375,12 +516,14 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(_periodic_abs_sync())
     hc_task = asyncio.create_task(_periodic_hardcover_sync())
     loan_task = asyncio.create_task(_periodic_loan_reminders())
+    price_task = asyncio.create_task(_periodic_price_alerts())
     from app.services import cover_queue
     cover_task = cover_queue.start()
     yield
     task.cancel()
     hc_task.cancel()
     loan_task.cancel()
+    price_task.cancel()
     if cover_task is not None:
         cover_task.cancel()
 
@@ -418,7 +561,27 @@ def strip_html(value: str) -> str:
     value = re.sub(r"\n{3,}", "\n\n", value)
     return html_mod.unescape(value).strip()
 
+
+def highlight_search(value: str, query: str) -> Markup:
+    """Escape text and mark every search match, including accent variants."""
+    text = str(value or "")
+    ranges = folded_match_ranges(text, (query or ""))
+    if not ranges:
+        return Markup(escape(text))
+    parts: list[str] = []
+    previous_end = 0
+    for start, end in ranges:
+        parts.append(str(escape(text[previous_end:start])))
+        parts.append(
+            f'<mark class="bg-shelf-accent/80 text-white rounded px-0.5">'
+            f"{escape(text[start:end])}</mark>"
+        )
+        previous_end = end
+    parts.append(str(escape(text[previous_end:])))
+    return Markup("".join(parts))
+
 templates.env.filters["strip_html"] = strip_html
+templates.env.filters["highlight_search"] = highlight_search
 templates.env.filters["money"] = format_money
 templates.env.globals["currency"] = get_currency
 templates.env.globals["currencies"] = CURRENCIES
@@ -427,15 +590,46 @@ templates.env.globals["search_langs"] = SEARCH_LANGS
 # A global rather than route context, so neither host route grows a key for it.
 templates.env.globals["creator_labels"] = CREATOR_LABELS
 templates.env.globals["creator_label"] = creator_label
+# Each cover's box shape per media type — declared once in app/config.py, and
+# carried as data-cover-shape so one CSS rule squares every music cover.
+templates.env.globals["cover_shape"] = cover_shape
+# Browse's creator column and author sort option follow the Type filter.
+templates.env.globals["browse_creator_label"] = browse_creator_label
 # Browse's hx-include lists are derived, not written — see app/browse_filters.py.
 templates.env.globals["filter_includes"] = browse_filters.filter_includes
 templates.env.globals["browse_filter_config"] = browse_filters.client_config
 # Browse's list-view column set is derived, not written — see app/browse_columns.py.
 templates.env.globals["browse_columns"] = browse_columns.COLUMNS
 templates.env.globals["browse_column_config"] = browse_columns.client_config
+# A template reads a flag through this one global, never a per-route context
+# key, so a fragment re-rendered from a new route can't forget it — an
+# unknown key raises rather than rendering as falsy.
+templates.env.globals["feature_on"] = feature_enabled
+# The toggle route re-renders reading_status.html with only `item` in context,
+# so the status words must come from a global.
+templates.env.globals["status_labels"] = status_labels
 
 # Wrap TemplateResponse to auto-inject 'user' from request.state
 _original_template_response = templates.TemplateResponse
+
+def _trash_nag(user):
+    """The admin Trash banner's state for this render, or None.
+
+    Runs on every render for every user, so the role is checked here, before
+    any service call: a non-admin render reaches no Trash code and no query.
+    An admin's render reads the cached count (one query pair per process per
+    hour). A failure means no banner this render, never a failed page — the
+    same rule as the nav's settings read.
+    """
+    if not user or user["role"] != "admin":
+        return None
+    from app.services import trash
+    try:
+        return trash.nag_state(user)
+    except Exception:
+        logger.warning("Could not read the Trash count", exc_info=True)
+        return None
+
 
 def _template_response_with_user(request_or_self, *args, **kwargs):
     # Handle both templates.TemplateResponse(request, name, ctx) patterns
@@ -449,6 +643,18 @@ def _template_response_with_user(request_or_self, *args, **kwargs):
     # Find the context dict and inject user + the nav tabs that user can see
     from app.nav import visible_tabs
     user = getattr(request.state, "user", None)
+    trash_nag = _trash_nag(user)
+    avatar_preferences = {}
+    user_theme = ""
+    if user:
+        # The account menu is part of every authenticated page, so its
+        # per-user symbol settings are resolved here rather than duplicated
+        # across every route that renders a template.
+        from app.database import get_db
+        from app.services.user_preferences import user_symbol_preferences, user_theme as get_user_theme
+        with get_db() as db:
+            avatar_preferences = user_symbol_preferences(db, user["id"])
+            user_theme = get_user_theme(db, user["id"])
     context = kwargs.get('context', None)
     if context is None:
         # Context is a positional arg (3rd after request, name)
@@ -456,10 +662,16 @@ def _template_response_with_user(request_or_self, *args, **kwargs):
             if isinstance(a, dict):
                 a.setdefault("user", user)
                 a.setdefault("nav_tabs", visible_tabs(user))
+                a.setdefault("trash_nag", trash_nag)
+                a.setdefault("avatar_preferences", avatar_preferences)
+                a.setdefault("user_theme", user_theme)
                 break
     else:
         context.setdefault("user", user)
         context.setdefault("nav_tabs", visible_tabs(user))
+        context.setdefault("trash_nag", trash_nag)
+        context.setdefault("avatar_preferences", avatar_preferences)
+        context.setdefault("user_theme", user_theme)
 
     return _original_template_response(request_or_self, *args, **kwargs)
 
@@ -501,6 +713,9 @@ async def health():
 # Routers
 app.include_router(auth_routes.router)
 app.include_router(pages.router)
+# Before items.router: tags.router owns the static POST /api/items/bulk-tags,
+# which items.py's POST /items/{item_id} would otherwise match first.
+app.include_router(tags.router)
 app.include_router(items.router)
 # items.py was split by feature area (Lever 5); all four share the /api prefix.
 app.include_router(items_covers.router)
@@ -512,6 +727,7 @@ app.include_router(locations.router)
 app.include_router(location_order.router)
 app.include_router(platforms.router)
 app.include_router(settings.router)
+app.include_router(settings.personal_router)
 app.include_router(sync.router)
 app.include_router(checkouts.router)
 app.include_router(valuation.router)
@@ -520,7 +736,6 @@ app.include_router(store.router)
 app.include_router(series.router)
 app.include_router(share.router)
 app.include_router(item_copies.router)
-app.include_router(tags.router)
 app.include_router(intake.router)
 app.include_router(archive.router)
 app.include_router(music.router)
@@ -529,3 +744,6 @@ app.include_router(romm.router)
 app.include_router(komga.router)
 app.include_router(periodicals.router)
 app.include_router(related_media.router)
+app.include_router(game_metadata.router)
+app.include_router(trash.router)
+app.include_router(trash.page_router)

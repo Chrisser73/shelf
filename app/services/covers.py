@@ -1,10 +1,11 @@
 import logging
+import unicodedata
 from urllib.parse import urlparse
 
 import httpx
 
 from app.config import COVERS_DIR
-from app.services import googlebooks, igdb, outbound, provider_result, tmdb
+from app.services import book_cover_search, igdb, outbound, provider_result, tmdb
 
 logger = logging.getLogger(__name__)
 
@@ -94,61 +95,43 @@ def _looks_like_image(content: bytes) -> bool:
     return any(content.startswith(sig) for sig in _IMAGE_SIGNATURES)
 
 
-def save_uploaded_cover(item_id: int, content: bytes) -> str | None:
-    """Save an uploaded cover image. Returns relative path or None."""
-    COVERS_DIR.mkdir(parents=True, exist_ok=True)
-    dest = COVERS_DIR / f"{item_id}.jpg"
+def validate_uploaded_cover(content: bytes) -> bool:
+    """True if `content` is an acceptable cover upload (size and image magic).
+
+    Pure: no mkdir, no write. Safe to call before a route knows whether it
+    will go on to save.
+    """
     if len(content) < MIN_COVER_SIZE or len(content) > MAX_COVER_SIZE:
-        return None
-    if not _looks_like_image(content):
-        return None
-    dest.write_bytes(content)
+        return False
+    return _looks_like_image(content)
+
+
+def write_uploaded_cover(item_id: int, content: bytes) -> str:
+    """Write already-validated cover bytes to `{item_id}.jpg`. Returns the relative path.
+
+    Does no validation: the caller must have passed `content` through
+    `validate_uploaded_cover` first. The two are separate so a route that may
+    still refuse the save (#127) can validate early and write last, leaving
+    the existing cover untouched when it refuses.
+    """
+    COVERS_DIR.mkdir(parents=True, exist_ok=True)
+    (COVERS_DIR / f"{item_id}.jpg").write_bytes(content)
     return f"covers/{item_id}.jpg"
 
 
-async def search_cover_by_title(
-    title: str,
-    author: str | None,
-    client: httpx.AsyncClient,
-    *,
-    google_api_key: str | None = None,
-) -> list[dict]:
-    """Search for cover candidates by title/author. Returns list of {url, source, thumbnail}."""
-    candidates = []
+def save_uploaded_cover(item_id: int, content: bytes) -> str | None:
+    """Save an uploaded cover image. Returns relative path or None."""
+    return write_uploaded_cover(item_id, content) if validate_uploaded_cover(content) else None
 
-    # Google Books search
-    try:
-        candidates.extend(await googlebooks.search_covers(
-            title, author, client, api_key=google_api_key
-        ))
-    except Exception:
-        pass
 
-    # Open Library search
-    try:
-        params = {"title": title, "limit": "5"}
-        if author:
-            params["author"] = author.split(",")[0].strip()
-        resp = await outbound.fetch(
-            client, "GET",
-            "https://openlibrary.org/search.json",
-            params=params,
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            for doc in data.get("docs", []):
-                cover_i = doc.get("cover_i")
-                if cover_i:
-                    candidates.append({
-                        "url": f"https://covers.openlibrary.org/b/id/{cover_i}-L.jpg",
-                        "thumbnail": f"https://covers.openlibrary.org/b/id/{cover_i}-M.jpg",
-                        "source": "Open Library",
-                    })
-    except Exception:
-        pass
-
-    return candidates
+async def search_book_covers(
+    title: str, author: str | None, isbn: str | None,
+    client: httpx.AsyncClient, *, google_api_key: str | None = None,
+) -> provider_result.ProviderResult:
+    """Search exact ISBN editions first, then offer title matches for review."""
+    return await book_cover_search.search(
+        title, author, isbn, client, google_api_key=google_api_key,
+    )
 
 # --- Media-type dispatch for the cover picker -------------------------------
 #
@@ -245,20 +228,13 @@ async def search_covers(
         return await _tmdb_candidates(item, query, client, creds)
     if provider == "igdb":
         return await _igdb_candidates(item, query, client, creds)
-    # Called as the bare module global on purpose: eight tests in
-    # tests/test_covers.py patch `covers.search_cover_by_title` by attribute,
-    # and a local alias or a from-import would detach every one of them.
-    #
-    # Wrapped as `found` rather than re-typed: the book branch fans out over
-    # Google Books and Open Library and swallows each one's failure on its own
-    # (`search_cover_by_title` above), so it has no single outcome to report.
-    # Re-typing that cascade is `plan-cover-editions`' work.
-    return provider_result.found("openlibrary", await search_cover_by_title(
+    return await search_book_covers(
         query,
         _col(item, "authors"),
+        _col(item, "isbn") if query.strip() == (_col(item, "title") or "").strip() else None,
         client,
         google_api_key=creds.get("google_books_api_key"),
-    ))
+    )
 
 
 async def _tmdb_candidates(
@@ -348,11 +324,30 @@ async def _igdb_candidates(
         # the honest value; `_search_note` is what the user actually sees.
         return provider_result.no_credential("igdb")
     try:
-        result = await igdb.search_game_art(
-            query, cid, secret, client,
-            platform=_col(item, "platform"),
-            limit=5,
-        )
+        platform = _col(item, "platform")
+        result = await igdb.search_game_art(query, cid, secret, client, platform=platform, limit=5)
+        # IGDB's title search is inconsistent around accented franchise names
+        # (notably Pokkén). Retry an ASCII-folded spelling, then once without a
+        # platform constraint when the title exists but IGDB omitted a platform
+        # relation. Both are fallbacks only, so the precise first query wins.
+        folded = "".join(
+            char for char in unicodedata.normalize("NFKD", query)
+            if not unicodedata.combining(char)
+        ).replace("™", "").strip()
+        if not result.found and folded and folded.casefold() != query.casefold():
+            result = await igdb.search_game_art(folded, cid, secret, client, platform=platform, limit=5)
+        if not result.found and platform:
+            result = await igdb.search_game_art(folded or query, cid, secret, client, platform=None, limit=5)
+        # A fuzzy search can return a game without cover/artwork. That is a
+        # valid IGDB response but not a usable picker result, so retry the
+        # same full title (including DX) without the platform restriction.
+        if result.found and not any(
+            game.get("cover_image_id") or game.get("artwork_image_ids")
+            for game in (result.payload or [])
+        ) and platform:
+            result = await igdb.search_game_art(
+                folded or query, cid, secret, client, platform=None, limit=5,
+            )
         # Never `if not result:` — `ProviderResult.__bool__` raises, and the
         # `except Exception` below would swallow it into `[]`: green and wrong.
         if not result.found:

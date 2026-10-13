@@ -277,7 +277,7 @@ document.addEventListener('alpine:init', function () {
                     body: JSON.stringify({ title: b.title, authors: b.authors, cover_url: b.cover_url, hardcover_book_id: b.hardcover_book_id, series_name: b.series_name, series_position: b.series_position })
                 })
                     .then(r => r.json())
-                    .then(d => { if (d.ok || d.item_id) { this.added[b.hardcover_book_id] = true; showToast('Added to wishlist'); } else { showToast(d.message || 'Failed', 'error'); } })
+                    .then(d => { if (d.ok || d.item_id) { this.added[b.hardcover_book_id] = true; showToast(d.restored ? 'Restored from Trash' : 'Added to wishlist'); } else { showToast(d.message || 'Failed', 'error'); } })
                     .catch(() => showToast('Failed', 'error'));
             }
         };
@@ -372,7 +372,7 @@ document.addEventListener('alpine:init', function () {
                     body: JSON.stringify(d)
                 })
                     .then(r => r.json())
-                    .then(r => { this.adding = false; if (r.ok) { this.added = true; showToast('Added to wishlist'); } else { this.error = r.message; if (r.item_id) this.added = true; } })
+                    .then(r => { this.adding = false; if (r.ok) { this.added = true; showToast(r.restored ? 'Restored from Trash' : 'Added to wishlist'); } else { this.error = r.message; if (r.item_id) this.added = true; } })
                     .catch(() => { this.adding = false; this.error = 'Failed'; });
             }
         };

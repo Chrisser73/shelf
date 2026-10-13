@@ -162,6 +162,7 @@ def render_card(request, db, item, pos: int, total: int, **extra):
         "item": item,
         "item_id": item["id"],
         "cover_path": item["cover_path"],
+        "media_type": item["media_type"],
         "candidates": [],
         "query": "",
         "pos": pos,
@@ -194,6 +195,7 @@ async def cover_review_page(request: Request, _=Depends(require_role("editor")))
             "item": item,
             "item_id": item["id"] if item is not None else None,
             "cover_path": item["cover_path"] if item is not None else None,
+            "media_type": item["media_type"] if item is not None else None,
             "candidates": [],
             "query": "",
             "pos": 1 if item is not None else 0,
@@ -240,7 +242,7 @@ async def cover_review_search(
     templates = request.app.state.templates
     with get_db() as db:
         item = db.execute(
-            "SELECT id, title, authors, cover_path, media_type, publish_year, platform "
+            "SELECT id, title, authors, isbn, cover_path, media_type, publish_year, platform "
             "FROM items_live WHERE id = ?", (item_id,)
         ).fetchone()
         # Key-by-key through get_setting, never the bulk accessor: provider
@@ -262,6 +264,7 @@ async def cover_review_search(
             "candidates": result.payload or [],
             "item_id": item_id,
             "cover_path": item["cover_path"],
+            "media_type": item["media_type"],
             "query": search_query,
             "search_note": items_covers._search_note(item["media_type"], creds),
             "search_status": search_status,

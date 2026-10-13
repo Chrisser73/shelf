@@ -1,5 +1,9 @@
+import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DATABASE_PATH = DATA_DIR / "shelf.db"
@@ -26,6 +30,43 @@ MEDIA_TYPES = {
 # release-based. `dvd` and `video_game` belong to no family; `cd` belongs to
 # the music one. Declared here, beside the types themselves.
 BOOK_MEDIA_TYPES = frozenset({"book", "audiobook", "ebook", "comic", "manga"})
+
+
+# The words a stored reading_status value is shown as. The stored values stay
+# want_to_read / reading / read for every type; only the words change. A Python
+# map rather than a Jinja macro because plan-wrapups renders the same words in
+# Python.
+@dataclass(frozen=True)
+class StatusLabels:
+    key: str
+    want: str
+    doing: str
+    done: str
+    done_lower: str
+
+    def label(self, value):
+        """The word for a stored reading_status value; "" for None or unknown."""
+        return {"want_to_read": self.want, "reading": self.doing, "read": self.done}.get(value, "")
+
+
+READ_LABELS = StatusLabels("read", "Want to Read", "Reading", "Read", "read")
+WATCH_LABELS = StatusLabels("watch", "Want to Watch", "Watching", "Watched", "watched")
+PLAY_LABELS = StatusLabels("play", "Want to Play", "Playing", "Played", "played")
+# For places that show several types at once.
+NEUTRAL_LABELS = StatusLabels("neutral", "Want to", "In progress", "Finished", "finished")
+
+# Overrides only, as CREATOR_LABELS does; every other type reads.
+STATUS_VERBS = {"dvd": WATCH_LABELS, "video_game": PLAY_LABELS}
+
+# A type with its own verb gets its own status control on the item page.
+STATUS_MEDIA_TYPES = BOOK_MEDIA_TYPES | frozenset(STATUS_VERBS)
+
+
+def status_labels(media_type):
+    """The verb set for a media type: neutral for None or "", read by default."""
+    if not media_type:
+        return NEUTRAL_LABELS
+    return STATUS_VERBS.get(media_type, READ_LABELS)
 
 # Retired physical types, mapped to the canonical value that replaced them.
 # `kids_book` was a user *category* wearing a format's clothes — it had no
@@ -93,6 +134,30 @@ def creator_label(media_type):
     """The label for the creator field of `media_type`."""
     return CREATOR_LABELS.get(media_type, DEFAULT_CREATOR_LABEL)
 
+
+# Media types whose artwork is square. Derived from MUSIC_MEDIA_TYPES, not
+# retyped, so a fifth music format cannot silently fall back to portrait —
+# the same rule CREATOR_LABELS applies above. Read it through cover_shape().
+SQUARE_COVER_MEDIA_TYPES = frozenset(MUSIC_MEDIA_TYPES)
+
+
+def cover_shape(media_type):
+    """"square" or "portrait": the box a cover of `media_type` is shown in."""
+    return "square" if media_type in SQUARE_COVER_MEDIA_TYPES else "portrait"
+
+
+# Browse's creator column header and author sort option. They follow the Type
+# filter, borrowing CREATOR_LABELS' overrides, but keep Browse's own default:
+# with no single type picked the column mixes every type, and it has always
+# read "Author", not the add form's per-item "Author(s)". One function, so the
+# header and the sort option cannot disagree.
+BROWSE_CREATOR_DEFAULT = "Author"
+
+
+def browse_creator_label(media_type):
+    """The creator column's label on Browse when filtered to `media_type`."""
+    return CREATOR_LABELS.get(media_type, BROWSE_CREATOR_DEFAULT)
+
 # Starter tag suggestions offered per media type by
 # app.services.tags.suggestions_for(), shown only until the user scopes a
 # tag of their own to that type. The three music formats share one list
@@ -122,6 +187,7 @@ GAME_PLATFORMS = {
     "wii": "Wii",
     "wiiu": "Wii U",
     "switch": "Nintendo Switch",
+    "switch2": "Nintendo Switch 2",
     "gameboy": "Game Boy",
     "gba": "Game Boy Advance",
     "nds": "Nintendo DS",
@@ -141,6 +207,7 @@ GAME_PLATFORMS = {
     "xboxone": "Xbox One",
     "xboxsx": "Xbox Series X/S",
     "pc": "PC",
+    "mac": "Mac",
     "other": "Other",
 }
 
@@ -224,8 +291,10 @@ HOST_RATE_LIMITS: dict[str, float] = {
     # limited one. Do not lower below 3.0.
     "covers.openlibrary.org": 3.0,
     "services.dnb.de": 1.0,  # DNB SRU catalog — good citizenship
+    "tagetes2.oszk.hu": 1.0,  # OSZK NEKTÁR Z39.50 catalog
     "portal.dnb.de": 1.0,  # DNB cover host, same citizenship
     "opac.sbn.it": 1.0,  # SBN publishes no rate limit; matches DNB, a comparable national library
+    "data.bibliotheken.nl": 1.0,  # KB Dutch National Bibliography SPARQL endpoint
     "api.hardcover.app": 1.0,  # 60/min API limit
     "api2.isbndb.com": 3.0,  # was isbndb's own 3s post-request sleep
     "www.googleapis.com": 0.25,  # Google Books quota is per-day; light pacing only
@@ -239,6 +308,7 @@ HOST_RATE_LIMITS: dict[str, float] = {
     # Cover Art Archive is separate from MusicBrainz. Artwork requests are
     # not latency critical, so pace them conservatively too.
     "coverartarchive.org": 1.0,
+    "api.discogs.com": 1.0,  # 60/min for authenticated requests
     # EXPLORER (the keyless trial tier this client uses) allows 6 lookups per
     # minute and 100 per day; faster than the burst rate is declined with 429
     # (https://www.upcitemdb.com/wp/docs/main/development/api-rate-limits/).
@@ -269,7 +339,28 @@ DEFAULT_PAGE_SIZE = 60
 # Auth
 SECRET_KEY = os.environ.get("SECRET_KEY", "")  # auto-generated into DATA_DIR/signing.key if empty
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRY_SECONDS = 7 * 24 * 3600  # 7 days
+SESSION_DAYS_DEFAULT = 30
+SESSION_DAYS_MAX = 365
+
+
+def session_days(raw: str | None) -> int:
+    """Parse SHELF_SESSION_DAYS. Unset or empty (compose passes "") is the default, silently."""
+    if raw is None or not raw.strip():
+        return SESSION_DAYS_DEFAULT
+    try:
+        days = int(raw)
+    except ValueError:
+        days = 0
+    if not 1 <= days <= SESSION_DAYS_MAX:
+        logger.warning(
+            "SHELF_SESSION_DAYS=%r is not an integer from 1 to %d; using %d",
+            raw, SESSION_DAYS_MAX, SESSION_DAYS_DEFAULT,
+        )
+        return SESSION_DAYS_DEFAULT
+    return days
+
+
+JWT_EXPIRY_SECONDS = session_days(os.environ.get("SHELF_SESSION_DAYS")) * 24 * 3600
 
 # API secret env var overrides (take priority over DB settings when set)
 # Map: settings key -> env var name
@@ -287,24 +378,14 @@ SECRET_ENV_VARS = {
 
 
 def get_client_ip(request) -> str:
-    """Extract the real client IP for rate limiting and auth logs.
+    """Return the client IP for rate limiting and auth logs: the socket peer.
 
-    Proxy headers (CF-Connecting-IP, X-Forwarded-For) are client-controlled and
-    trivially spoofable, so they are only honored when SHELF_TRUST_PROXY is set —
-    i.e. the operator has a reverse proxy in front that overwrites them. In the
-    default direct-connection deployment we use the socket peer address.
+    No header is read here, because every header is client-controlled. Behind a
+    trusted reverse proxy the peer is already the real client: uvicorn's
+    proxy-headers middleware rewrites it for peers listed in FORWARDED_ALLOW_IPS
+    (set from SHELF_TRUST_PROXY by entrypoint.sh), walking X-Forwarded-For from
+    the right and skipping trusted hops.
     """
-    if os.environ.get("SHELF_TRUST_PROXY"):
-        # Cloudflare sets this to the actual visitor IP
-        cf_ip = request.headers.get("cf-connecting-ip")
-        if cf_ip:
-            return cf_ip.strip()
-
-        # Standard proxy header — first entry is the original client
-        xff = request.headers.get("x-forwarded-for")
-        if xff:
-            return xff.split(",")[0].strip()
-
     return request.client.host if request.client else "unknown"
 
 

@@ -1,20 +1,24 @@
 import json
+import re
 import sqlite3
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, Request
+import httpx
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, FileResponse
 
 from app.auth import require_role
 from app.config import DATABASE_PATH, DATA_DIR
 from app.crypto import SENSITIVE_KEYS, encrypt_value, get_encryption_key
 from app.currency import CURRENCIES, invalidate_cache as invalidate_currency_cache
-from app.database import get_db, get_setting
+from app import features
+from app.database import get_all_settings, get_db, get_setting, set_setting
 from app.nav import HIDEABLE_KEYS, invalidate_cache as invalidate_nav_cache
 from app.services import audiobookshelf
 from app.services.national import SEARCH_LANGS
 
 router = APIRouter(prefix="/api/settings", dependencies=[Depends(require_role("admin"))])
+personal_router = APIRouter(prefix="/api/settings", dependencies=[Depends(require_role("viewer"))])
 
 _INTEGRATION_KEYS = (
     "abs_url",
@@ -26,7 +30,94 @@ _INTEGRATION_KEYS = (
     "google_books_api_key",
     "igdb_client_id",
     "igdb_client_secret",
+    "discogs_token",
 )
+
+
+@router.get("/vision/ollama-models")
+async def ollama_models(url: str = ""):
+    """Return models installed on the configured Ollama server for Settings."""
+    url = url.strip().rstrip("/")
+    if not re.match(r"^https?://[^/]+(?:/.*)?$", url):
+        return {"ok": False, "message": "Enter a valid Ollama URL first"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(f"{url}/api/tags")
+    except httpx.HTTPError:
+        return {"ok": False, "message": "Could not reach Ollama"}
+    if response.status_code != 200:
+        return {"ok": False, "message": f"Ollama error (HTTP {response.status_code})"}
+    try:
+        raw_models = response.json().get("models", [])
+    except (ValueError, AttributeError):
+        return {"ok": False, "message": "Ollama returned an invalid model list"}
+    models = []
+    for model in raw_models:
+        if not isinstance(model, dict) or not isinstance(model.get("name"), str):
+            continue
+        models.append({"name": model["name"], "vision": "vision" in (model.get("capabilities") or [])})
+    return {"ok": True, "models": models}
+
+
+@router.post("/vision/test")
+async def test_vision_connection(request: Request):
+    """Test the provider and credentials currently visible in the form.
+
+    A Settings form can be changed before Save, so reading only persisted
+    settings would test a different provider.  Unsaved credentials are used
+    for this one request only and are never stored by this endpoint.
+    """
+    try:
+        submitted = await request.json()
+    except ValueError:
+        submitted = {}
+    if not isinstance(submitted, dict):
+        return {"ok": False, "message": "Invalid connection-test request"}
+    with get_db() as db:
+        settings = get_all_settings(db)
+        provider = (submitted.get("provider") or settings.get("vision_provider") or "").strip()
+        if provider not in ("anthropic", "openai", "ollama"):
+            return {"ok": False, "message": "Choose a vision provider first."}
+        submitted_key = submitted.get(f"{provider}_api_key")
+        key = submitted_key.strip() if isinstance(submitted_key, str) and submitted_key.strip() else settings.get(f"{provider}_api_key")
+        # The OpenAI-compatible form calls its URL field `openai_base_url`;
+        # the other providers use `<provider>_url`.
+        url_key = "openai_base_url" if provider == "openai" else f"{provider}_url"
+        submitted_url = submitted.get(url_key)
+        if provider == "ollama":
+            url = (submitted_url.strip() if isinstance(submitted_url, str) and submitted_url.strip() else settings.get("ollama_url") or "http://localhost:11434").rstrip("/")
+        elif provider == "openai":
+            url = (submitted_url.strip() if isinstance(submitted_url, str) and submitted_url.strip() else settings.get("openai_base_url") or "https://api.openai.com/v1").rstrip("/")
+        else:
+            url = "https://api.anthropic.com"
+        if provider != "ollama" and not key:
+            return {"ok": False, "message": f"Enter an {provider.title()} API key first."}
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                if provider == "ollama":
+                    response = await client.get(f"{url}/api/tags")
+                elif provider == "anthropic":
+                    response = await client.get(
+                        f"{url}/v1/models?limit=1",
+                        headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+                    )
+                else:
+                    headers = {"Authorization": f"Bearer {key}"} if key else {}
+                    response = await client.get(f"{url}/models", headers=headers)
+            ok = response.status_code == 200
+        except httpx.HTTPError:
+            ok = False
+        # Persist only a test of the saved provider/configuration. A successful
+        # test of unsaved fields must not make Photo Intake display a stale dot.
+        saved_provider = settings.get("vision_provider") or ""
+        uses_unsaved = bool(submitted_key) or (
+            isinstance(submitted_url, str) and submitted_url.strip()
+            and submitted_url.strip().rstrip("/") != (settings.get(url_key) or "").rstrip("/")
+        )
+        if provider == saved_provider and not uses_unsaved:
+            set_setting(db, "vision_connection_status", "ok" if ok else "error")
+    provider_label = {"anthropic": "Anthropic", "openai": "OpenAI", "ollama": "Ollama"}[provider]
+    return {"ok": ok, "message": f"Connected to {provider_label}" if ok else f"Could not reach {provider_label} at {url}"}
 
 
 def _upsert_setting(db, key: str, value: str, cleared: bool = False):
@@ -40,10 +131,7 @@ def _upsert_setting(db, key: str, value: str, cleared: bool = False):
             return
         else:
             value = encrypt_value(value, get_encryption_key())
-    db.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
-        (key, value, value),
-    )
+    set_setting(db, key, value)
 
 
 @router.post("")
@@ -104,9 +192,11 @@ async def update_vision_settings(
     vision_provider: str = Form(""),
     anthropic_api_key: str = Form(""),
     anthropic_vision_model: str = Form(""),
+    anthropic_vision_reasoning: str = Form(""),
     openai_base_url: str = Form(""),
     openai_api_key: str = Form(""),
     openai_vision_model: str = Form(""),
+    openai_vision_reasoning: str = Form("low"),
     openai_ingest_long_edge: str = Form(""),
     ollama_url: str = Form(""),
     ollama_model: str = Form(""),
@@ -121,6 +211,10 @@ async def update_vision_settings(
     """
     if vision_provider not in ("", "anthropic", "openai", "ollama"):
         return {"ok": False, "message": "Unknown vision provider"}
+    if anthropic_vision_reasoning not in ("", "low", "medium", "high"):
+        return {"ok": False, "message": "Unknown Anthropic reasoning level"}
+    if openai_vision_reasoning not in ("", "low", "medium", "high", "xhigh", "max"):
+        return {"ok": False, "message": "Unknown OpenAI reasoning level"}
     ollama_long_edge = ollama_ingest_long_edge.strip()
     if ollama_long_edge and not ollama_long_edge.isdigit():
         return {"ok": False, "message": "Ollama image size must be a whole number of pixels"}
@@ -135,15 +229,20 @@ async def update_vision_settings(
             ("vision_provider", vision_provider),
             ("anthropic_api_key", anthropic_api_key.strip()),
             ("anthropic_vision_model", anthropic_vision_model.strip()),
+            ("anthropic_vision_reasoning", anthropic_vision_reasoning),
             ("openai_base_url", openai_base_url.strip().rstrip("/")),
             ("openai_api_key", openai_api_key.strip()),
             ("openai_vision_model", openai_vision_model.strip()),
+            ("openai_vision_reasoning", openai_vision_reasoning),
             ("openai_ingest_long_edge", openai_long_edge),
             ("ollama_url", ollama_url.strip().rstrip("/")),
             ("ollama_model", ollama_model.strip()),
             ("ollama_ingest_long_edge", ollama_long_edge),
         ]:
             _upsert_setting(db, key, value, cleared=clears.get(key, False))
+        # A saved endpoint/model may no longer be the one that was tested.
+        # Keep the result persistent, but never show a stale green indicator.
+        set_setting(db, "vision_connection_status", "")
     invalidate_nav_cache()  # the vision provider and its key gate the Intake tab
     return RedirectResponse(url="/settings", status_code=303)
 
@@ -180,6 +279,65 @@ async def update_lending_settings(
     return RedirectResponse(url="/settings", status_code=303)
 
 
+@router.post("/trash")
+async def update_trash_settings(trash_retention_days: str = Form("180")):
+    """Save the Trash retention window.
+
+    Separate from POST /api/settings on purpose, same as /lending: a partial
+    form posted there would blank the integration credentials.
+    """
+    from app.services import trash
+
+    raw = trash_retention_days.strip() or "180"
+    # int() on an ASCII-only string: str.isdigit() also accepts "²" and other
+    # Unicode digits, which get_retention_days then reads back as the default.
+    try:
+        days = int(raw) if raw.isascii() else -1
+    except ValueError:
+        days = -1
+    if not 0 <= days <= trash.MAX_TRASH_RETENTION_DAYS:
+        return {"ok": False, "message": "Retention days must be a whole number"}
+
+    with get_db() as db:
+        _upsert_setting(db, "trash_retention_days", str(days))
+        trash.settle_marker(db)
+    trash.invalidate()
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/price-alerts")
+async def update_price_alert_settings(
+    price_alert_threshold_pct: str = Form("15"),
+    price_alert_nightly_cap: str = Form("100"),
+):
+    """Save the price-alert drop threshold and nightly lookup cap.
+
+    Separate from POST /api/settings for the same reason as /trash: a partial
+    form posted there would blank the integration credentials.
+    """
+    from app.services import price_alerts
+
+    def _whole(raw: str) -> int:
+        # ASCII-only int(): str.isdigit() also accepts "²" (see /trash).
+        raw = raw.strip()
+        try:
+            return int(raw) if raw.isascii() else -1
+        except ValueError:
+            return -1
+
+    threshold = _whole(price_alert_threshold_pct)
+    cap = _whole(price_alert_nightly_cap)
+    if not 1 <= threshold <= price_alerts.MAX_THRESHOLD_PCT:
+        return {"ok": False, "message": f"Drop threshold must be a whole number from 1 to {price_alerts.MAX_THRESHOLD_PCT}"}
+    if not 1 <= cap <= price_alerts.MAX_NIGHTLY_CAP:
+        return {"ok": False, "message": f"Books per night must be a whole number from 1 to {price_alerts.MAX_NIGHTLY_CAP}"}
+
+    with get_db() as db:
+        _upsert_setting(db, "price_alert_threshold_pct", str(threshold))
+        _upsert_setting(db, "price_alert_nightly_cap", str(cap))
+    return RedirectResponse(url="/settings", status_code=303)
+
+
 @router.post("/nav")
 async def update_nav_settings(request: Request):
     """Save which nav tabs are visible.
@@ -196,6 +354,50 @@ async def update_nav_settings(request: Request):
         _upsert_setting(db, "nav_hidden_tabs", json.dumps(hidden))
     invalidate_nav_cache()
     return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/features/{key}")
+async def set_feature(key: str, enabled: str = Form(...)):
+    """Turn a feature on ("1") or off ("0") from Settings → Features.
+
+    Probes are not re-run here: the warning is the page's `data-confirm`
+    step, and the stored flag is the only effect. Nothing is deleted.
+    """
+    if key not in features.FEATURES or enabled not in ("0", "1"):
+        raise HTTPException(status_code=404 if key not in features.FEATURES else 400)
+    with get_db() as db:
+        features.set_feature_enabled(db, key, enabled == "1")
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/profile")
+async def set_profile(profile: str = Form(...)):
+    """Apply Minimal, Standard or Everything from Settings → Features.
+
+    Validates and applies; the page's `data-confirm` decides whether to ask
+    first, as for a single feature. Not under `/features/`, where the dynamic
+    `/features/{key}` above would take it (G119).
+    """
+    if profile not in features.PROFILES:
+        raise HTTPException(status_code=400)
+    with get_db() as db:
+        features.apply_profile(db, profile)
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/features/{key}/enable")
+async def enable_feature(key: str):
+    """Turn a feature on from its disabled page.
+
+    Lands on the feature's own entry path from the registry. No request value
+    (a `next` field, the Referer) is ever read for the target: echoing one
+    would be an open redirect on an admin POST.
+    """
+    if key not in features.FEATURES:
+        raise HTTPException(status_code=404)
+    with get_db() as db:
+        features.set_feature_enabled(db, key, True)
+    return RedirectResponse(url=features.FEATURES[key].entry_path, status_code=303)
 
 
 @router.post("/display")
@@ -219,6 +421,94 @@ async def update_display_settings(request: Request):
         with get_db() as db:
             _upsert_setting(db, "metadata_search_lang", search_lang)
 
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@personal_router.post("/appearance")
+async def update_appearance_settings(request: Request):
+    """Save collection appearance preferences."""
+    form = await request.form()
+    always_show = "1" if form.get("always_show_game_title") in ("1", "on", "true") else "0"
+    show_platform_logo = "1" if form.get("show_platform_logo_in_collection") in ("1", "on", "true") else "0"
+    show_collector_condition = "1" if form.get("show_collector_condition_in_collection") in ("1", "on", "true") else "0"
+    show_region = "1" if form.get("show_region_in_collection") in ("1", "on", "true") else "0"
+    # The Appearance form always sends a hidden 0 followed by the checkbox's
+    # 1 when selected. Reading the full list keeps unchecked values explicit
+    # and works even if a browser preserves a stale form control.
+    show_new_label = "1" if "1" in form.getlist("show_new_label_in_collection") else "0"
+    show_wishlist_icon = "1" if form.get("show_wishlist_icon_in_collection") in ("1", "on", "true") else "0"
+    # Unlike the legacy New-label checkbox, these controls do not need a
+    # hidden fallback: an unchecked HTML checkbox is absent from the form.
+    # Treat that absence explicitly as disabled.
+    show_home_collection_mix = "1" if form.get("show_home_collection_mix") in ("1", "on", "true") else "0"
+    show_home_useful_places = "1" if form.get("show_home_useful_places") in ("1", "on", "true") else "0"
+    # Keep the allow-list here so a forged form value cannot become a
+    # page-wide class. "default" deliberately maps to the original palette.
+    theme = form.get("theme") if form.get("theme") in ("light", "navi", "ocean", "sakura", "coffee", "retro", "matrix") else ""
+    with get_db() as db:
+        from app.services.user_preferences import set_preference
+        set_preference(db, request.state.user["id"], "always_show_game_title", always_show)
+        set_preference(db, request.state.user["id"], "show_platform_logo_in_collection", show_platform_logo)
+        set_preference(db, request.state.user["id"], "show_collector_condition_in_collection", show_collector_condition)
+        set_preference(db, request.state.user["id"], "show_region_in_collection", show_region)
+        set_preference(db, request.state.user["id"], "show_new_label_in_collection", show_new_label)
+        set_preference(db, request.state.user["id"], "show_wishlist_icon_in_collection", show_wishlist_icon)
+        set_preference(db, request.state.user["id"], "show_home_collection_mix", show_home_collection_mix)
+        set_preference(db, request.state.user["id"], "show_home_useful_places", show_home_useful_places)
+        set_preference(db, request.state.user["id"], "theme", theme)
+        for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types"):
+            set_preference(db, request.state.user["id"], f"home_tile:{key}",
+                           "1" if form.get(f"home_tile_{key}") in ("1", "on", "true") else "0")
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@personal_router.post("/user-symbol")
+async def update_user_symbol_settings(request: Request):
+    """Save the current user's header-symbol preferences from Settings → Users."""
+    form = await request.form()
+    from app.services.user_preferences import set_user_symbol_preferences
+
+    with get_db() as db:
+        ok, _message = set_user_symbol_preferences(
+            db,
+            request.state.user["id"],
+            str(form.get("user_symbol_background") or ""),
+            str(form.get("user_symbol_text") or ""),
+            form.get("user_symbol_show_initial") in ("1", "on", "true"),
+        )
+    return RedirectResponse(
+        url="/settings?tab=users&user_symbol_error=invalid" if not ok else "/settings?tab=users",
+        status_code=303,
+    )
+
+
+@router.post("/missing-game-metadata")
+async def update_missing_game_metadata_settings(request: Request):
+    """Save the admin-selected fields behind the maintenance tile/filter."""
+    form = await request.form()
+    from app.services.game_metadata import MISSING_FIELD_LABELS
+    fields = [field for field in form.getlist("fields") if field in MISSING_FIELD_LABELS]
+    with get_db() as db:
+        set_setting(db, "missing_game_metadata_fields", ",".join(fields) or "none")
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@personal_router.post("/platform-logo")
+async def update_platform_logo(request: Request):
+    form = await request.form()
+    platform = (form.get("platform") or "").strip()
+    from app.services.platform_logos import normalise_svg_path
+    from app.services.user_preferences import set_preference
+    path = normalise_svg_path(form.get("svg_path") or "")
+    with get_db() as db:
+        exists = db.execute("SELECT 1 FROM game_platforms WHERE slug = ?", (platform,)).fetchone()
+        if exists and path:
+            set_preference(db, request.state.user["id"], f"platform_logo:{platform}", path)
+            db.execute(
+                "INSERT INTO user_platform_logos (user_id, platform_slug, svg_path) VALUES (?, ?, ?) "
+                "ON CONFLICT(user_id, platform_slug) DO UPDATE SET svg_path = excluded.svg_path",
+                (request.state.user["id"], platform, path),
+            )
     return RedirectResponse(url="/settings", status_code=303)
 
 
@@ -408,6 +698,16 @@ async def restore_backup(request: Request):
     # "database disk image is malformed". backup() copies page by page
     # through SQLite, which holds the right locks and leaves the WAL
     # consistent with the file it belongs to.
+    # Read before the copy: afterwards the live table no longer exists. Deleted
+    # users' versions survive only in the high-water setting.
+    from app.auth import TOKEN_VERSION_HIGH_WATER
+    with get_db() as db:
+        live_max = db.execute(
+            "SELECT MAX(COALESCE((SELECT MAX(token_version) FROM users), 0), "
+            "COALESCE((SELECT CAST(value AS INTEGER) FROM settings WHERE key = ?), 0))",
+            (TOKEN_VERSION_HIGH_WATER,),
+        ).fetchone()[0]
+
     src = sqlite3.connect(str(tmp_path))
     try:
         dest = sqlite3.connect(str(DATABASE_PATH))
@@ -419,7 +719,11 @@ async def restore_backup(request: Request):
         src.close()
         tmp_path.unlink(missing_ok=True)
 
-    # Invalidate all existing sessions by bumping every user's token_version.
+    # Invalidate every existing session. The restored rows carry their own, older
+    # versions, so a flat bump could land on a version a live cookie still holds;
+    # lifting every row above the pre-restore maximum refuses all of them. A
+    # password change that commits between the live_max read and the copy can
+    # still collide; the route is admin-only and that window is accepted.
     # Encrypted settings in the restored DB stay readable because the
     # encryption key lives outside the DB (env var or DATA_DIR/encryption.key)
     # and is unaffected by the restore. A backup from a *different* install
@@ -429,7 +733,11 @@ async def restore_backup(request: Request):
     from app.database import init_db
     init_db()  # bring an older restored DB up to the current schema first
     with get_db() as db:
-        db.execute("UPDATE users SET token_version = token_version + 1")
+        db.execute(
+            "UPDATE users SET token_version = MAX(token_version, ?) + 1, updated_at = datetime('now')",
+            (live_max,),
+        )
     invalidate_nav_cache()  # the restored DB carries its own settings
+    features.invalidate_cache()  # ...including its own feature.* rows
 
     return {"ok": True, "message": "Database restored. All sessions invalidated. Restart the container to apply."}

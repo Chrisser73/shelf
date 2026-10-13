@@ -2,6 +2,7 @@
    which was 1,517 lines: the largest template with the thinnest E2E
    coverage. Included by settings.html inside its `settingsTabs` x-data,
    so `tab` and `setTab()` resolve from the parent scope. #}
+{% import "fragments/settings/feature_off_note.html" as feature_notes %}
     <!-- Library Tab -->
     <div x-show="tab === 'library'" class="space-y-8">
 
@@ -44,27 +45,257 @@
         </form>
     </div>
 
+    <!-- Appearance -->
+    <div class="bg-shelf-card rounded-xl border border-shelf-border p-6" data-testid="settings-appearance">
+        <h2 class="text-lg font-semibold mb-1">Appearance</h2>
+        <p class="text-sm text-shelf-muted mb-4">Control how game titles are displayed in the collection.</p>
+        <form action="/api/settings/appearance" method="post" class="space-y-4">
+            <div class="border-b border-shelf-border pb-5">
+                <p class="text-sm font-medium">Theme</p>
+                <p class="mt-1 text-xs text-shelf-muted">Themes are saved per user. Choose the Shelf default or an available alternative.</p>
+                {% set selected_theme = settings.get('theme') if settings.get('theme') in ['light', 'navi', 'ocean', 'sakura', 'coffee', 'retro', 'matrix'] else 'default' %}
+                <div x-data="{ selectedTheme: '{{ selected_theme }}' }" class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+                    <label class="relative block cursor-pointer">
+                        <input type="checkbox" name="theme" value="default" {% if selected_theme == 'default' %}checked{% endif %} :checked="selectedTheme === 'default'" @change="selectedTheme = 'default'"
+                               class="peer absolute right-3 top-3 z-10 h-5 w-5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                        <span class="block rounded-xl border-2 border-[#2d3148] bg-[#191d29] p-3 text-[#e2e8f0] transition-colors peer-checked:border-shelf-accent peer-checked:ring-2 peer-checked:ring-shelf-accent/25">
+                            <span class="block text-sm font-semibold">Shelf</span>
+                            <span class="mt-1 block text-xs text-[#a8b4c8]">The original dark Shelf palette.</span>
+                            <span class="mt-3 flex items-end gap-2" aria-hidden="true">
+                                <span class="h-10 w-12 rounded-md border border-[#2d3148] bg-[#0f1117]"></span>
+                                <span class="h-14 flex-1 rounded-md border border-[#2d3148] bg-[#1a1d27] p-2">
+                                    <span class="block h-2 w-16 rounded-full bg-[#6366f1]"></span>
+                                    <span class="mt-2 block h-2 w-full rounded-full bg-[#242836]"></span>
+                                    <span class="mt-1 block h-2 w-2/3 rounded-full bg-[#242836]"></span>
+                                </span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="relative block cursor-pointer">
+                        <input type="checkbox" name="theme" value="light" {% if selected_theme == 'light' %}checked{% endif %} :checked="selectedTheme === 'light'" @change="selectedTheme = 'light'"
+                               class="peer absolute right-3 top-3 z-10 h-5 w-5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                        <span class="block rounded-xl border-2 border-shelf-border bg-white p-3 text-[#172033] transition-colors peer-checked:border-shelf-accent peer-checked:ring-2 peer-checked:ring-shelf-accent/25">
+                            <span class="block text-sm font-semibold">Light</span>
+                            <span class="mt-1 block text-xs text-[#64748b]">A bright analogue of the default Shelf palette.</span>
+                            <span class="mt-3 flex items-end gap-2" aria-hidden="true">
+                                <span class="h-10 w-12 rounded-md border border-[#d7ddea] bg-[#f5f7fb]"></span>
+                                <span class="h-14 flex-1 rounded-md border border-[#d7ddea] bg-white p-2">
+                                    <span class="block h-2 w-16 rounded-full bg-[#4f46e5]"></span>
+                                    <span class="mt-2 block h-2 w-full rounded-full bg-[#e8ecf5]"></span>
+                                    <span class="mt-1 block h-2 w-2/3 rounded-full bg-[#e8ecf5]"></span>
+                                </span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="relative block cursor-pointer">
+                        <input type="checkbox" name="theme" value="navi" {% if selected_theme == 'navi' %}checked{% endif %} :checked="selectedTheme === 'navi'" @change="selectedTheme = 'navi'"
+                               class="peer absolute right-3 top-3 z-10 h-5 w-5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                        <span class="block rounded-xl border-2 border-[#283b54] bg-[#111c2a] p-3 text-[#e4eef8] transition-colors peer-checked:border-shelf-accent peer-checked:ring-2 peer-checked:ring-shelf-accent/25">
+                            <span class="block text-sm font-semibold">Navi</span>
+                            <span class="mt-1 block text-xs text-[#91a9c3]">A deep blue and teal take on Shelf.</span>
+                            <span class="mt-3 flex items-end gap-2" aria-hidden="true">
+                                <span class="h-10 w-12 rounded-md border border-[#283b54] bg-[#0a1018]"></span>
+                                <span class="h-14 flex-1 rounded-md border border-[#283b54] bg-[#111c2a] p-2">
+                                    <span class="block h-2 w-16 rounded-full bg-[#0d8fb5]"></span>
+                                    <span class="mt-2 block h-2 w-full rounded-full bg-[#192b3b]"></span>
+                                    <span class="mt-1 block h-2 w-2/3 rounded-full bg-[#192b3b]"></span>
+                                </span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="relative block cursor-pointer">
+                        <input type="checkbox" name="theme" value="ocean" {% if selected_theme == 'ocean' %}checked{% endif %} :checked="selectedTheme === 'ocean'" @change="selectedTheme = 'ocean'"
+                               class="peer absolute right-3 top-3 z-10 h-5 w-5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                        <span class="block rounded-xl border-2 border-[#25464e] bg-[#10252c] p-3 text-[#e1f4f3] transition-colors peer-checked:border-shelf-accent peer-checked:ring-2 peer-checked:ring-shelf-accent/25">
+                            <span class="block text-sm font-semibold">Ocean</span>
+                            <span class="mt-1 block text-xs text-[#8fb6b5]">A richer green-petrol take on Shelf.</span>
+                            <span class="mt-3 flex items-end gap-2" aria-hidden="true">
+                                <span class="h-10 w-12 rounded-md border border-[#25464e] bg-[#0b1418]"></span>
+                                <span class="h-14 flex-1 rounded-md border border-[#25464e] bg-[#10252c] p-2">
+                                    <span class="block h-2 w-16 rounded-full bg-[#0ea5a8]"></span>
+                                    <span class="mt-2 block h-2 w-full rounded-full bg-[#16343a]"></span>
+                                    <span class="mt-1 block h-2 w-2/3 rounded-full bg-[#16343a]"></span>
+                                </span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="relative block cursor-pointer">
+                        <input type="checkbox" name="theme" value="sakura" {% if selected_theme == 'sakura' %}checked{% endif %} :checked="selectedTheme === 'sakura'" @change="selectedTheme = 'sakura'"
+                               class="peer absolute right-3 top-3 z-10 h-5 w-5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                        <span class="block rounded-xl border-2 border-[#59314d] bg-[#2a1425] p-3 text-[#fff0f7] transition-colors peer-checked:border-shelf-accent peer-checked:ring-2 peer-checked:ring-shelf-accent/25">
+                            <span class="block text-sm font-semibold">Sakura</span>
+                            <span class="mt-1 block text-xs text-[#d8a2ba]">A dark plum theme with cherry-pink accents.</span>
+                            <span class="mt-3 flex items-end gap-2" aria-hidden="true">
+                                <span class="h-10 w-12 rounded-md border border-[#59314d] bg-[#1a1018]"></span>
+                                <span class="h-14 flex-1 rounded-md border border-[#59314d] bg-[#2a1425] p-2">
+                                    <span class="block h-2 w-16 rounded-full bg-[#ec4899]"></span>
+                                    <span class="mt-2 block h-2 w-full rounded-full bg-[#3a1c33]"></span>
+                                    <span class="mt-1 block h-2 w-2/3 rounded-full bg-[#3a1c33]"></span>
+                                </span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="relative block cursor-pointer">
+                        <input type="checkbox" name="theme" value="coffee" {% if selected_theme == 'coffee' %}checked{% endif %} :checked="selectedTheme === 'coffee'" @change="selectedTheme = 'coffee'"
+                               class="peer absolute right-3 top-3 z-10 h-5 w-5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                        <span class="block rounded-xl border-2 border-[#624332] bg-[#2b1c17] p-3 text-[#fff1e5] transition-colors peer-checked:border-shelf-accent peer-checked:ring-2 peer-checked:ring-shelf-accent/25">
+                            <span class="block text-sm font-semibold">Coffee</span>
+                            <span class="mt-1 block text-xs text-[#d0a989]">Espresso surfaces with caramel accents.</span>
+                            <span class="mt-3 flex items-end gap-2" aria-hidden="true">
+                                <span class="h-10 w-12 rounded-md border border-[#624332] bg-[#1a120f]"></span>
+                                <span class="h-14 flex-1 rounded-md border border-[#624332] bg-[#2b1c17] p-2">
+                                    <span class="block h-2 w-16 rounded-full bg-[#c77a3d]"></span>
+                                    <span class="mt-2 block h-2 w-full rounded-full bg-[#402a20]"></span>
+                                    <span class="mt-1 block h-2 w-2/3 rounded-full bg-[#402a20]"></span>
+                                </span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="relative block cursor-pointer">
+                        <input type="checkbox" name="theme" value="retro" {% if selected_theme == 'retro' %}checked{% endif %} :checked="selectedTheme === 'retro'" @change="selectedTheme = 'retro'"
+                               class="peer absolute right-3 top-3 z-10 h-5 w-5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                        <span class="block rounded-xl border-2 border-[#705a31] bg-[#382b1b] p-3 text-[#fff4ce] transition-colors peer-checked:border-shelf-accent peer-checked:ring-2 peer-checked:ring-shelf-accent/25">
+                            <span class="block text-sm font-semibold">Retro</span>
+                            <span class="mt-1 block text-xs text-[#d1bd80]">Warm arcade panels with classic amber highlights.</span>
+                            <span class="mt-3 flex items-end gap-2" aria-hidden="true">
+                                <span class="h-10 w-12 rounded-md border border-[#705a31] bg-[#241c12]"></span>
+                                <span class="h-14 flex-1 rounded-md border border-[#705a31] bg-[#382b1b] p-2">
+                                    <span class="block h-2 w-16 rounded-full bg-[#e0a72f]"></span>
+                                    <span class="mt-2 block h-2 w-full rounded-full bg-[#514026]"></span>
+                                    <span class="mt-1 block h-2 w-2/3 rounded-full bg-[#514026]"></span>
+                                </span>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="relative block cursor-pointer">
+                        <input type="checkbox" name="theme" value="matrix" {% if selected_theme == 'matrix' %}checked{% endif %} :checked="selectedTheme === 'matrix'" @change="selectedTheme = 'matrix'"
+                               class="peer absolute right-3 top-3 z-10 h-5 w-5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                        <span class="block rounded-xl border-2 border-[#1d5a32] bg-[#0b1d12] p-3 text-[#e4ffe9] transition-colors peer-checked:border-shelf-accent peer-checked:ring-2 peer-checked:ring-shelf-accent/25">
+                            <span class="block text-sm font-semibold">Matrix</span>
+                            <span class="mt-1 block text-xs text-[#8bc69a]">Near-black with luminous terminal-green accents.</span>
+                            <span class="mt-3 flex items-end gap-2" aria-hidden="true">
+                                <span class="h-10 w-12 rounded-md border border-[#1d5a32] bg-[#07110b]"></span>
+                                <span class="h-14 flex-1 rounded-md border border-[#1d5a32] bg-[#0b1d12] p-2">
+                                    <span class="block h-2 w-16 rounded-full bg-[#22c55e]"></span>
+                                    <span class="mt-2 block h-2 w-full rounded-full bg-[#12301d]"></span>
+                                    <span class="mt-1 block h-2 w-2/3 rounded-full bg-[#12301d]"></span>
+                                </span>
+                            </span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+            <div class="pt-1">
+                <p class="text-sm font-medium mb-3">Collection and Home</p>
+            <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" name="always_show_game_title" value="1"
+                       {% if settings.get('always_show_game_title') == '1' %}checked{% endif %}
+                       class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                <span>
+                    <span class="block text-sm font-medium">Always show game title in collection</span>
+                    <span class="block text-xs text-shelf-muted mt-1">Keep the title overlay visible instead of showing it only on hover.</span>
+                </span>
+            </label>
+            <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" name="show_platform_logo_in_collection" value="1"
+                       {% if settings.get('show_platform_logo_in_collection') == '1' %}checked{% endif %}
+                       class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                <span><span class="block text-sm font-medium">Show platform logo in collection</span><span class="block text-xs text-shelf-muted mt-1">Show the assigned console logo on each matching game card.</span></span>
+            </label>
+            <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" name="show_collector_condition_in_collection" value="1"
+                       {% if settings.get('show_collector_condition_in_collection') == '1' %}checked{% endif %}
+                       class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                <span><span class="block text-sm font-medium">Show collector state in collection</span><span class="block text-xs text-shelf-muted mt-1">Show CIB, Boxed, or Loose below matching card titles.</span></span>
+            </label>
+            <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" name="show_region_in_collection" value="1"
+                       {% if settings.get('show_region_in_collection') == '1' %}checked{% endif %}
+                       class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                <span><span class="block text-sm font-medium">Show region in collection</span><span class="block text-xs text-shelf-muted mt-1">Show PAL, NTSC, NTSC-J, or PAL-M on matching game cards.</span></span>
+            </label>
+            <label class="flex items-start gap-3 cursor-pointer">
+                <input type="hidden" name="show_new_label_in_collection" value="0">
+                <input type="checkbox" name="show_new_label_in_collection" value="1"
+                       {% if settings.get('show_new_label_in_collection', '1') == '1' %}checked{% endif %}
+                       class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                <span><span class="block text-sm font-medium">Show “New” label on items</span><span class="block text-xs text-shelf-muted mt-1">Show the New badge on recently added collection cards and rows.</span></span>
+            </label>
+            <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" name="show_wishlist_icon_in_collection" value="1"
+                       {% if settings.get('show_wishlist_icon_in_collection', '1') == '1' %}checked{% endif %}
+                       class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                <span><span class="block text-sm font-medium">Show icon on wishlisted items</span><span class="block text-xs text-shelf-muted mt-1">Show the filled heart in collection grid and list views.</span></span>
+            </label>
+            <div class="border-t border-shelf-border pt-4 space-y-2">
+                <p class="text-sm font-medium">Home</p>
+                <p class="text-xs text-shelf-muted">Choose the summary tiles shown on your Home page.</p>
+                <label class="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" name="show_home_collection_mix" value="1"
+                           {% if settings.get('show_home_collection_mix', '1') == '1' %}checked{% endif %}
+                           class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                    <span><span class="block text-sm font-medium">Show Collection mix</span><span class="block text-xs text-shelf-muted mt-1">Show or hide this overview card on the Home page.</span></span>
+                </label>
+                <label class="flex items-start gap-3 cursor-pointer pb-2">
+                    <input type="checkbox" name="show_home_useful_places" value="1"
+                           {% if settings.get('show_home_useful_places', '1') == '1' %}checked{% endif %}
+                           class="mt-0.5 rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                    <span><span class="block text-sm font-medium">Show Useful places</span><span class="block text-xs text-shelf-muted mt-1">Show or hide this overview card on the Home page.</span></span>
+                </label>
+                {% for key, label in [('catalogue', 'Catalogue'), ('owned', 'Owned'), ('wishlist', 'Wishlist'), ('lent_out', 'Lent out'), ('missing_covers', 'Missing covers'), ('missing_game_metadata', 'Missing metadata'), ('media_types', 'Media types')] %}
+                {% if key != 'lent_out' or lending_enabled %}
+                <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" name="home_tile_{{ key }}" value="1" {% if settings.get('home_tile:' ~ key, '1') == '1' %}checked{% endif %} class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">{{ label }}</label>
+                {% endif %}
+                {% endfor %}
+            </div>
+            </div>
+            <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
+                Save Appearance
+            </button>
+        </form>
+    </div>
+
+    {% if user and user.role == 'admin' %}
+    <div id="missing-game-metadata" class="bg-shelf-card rounded-xl border border-shelf-border p-6">
+        <h2 class="text-lg font-semibold mb-1">Missing game data</h2>
+        <p class="text-sm text-shelf-muted mb-4">Select which empty metadata fields make a game appear in the Home tile and the Missing metadata filter.</p>
+        <form action="/api/settings/missing-game-metadata" method="post" class="space-y-2">
+            {% for field, label in [('title', 'Name'), ('authors', 'Developer'), ('publisher', 'Publisher'), ('platform', 'Platform'), ('region', 'Region'), ('language', 'Language'), ('publish_year', 'Year')] %}
+            <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" name="fields" value="{{ field }}" {% if field in settings.get('missing_game_metadata_fields', []) %}checked{% endif %} class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">{{ label }}</label>
+            {% endfor %}
+            <button type="submit" class="mt-3 px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2">Save missing-data fields</button>
+        </form>
+    </div>
+    {% endif %}
+
     <!-- Navigation -->
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6">
         <h2 class="text-lg font-semibold mb-1">Navigation</h2>
-        <p class="text-sm text-shelf-muted mb-4">Choose which tabs show in the nav bar. Browse and Settings always stay visible. Tabs for integrations that aren't set up stay hidden until you configure them.</p>
+        <p class="text-sm text-shelf-muted mb-4">Choose which tabs show in the nav bar. Browse and Settings always stay visible. Tabs for integrations that aren't set up stay hidden until you configure them, and a tab whose feature is turned off is turned off in Features, not here.</p>
         <form action="/api/settings/nav" method="post" class="space-y-3">
             <div>
                 <span class="block text-sm font-medium text-shelf-muted mb-2">Show in navigation</span>
                 <div class="space-y-2">
                     {% for tab in hideable_nav_tab_states %}
                     {# The checkbox means "not manually hidden" and stays enabled even when the
-                       tab is auto-hidden, so a preference set now survives configuring the
-                       integration later. The Configure button is a sibling of the label, never
-                       inside it — a button nested in a label is interactive content that can
-                       toggle the checkbox. #}
+                       tab is auto-hidden or its feature is off, so a preference set now survives
+                       configuring the integration or re-enabling the feature later. The Configure
+                       / Features button is a sibling of the label, never inside it — a button
+                       nested in a label is interactive content that can toggle the checkbox. #}
                     <div data-nav-setting-row="{{ tab.key }}" class="flex items-center gap-2 text-sm">
                         <label class="flex items-center gap-2">
                             <input type="checkbox" name="{{ tab.key }}" class="rounded border-shelf-border"
                                    {% if not tab.hidden %}checked{% endif %}>
                             {{ tab.label }}
                         </label>
-                        {% if not tab.available %}
+                        {% if tab.feature_off %}
+                        <span class="text-xs text-shelf-muted">
+                            Turned off in Features —
+                            <button type="button" data-testid="features-{{ tab.key }}"
+                                    @click="setTab('features')"
+                                    class="text-shelf-accent2 hover:underline">Features</button>
+                        </span>
+                        {% elif not tab.available %}
                         <span class="text-xs text-shelf-muted">
                             Hidden until {{ tab.requirement_label }} is set —
                             <button type="button" data-testid="configure-{{ tab.key }}"
@@ -102,7 +333,7 @@
             {% for loc in locations %}
             <div class="bg-shelf-bg rounded-lg px-4 py-2" data-testid="location-row-{{ loc.id }}">
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span>{{ loc.name }}</span>
+                    <span class="flex items-center gap-2">{{ loc.name }}{% if settings.get('default_location_id') == loc.id|string %}<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-shelf-accent/80 text-white shadow">Default</span>{% endif %}</span>
                     <a href="/locations/{{ loc.id }}/arrange" class="text-shelf-accent2 hover:underline text-sm">Arrange</a>
                     <form action="/api/locations/{{ loc.id }}/delete" method="post" class="inline"
                           data-confirm="Delete location '{{ loc.name }}'?">
@@ -120,17 +351,22 @@
                                    class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                         </div>
                         <div>
-                            <label for="location-parent-{{ loc.id }}" class="block text-sm font-medium text-shelf-muted mb-2">Inside</label>
+                            <label for="location-parent-{{ loc.id }}" class="block text-sm font-medium text-shelf-muted mb-2">Parent</label>
                             <select id="location-parent-{{ loc.id }}" name="parent_id"
                                     class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
                                 <option value="">Top level</option>
                                 {% for parent in locations %}
-                                {% if parent.id != loc.id %}
-                                <option value="{{ parent.id }}" {% if loc.parent_id == parent.id %}selected{% endif %}>{{ parent.name }}</option>
+                                {% if parent.id != loc.id and loc.id not in parent.ancestor_ids %}
+                                <option value="{{ parent.id }}" {% if loc.parent_id == parent.id %}selected{% endif %}>Inside {{ parent.name }}</option>
                                 {% endif %}
                                 {% endfor %}
                             </select>
                         </div>
+                        <label class="flex items-center gap-2 text-sm text-shelf-muted cursor-pointer">
+                            <input type="checkbox" name="set_as_default" {% if settings.get('default_location_id') == loc.id|string %}checked{% endif %}
+                                   class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                            Set as default location
+                        </label>
                         <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
                             Save location
                         </button>
@@ -151,15 +387,22 @@
                 <option value="{{ loc.id }}">Inside {{ loc.name }}</option>
                 {% endfor %}
             </select>
+            <label class="flex items-center gap-2 text-sm text-shelf-muted cursor-pointer">
+                <input type="checkbox" name="set_as_default" class="rounded border-shelf-border bg-shelf-bg text-shelf-accent focus:ring-shelf-accent">
+                Set as default location
+            </label>
             <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
                 Add
             </button>
         </form>
     </div>
 
+    {% include "fragments/settings/tags.html" %}
+
     <!-- Borrowers -->
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6">
         <h2 class="text-lg font-semibold mb-4">Borrowers</h2>
+        {{ feature_notes.feature_off_note('lending') }}
 
         {% if borrower_error_message %}
         <div data-testid="borrower-error-banner"
@@ -173,30 +416,82 @@
             {% for b in borrowers %}
             <div class="flex flex-wrap items-center justify-between gap-2 bg-shelf-bg rounded-lg px-4 py-2">
                 <span>{{ b.name }}</span>
-                <form action="/api/borrowers/{{ b.id }}/delete" method="post" class="inline"
+                {% if feature_on('lending') %}
+                <form action="/api/borrowers/{{ b.id }}/delete" method="post" class="inline" data-testid="borrower-remove"
                       {% if b.returned_loan_count %}data-confirm="Remove borrower '{{ b.name }}'? This also permanently deletes their {{ b.returned_loan_count }} past loan record(s)."{% else %}data-confirm="Remove borrower '{{ b.name }}'?"{% endif %}>
                     <button type="submit" class="text-shelf-muted hover:text-shelf-error text-sm transition-colors">
                         Remove
                     </button>
                 </form>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
         {% endif %}
 
-        <form action="/api/borrowers" method="post" class="flex gap-2">
+        {% if feature_on('lending') %}
+        <form action="/api/borrowers" method="post" class="flex gap-2" data-testid="borrower-add">
             <input type="text" name="name" placeholder="Add borrower..." required
                    class="flex-1 min-w-0 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
             <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
                 Add
             </button>
         </form>
+        {% endif %}
+    </div>
+
+    <!-- Platform Logos -->
+    <div class="bg-shelf-card rounded-xl border border-shelf-border p-6">
+        <h2 class="text-lg font-semibold mb-2">Platform Logos</h2>
+        <p class="text-xs text-shelf-muted mb-4">Choose a bundled platform logo. The first guess is used until you save a custom mapping.</p>
+
+        {% if game_platform_logos %}
+        <div class="space-y-2 mb-4 max-h-64 overflow-y-auto">
+            {% for mapping in game_platform_logos %}
+            <div class="flex items-center gap-3 bg-shelf-bg rounded-lg px-4 py-2">
+                {% if mapping.effective_svg_path %}
+                <span class="platform-logo-surface flex h-9 w-14 shrink-0 items-center justify-center rounded">
+                    <img src="/static/{{ mapping.effective_svg_path }}" alt="" class="w-12 h-8 object-contain">
+                </span>
+                {% else %}
+                <span class="w-12 text-center text-shelf-muted text-xs shrink-0">—</span>
+                {% endif %}
+                <span class="min-w-0 truncate">{{ mapping.name }} <span class="text-shelf-muted text-xs">({{ mapping.slug }})</span></span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <form action="/api/settings/platform-logo" method="post" class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-2">
+            <div>
+                <label for="logo-platform" class="sr-only">Platform</label>
+                <input id="logo-platform" name="platform" list="logo-platforms" placeholder="Platform slug (e.g. atari2600)" required
+                       class="w-full bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                <datalist id="logo-platforms">
+                    {% for p in game_platforms_list %}<option value="{{ p.slug }}">{{ p.name }}</option>{% endfor %}
+                </datalist>
+            </div>
+            <div x-data="logoSelect" class="relative">
+                <label for="logo-svg-path" class="sr-only">SVG logo</label>
+                <select id="logo-svg-path" name="svg_path" required
+                        @click="toggle" @change="close" @blur="close"
+                        class="w-full appearance-none bg-shelf-bg border border-shelf-border rounded-lg pl-3 pr-10 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+                    <option value="">Select a logo…</option>
+                    {% for logo in svg_logo_choices %}<option value="{{ logo.path }}">{{ logo.name }}</option>{% endfor %}
+                </select>
+                <svg class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-shelf-muted"
+                     :class="isOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 9-7 7-7-7" />
+                </svg>
+            </div>
+            <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">Save mapping</button>
+        </form>
     </div>
 
     <!-- Game Platforms -->
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6">
         <h2 class="text-lg font-semibold mb-4">Game Platforms</h2>
-        <p class="text-xs text-shelf-muted mb-4">Platforms available when adding video games. Custom platforms can be added for niche or retro systems.</p>
+        <p class="text-xs text-shelf-muted mb-4">Platforms available when adding video games. Custom platforms can be added for niche or retro systems. Add a custom slug with <code>Display name (slug)</code>.</p>
 
         {% if game_platforms_list %}
         <div class="space-y-2 mb-4 max-h-64 overflow-y-auto">
@@ -215,7 +510,7 @@
         {% endif %}
 
         <form action="/api/platforms" method="post" class="flex gap-2">
-            <input type="text" name="name" placeholder="Platform name (e.g. TurboGrafx-16)..." required
+            <input type="text" name="name" placeholder="Platform name (e.g. TurboGrafx-16 or TurboGrafx-16 (tg16))..." required
                    class="flex-1 min-w-0 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-sm text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
             <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
                 Add
@@ -223,10 +518,13 @@
         </form>
     </div>
 
-    <!-- Lending -->
+    <!-- Lending: its per-instance configuration is hidden while the global
+         feature is off. The values remain saved for a later re-enable. -->
+    {% if lending_enabled %}
     <div class="bg-shelf-card rounded-xl border border-shelf-border p-6" x-data="lendingPanel"
          data-notify-saved="{{ '1' if secrets_present['notify_url'] else '' }}">
         <h2 class="text-lg font-semibold mb-1">Lending</h2>
+        {{ feature_notes.feature_off_note('lending') }}
         <p class="text-sm text-shelf-muted mb-4">Loans past their due date — or, when no due date was set, out longer than the window below — show an <span class="text-shelf-error">Overdue</span> badge. Configure a notification URL to get a daily digest of overdue loans.</p>
         <form method="POST" action="/api/settings/lending" class="space-y-4">
             <div>
@@ -265,6 +563,32 @@
             </div>
             <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
                 Save Lending Settings
+            </button>
+        </form>
+    </div>
+    {% else %}
+    <div class="bg-shelf-card rounded-xl border border-shelf-border p-6">
+        <h2 class="text-lg font-semibold mb-1">Lending</h2>
+        <p class="text-sm text-shelf-muted">Lending is turned off globally. Turn it on under Features to configure loans and reminders.</p>
+        <button type="button" @click="setTab('features')"
+                class="mt-4 px-4 py-2 bg-shelf-hover text-shelf-text rounded-lg text-sm hover:bg-shelf-border transition-colors">Open Features</button>
+    </div>
+    {% endif %}
+
+    <!-- Trash -->
+    <div class="bg-shelf-card rounded-xl border border-shelf-border p-6">
+        <h2 class="text-lg font-semibold mb-1">Trash</h2>
+        <p class="text-sm text-shelf-muted mb-4">Deleted items and copies stay in Trash until someone restores them or an admin deletes them permanently. Nothing is deleted on a timer: past this window, an admin is prompted to empty them.</p>
+        <form method="POST" action="/api/settings/trash" class="space-y-4">
+            <div>
+                <label for="trash_retention_days" class="block text-sm font-medium text-shelf-muted mb-1">Prompt to empty Trash after (days — 0 never prompts)</label>
+                <input type="number" id="trash_retention_days" name="trash_retention_days" min="0" max="36500" step="1" required
+                       value="{{ settings.get('trash_retention_days', '180') }}"
+                       class="w-32 bg-shelf-bg border border-shelf-border rounded-lg px-3 py-2 text-shelf-text focus:ring-2 focus:ring-shelf-accent outline-none">
+            </div>
+            <p class="text-xs text-shelf-muted">Browse the deleted items and copies themselves from the account menu → Library → Trash.</p>
+            <button type="submit" class="px-4 py-2 bg-shelf-accent text-white rounded-lg text-sm hover:bg-shelf-accent2 transition-colors">
+                Save
             </button>
         </form>
     </div>

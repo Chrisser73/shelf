@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, Form, Request
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import BOOK_MEDIA_TYPES
 from app.database import gc_orphaned_series_meta, get_db, get_setting
 from app.services import lists
@@ -49,7 +50,8 @@ def find_gaps(positions: list) -> list[int]:
 
 
 @router.get("/series")
-async def series_page(request: Request, _=Depends(require_role("viewer"))):
+async def series_page(request: Request, _=Depends(require_role("viewer")),
+                      __=Depends(require_feature("series"))):
     templates = request.app.state.templates
     with get_db() as db:
         rows = db.execute(
@@ -134,7 +136,8 @@ async def series_page(request: Request, _=Depends(require_role("viewer"))):
 
 
 @router.get("/api/series/check")
-async def check_series(name: str = "", _=Depends(require_role("viewer"))):
+async def check_series(name: str = "", _=Depends(require_role("viewer")),
+                       __=Depends(require_feature("series"))):
     """Compare a local series against Hardcover's full listing."""
     name = name.strip()
     if not name:
@@ -241,7 +244,8 @@ def _upsert_series_description(db, name: str, description: str, source: str) -> 
 
 @router.post("/api/series/{name:path}/description")
 async def set_series_description(name: str, description: str = Form(""),
-                                  _=Depends(require_role("editor"))):
+                                  _=Depends(require_role("editor")),
+                                  __=Depends(require_feature("series"))):
     """Upsert the free-text synopsis for a series in series_meta.
 
     `{name:path}` (not a plain `{name}`) so series names containing a slash
@@ -291,7 +295,8 @@ def _upsert_series_complete(db, name: str, complete: int | None) -> None:
 
 @router.post("/api/series/{name:path}/complete")
 async def set_series_complete(name: str, complete: str = Form(...),
-                              _=Depends(require_role("editor"))):
+                              _=Depends(require_role("editor")),
+                              __=Depends(require_feature("series"))):
     """Set or clear the manual "series complete" override in series_meta.
 
     This is the top-priority signal in the three-state completeness model
@@ -334,7 +339,8 @@ async def set_series_complete(name: str, complete: str = Form(...),
 
 @router.post("/api/series/{name:path}/rename")
 async def rename_series(name: str, new_name: str = Form(""),
-                        _=Depends(require_role("editor"))):
+                        _=Depends(require_role("editor")),
+                        __=Depends(require_feature("series"))):
     """Move every item in a series to another series name.
 
     Renaming onto a name that already has books *merges* the two — the direct
@@ -426,7 +432,8 @@ async def rename_series(name: str, new_name: str = Form(""),
 
 
 @router.post("/api/series/{name:path}/remove-all")
-async def remove_all_from_series(name: str, _=Depends(require_role("editor"))):
+async def remove_all_from_series(name: str, _=Depends(require_role("editor")),
+                                 __=Depends(require_feature("series"))):
     """Disband a series: clear series_name on every item that belongs to it.
 
     The items themselves are untouched — only the series link is dropped.
@@ -454,7 +461,8 @@ async def remove_all_from_series(name: str, _=Depends(require_role("editor"))):
 
 
 @router.post("/api/series/{name:path}/fetch-description")
-async def fetch_series_description(name: str, _=Depends(require_role("editor"))):
+async def fetch_series_description(name: str, _=Depends(require_role("editor")),
+                                   __=Depends(require_feature("series"))):
     """Fetch a series' synopsis from Hardcover and persist it (source='hardcover').
 
     Mirrors check_series's token lookup. Never writes a row on failure — a

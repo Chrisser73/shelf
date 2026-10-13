@@ -16,6 +16,10 @@ mid-way heals itself on the next start (since 0.8.1). Downgrading is **not**
 supported: a newer schema may not load in an older image, so take a backup
 before upgrading if you might want to roll back.
 
+An upgrade never turns a feature off. Every optional feature in
+Settings → **Features** stays on after an upgrade, including one that did not
+exist before it, until an admin turns it off.
+
 Watch the first start after an upgrade:
 
 ```bash
@@ -25,6 +29,123 @@ docker compose logs -f shelf
 Release notes for every version are in the
 [changelog](../CHANGELOG.md) and on the
 [releases page](https://github.com/dgahagan/shelf/releases).
+
+### After upgrading to X.Y.Z
+
+**A `price_history` table is created on first start.** It holds the list
+prices the new [price alerts](user-guide/wishlist-and-store-mode.md#price-alerts)
+record for wishlisted books. It starts empty and fills only while Price alerts
+is on and an ISBNdb key is saved.
+
+**Price alerts starts the way Valuation stands.** If Valuation is off — as
+it is under the Standard and Minimal profiles — the upgrade turns Price alerts
+off too. Otherwise (the Everything profile, or an install that never chose a
+profile) it is on, and if an ISBNdb key is saved the first check runs a few
+minutes after the upgrade, looking up to 100 wishlisted books a night — each
+one an ISBNdb request against your plan. Change it under Settings →
+**Features**, or lower **Books checked per night** under Settings →
+Integrations → Collection Valuation → **Price alerts**.
+
+**Price history is in a database backup, not in a portable archive.** Copying
+`data/` or downloading a Settings backup keeps it. A portable archive leaves
+it out, so importing an archive into a new install starts every book's price
+history from zero — and, as with loans and reading history, an archive
+exported before a change and imported after it does not bring history back.
+
+### After upgrading to 0.59.0
+
+**Stats' Books Read per Year chart may show lower bars.** It now counts only
+books, audiobooks, ebooks, comics and manga. A film, game, album or magazine
+you marked finished used to count there too. It still counts in the
+**Finished in <year>** card, as *watched*, *played* or *read*.
+
+**Hardcover sync skips anything that is not a book.** An item you once linked
+to Hardcover as a book and later changed to a DVD, game, music or magazine
+keeps its link, but its status is no longer sent to Hardcover or overwritten
+from it.
+
+**No migrations run, and no stored data changes.**
+
+### After upgrading to 0.56.0
+
+**The first start builds an author index.** Shelf reads every item's authors
+field and records each author separately, so the item page can link each name
+and Browse can filter by one author. It takes a moment on the first start and
+logs one line — `Built author index: N items, M authors`. **No item data
+changes**: the authors field is only read, never rewritten, and a name that
+was split wrongly is fixed by editing the field (see
+[Items](user-guide/items.md#whats-on-the-page)).
+
+The index is not part of a CSV export or a portable archive. It is rebuilt
+from the authors field wherever the items land — after an import, a database
+restore, or a later release that changes how the field is read.
+
+**No migrations run.** Two tables are added alongside the existing ones.
+
+### After upgrading to 0.51.0
+
+**`SHELF_TRUST_PROXY` is now the proxy's address.** Set it to the address
+your reverse proxy reaches Shelf from (`127.0.0.1` on the same host, the
+Docker bridge gateway under `docker run -p`, or the proxy's LAN address), or a
+comma-separated list for a chain. The old value `1` keeps working for a
+same-host proxy: it now means `127.0.0.1`, and Shelf prints a startup warning
+asking for the address. For a proxy on another machine, `1` makes every client
+share the proxy's rate-limit bucket until you set the address. See
+[HTTPS and reverse proxies](https-and-reverse-proxy.md#2-reverse-proxy-with-a-real-certificate).
+
+**`CF-Connecting-IP` is no longer read.** Behind Cloudflare, list
+Cloudflare's published IP ranges in `SHELF_TRUST_PROXY` instead.
+
+**A restore now signs out every session that existed before it.** That
+includes a session a restored backup would otherwise have accepted, such as
+one from before a password change the backup does not contain. Everyone logs
+in again after a restore.
+
+**No migrations run.**
+
+### After upgrading to 0.49.0
+
+**Exports now include Trash.** The CSV export gains a `deleted` column, and
+the portable archive carries the items and copies in Trash with the dates they
+were deleted. Importing either puts them back in Trash; an import never moves
+a live item to Trash. A viewer's CSV export still leaves Trash out. See
+[Import & export](user-guide/import-and-export.md#what-an-import-does-with-trash).
+
+**The archive format is now version 2.** An older Shelf refuses a version 2
+archive with its "upgrade Shelf" message, so upgrade the receiving install
+first. Version 1 archives, taken before this upgrade, still import — every
+item in them arrives live.
+
+**The archive is still not an undo.** Importing an archive restores an item
+you have since moved to Trash, but it adds none of the archive's reading log
+or loans to an item that is already there — history that was lost stays lost.
+Trash itself is the way to undo a delete, and a database backup is the way to
+undo anything else.
+
+**No migrations run.**
+
+### After upgrading to 0.46.0
+
+**Delete now moves things to Trash.** Deleting an item — from its page, from
+Browse's bulk delete, or by the Audiobookshelf excluded-library cleanup — and
+removing a copy no longer delete anything. The item or copy goes to
+[Trash](user-guide/items.md#trash) (account menu → Library) with everything
+attached to it, and **Restore** brings it back. Only an admin's **Delete
+permanently** or **Empty expired** removes a row for good. Merging records
+still removes the merged record, as before.
+
+**Nothing you deleted before this upgrade comes back.** Those deletes were
+permanent when you made them; Trash starts empty.
+
+**The retention window defaults to 180 days** (Settings → Library → Trash).
+Past it, admins see a banner offering to empty the expired rows; nothing is
+deleted automatically.
+
+**No migrations run.** The columns Trash uses shipped earlier, empty.
+
+**Exports leave Trash out.** The CSV export and the portable archive contain
+only what is not in Trash; the database backup carries everything. (0.49.0
+adds Trash to both — see above.)
 
 ### After upgrading to 0.43.0
 
@@ -259,17 +380,25 @@ Settings → Data → **Backup & Restore** downloads `shelf.db`. Tick the
 passphrase option and the download is AES-encrypted — safe to store off-site.
 Restore from the same card, then **restart the container** — the restored
 file is picked up on the next start. Note this contains password hashes and encrypted
-credentials, but **no covers**.
+credentials, but **no covers**. It also carries which features are turned on
+or off in Settings → **Features**, because those switches are settings: a
+restore brings them back as they were when the backup was taken.
 
 ### 3. Portable archive
 
 Settings → Data → **Portable archive** exports a zip with items, tags,
 locations, series, reading log, checkouts, physical copies **and cover
 images** — and no
-credentials, users or instance-specific data. It is the safe way to move to
+credentials, users or instance-specific data. That includes the
+Settings → **Features** switches: an archive carries no settings, so
+importing one never turns a feature on or off, and it imports loans and other
+data even for a feature that is off on the receiving server. It is the safe way to move to
 a new server or hand your library to someone else, and it imports with a
 preview step that shows what's new, what's already there and how duplicates
 were matched. See [Import & export](user-guide/import-and-export.md).
+The author index is not in the archive either: it is rebuilt from each item's
+authors field on the receiving server. Wishlist price history is left out
+too, and is not rebuilt — the receiving server starts recording prices afresh.
 
 A sensible routine: an automated copy of `data/` (e.g. nightly via your
 backup tool), plus a portable archive before any big change.

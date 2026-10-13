@@ -1,386 +1,333 @@
-# Shelf
-
-[![Release](https://img.shields.io/github/v/release/dgahagan/shelf)](https://github.com/dgahagan/shelf/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/dangahagan/shelf)](https://hub.docker.com/r/dangahagan/shelf)
-[![CI](https://github.com/dgahagan/shelf/actions/workflows/test.yml/badge.svg)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-3647%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![E2E tests](https://img.shields.io/badge/e2e%20tests-256%20passing-brightgreen)](https://github.com/dgahagan/shelf/actions/workflows/test.yml)
-[![License: AGPL-3.0](https://img.shields.io/github/license/dgahagan/shelf)](LICENSE)
-
-A self-hosted home library catalog with barcode scanning, multi-mode scanning workflows, automatic metadata lookup, cover art, and collection management — all in a single Docker container.
-
-<p align="center">
-  <img src="screenshots/demo.gif" width="800" alt="Photo Intake demo — a shelf photo is analyzed by AI vision, 11 books are detected and imported with covers and metadata">
-</p>
-
-<p align="center"><em>Photo Intake: snap a shelf, AI reads the spines, books land in your library with covers and metadata.</em></p>
-
-## Why Shelf?
-
-Most home library apps are cloud-hosted, mobile-only, or require you to manually enter every book. Shelf takes a different approach:
-
-- **Scan and done** — point your phone camera at a barcode or use a USB/Bluetooth barcode scanner and the book is cataloged in seconds, complete with cover art, author, series info, and description. Works out of the box with any scanner that sends Enter after the barcode (most do by default), and camera scanning works on iPhones and iPads as well as Android
-- **Bulk-add from a photo** — snap a picture of a full shelf, a stack, or books laid face-up, and a vision model reads the spines and recognizes the covers. Review the candidate list — each row carries the ISBN read off a back cover, a per-row media type, and a marker on rows the model recognized rather than read — then import them all. Set a row to DVD or Video Game and it is looked up on TMDb or IGDB at confirm, not merely filed, on an exact title match. Works with the Anthropic API, any OpenAI-compatible endpoint, or a fully local Ollama model
-- **The barcode decides the media type** — an ISBN is a book even if the dropdown still says DVD, and a game UPC reaches IGDB even if it says Book. Leave it on **Auto** and scan a mixed pile; the card says what it detected and why, and says plainly when a record came back thin — because a provider key is missing, was rejected, is rate-limiting you right now, has no source for that format yet, or simply had no match
-- **8 scan modes** — Add, Wishlist, Lend, Return, Move, Inventory, Lookup, and Quick Rate. The scan tab adapts to whatever you're doing: adding new items, lending to a friend, reorganizing shelves, or auditing a room
-- **Title search** — don't have a barcode? Search by title across Open Library (books), TMDb (movies), and IGDB (video games) and add directly from results. Like the scan card, the result box says *why* it is empty — a rejected key, a rate-limited provider, one that could not be reached — so "No books found" means only that the provider answered and had nothing
-- **Add by hand** — a title is the only field required, for anything no lookup can find: a self-published book, a burned CD, a niche import, something you made yourself. Every media type, no barcode needed, and reachable from Home, from an empty title search, from a mistyped barcode, and from any item's page
-- **Zero cloud dependency** — runs entirely on your network in a single Docker container with a SQLite database. Your data never leaves your home
-- **Works on any device** — responsive web UI that works on phones, tablets, and desktops. No app store required
-- **Multi-user** — share with your household. Admins manage the catalog, viewers can browse and track what they're reading
-- **More than books** — catalog audiobooks, eBooks, DVDs, CDs, comics, manga, and video games. Link physical and digital formats together
-- **Video game support** — scan UPC barcodes for modern games or search IGDB by title for retro cartridges (Atari 2600, NES, SNES, etc.). Cover art, publisher, series, and platform tracking with a customizable platform list
-- **Lend with confidence** — track who borrowed what with the Lend/Return scan modes and a "Lent Out" filter on the browse page
-- **Inventory auditing** — pick a location, scan everything on the shelf, then see what's missing
-- **Know what you own** — ISBNdb integration estimates your collection's value and generates a location-grouped, print-ready valuation report for insurance documentation
-
-## Screenshots
-
-| Browse | Scan (Add Mode) |
-|--------|-----------------|
-| ![Browse](screenshots/browse.png) | ![Scan](screenshots/scan.png) |
-
-| Scan (Lend Mode) | Item Detail |
-|-------------------|-------------|
-| ![Lend](screenshots/scan-lend.png) | ![Detail](screenshots/detail.png) |
-
-| Stats | Admin Logs |
-|-------|------------|
-| ![Stats](screenshots/stats.png) | ![Logs](screenshots/logs.png) |
-
-| Valuation Report | Browse (Tag Filter) |
-|------------------|---------------------|
-| ![Valuation Report](screenshots/valuation-report.png) | ![Tag Filter](screenshots/browse-tag-filter.png) |
-
-| Photo Intake | Series |
-|--------------|--------|
-| ![Photo Intake](screenshots/photo-intake.png) | ![Series](screenshots/series.png) |
-
-## Documentation
-
-Full docs live in [`docs/`](docs/README.md):
-
-- [Installation](docs/installation.md) · [Configuration](docs/configuration.md) · [HTTPS & reverse proxy](docs/https-and-reverse-proxy.md) · [Upgrading & backups](docs/upgrading-and-backups.md)
-- **User guide:** [Getting started](docs/user-guide/getting-started.md) · [Scanning](docs/user-guide/scanning.md) · [Photo Intake](docs/user-guide/photo-intake.md) · [Browse](docs/user-guide/browse-and-search.md) · [Items](docs/user-guide/items.md) · [Locations](docs/user-guide/locations.md) · [Series](docs/user-guide/series.md) · [Lending](docs/user-guide/lending.md) · [Wishlist & Store Mode](docs/user-guide/wishlist-and-store-mode.md) · [Sharing](docs/user-guide/sharing.md) · [Stats & valuation](docs/user-guide/stats-and-valuation.md) · [Import & export](docs/user-guide/import-and-export.md) · [Integrations](docs/user-guide/integrations.md) · [Users & roles](docs/user-guide/users-and-roles.md)
-- [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Development](docs/development.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md)
-
-## Quick Start
-
-```bash
-docker compose up -d
-```
-
-Open `https://localhost:18888` and create your admin account via the setup wizard. That's it.
-
-### Configuration
-
-Create a `.env` file alongside `docker-compose.yml` for host-specific config:
-
-```bash
-# Add your machine's IP so you can access Shelf from other devices
-CERT_SAN=IP:192.168.1.100,DNS:shelf,DNS:localhost
-```
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CERT_SAN` | `DNS:shelf,DNS:localhost` | TLS certificate Subject Alternative Names |
-| `SECRET_KEY` | *(auto-generated)* | JWT signing key. If unset, generated at `data/signing.key` (0600) on first start; an existing key from before 0.30 is moved there from the database on the first start after upgrading, so sessions survive. Set it explicitly to run several instances against one database |
-| `SHELF_ENCRYPTION_KEY` | *(auto-generated)* | Encryption key for stored API credentials. Auto-generated at `data/encryption.key` if not set — never stored in the DB, so backups contain ciphertext only. Set it (e.g. `openssl rand -hex 32`) so the data directory alone can't decrypt credentials |
-
-### Data
-
-All persistent data lives in `./data/` (bind-mounted into the container):
-
-```
-data/
-  shelf.db        — SQLite database
-  covers/         — cached cover images
-  certs/          — auto-generated TLS certificates
-  encryption.key  — key for credentials stored in the DB (unless
-                    SHELF_ENCRYPTION_KEY is set)
-  signing.key     — signs login sessions (unless SECRET_KEY is set)
-```
-
-Keep both key files out of shared copies. The database holds no key material,
-so a database backup is ciphertext without anything that opens it — but a copy
-of this whole directory carries the keys next to the data they protect.
-
-## Features
-
-### Scanning and Metadata
-- **Camera barcode scanning** on mobile — tap to scan ISBNs and UPCs, from the Scan tab or from an item's edit form when you need to correct one ISBN
-- **8 scan modes** — Add, Wishlist, Lend, Return, Move, Inventory, Lookup, and Quick Rate
-- **Media-type detection** — the barcode outranks the scan form's dropdown when it is certain; Auto reads the barcode and decides. It reads platform, format, medium and audio wording out of the retail title, and the product category behind it, so a music CD and a PC CD-ROM game are each filed as themselves rather than guessed at against a film database
-- **Photo intake** — bulk-add from a photo of your shelves using a vision model, snapped with the phone or webcam or uploaded. Rows typed DVD or Video Game are looked up on TMDb or IGDB at confirm, on an exact title match (see [Photo Intake](#photo-intake))
-- **Title search** — search Open Library, TMDb, or IGDB by title when you don't have a barcode; an empty result box names the reason when the search failed rather than missed
-- **Add by hand** — a title is the only field required, for anything no lookup can find: a self-published book, a burned CD, a niche import, something you made yourself. Every media type, no barcode needed, and reachable from Home, from an empty title search, from a mistyped barcode, and from any item's page
-- **Cascading metadata lookup** — Open Library, Hardcover, and Google Books, with national bibliographies consulted first for the groups they cover: German (978-3) ISBNs go to the Deutsche Nationalbibliothek (DNB), Italian ones (978-88 and 979-12) to the Servizio Bibliotecario Nazionale (SBN)
-- **Edition language** — captured on lookup, editable on items, filterable in Browse; a settings dropdown picks the preferred language for title searches
-- **Cover art pipeline** — Open Library, Hardcover, DNB (German ISBNs), Amazon, Google Books, IGDB, and manual search/upload/paste-a-URL/remove, on any item. A **cover review queue** walks every cover-less item one at a time — discs, games and music included, which the automatic sweep deliberately never touches — with the picker inline, and a **Not available** verdict that is remembered so the list converges on zero. Cover search is media-type aware: books search Google Books and Open Library, DVDs the film's TMDb poster set, video games IGDB cover art and artwork. The picker reports a missing key, a rejected key, a spent quota and an unreachable provider by name, so "No covers found for this title." is only ever a genuine miss
-- **UPC support** — scan DVDs and Blu-rays with TMDb lookup, and music discs, which are detected on Auto. A barcode Shelf can resolve on MusicBrainz brings back the release; one it cannot is still filed under its own title
-- **Music by release, not by title** — a **Music** page searches MusicBrainz by title, artist, barcode or catalogue number and catalogues the exact pressing: country, date, label, catalogue number, packaging and medium, with real track lists across multiple discs. Vinyl, Cassette, CD and Digital Music. Two pressings of one album stay distinct and are linked to each other automatically. See [Music](docs/user-guide/music.md)
-- **Periodicals as publication plus issue** — a magazine run is one publication with many issues, not many unrelated rows. A 977 barcode resolves the publication from its ISSN; the issue number and date stay yours to confirm. See [Periodicals](docs/user-guide/periodicals.md)
-- **Manga as its own media type** — in the book family, so it carries an ISBN, belongs to a series, and filters separately from comics
-- **Retail barcodes on the edit form** — the Identifiers section takes a UPC/EAN as well as an ISBN, with the same camera scanner. UPC-A is canonicalised to EAN-13 and checksummed; 978/979 Bookland codes are refused, because they belong in the ISBN field. See [Editing barcodes](docs/user-guide/editing-barcodes.md)
-- **Video game support** — scan UPC barcodes for modern games or search IGDB by title for retro cartridges. Platform tracking with a customizable platform list (30+ platforms from Atari 2600 to PS5)
-
-### Scan Modes
-
-| Mode | What it does |
-|------|-------------|
-| **Add** | Scan barcodes to add items to your collection with full metadata lookup. Scanning something already on your wishlist marks it owned |
-| **Wishlist** | Scan at a bookstore to save items you want — adds them to your wishlist |
-| **Lend** | Select a borrower, then scan items to check them out |
-| **Return** | Scan items to check them back in |
-| **Move** | Select a target location, then batch-scan items to relocate them |
-| **Inventory** | Select a location, scan everything there, then check for missing items. Counts physical copies, so a book with copies in two rooms is expected in both; a scan that cannot say *which* copy reports instead of moving one |
-| **Lookup** | Scan to check if an item is in your collection — no changes made |
-| **Quick Rate** | Scan to mark items as read/completed |
-
-Camera scanning picks its decoder to suit the device: iOS Safari drives the
-camera with ZXing, every other platform uses html5-qrcode. The scan page and
-Store Mode share one engine, so both behave the same everywhere. Retail
-barcodes are covered — EAN-13, EAN-8, UPC-A and UPC-E. USB and Bluetooth
-scanners bypass the camera entirely and work regardless.
-
-### Photo Intake
-
-<p align="center">
-  <img src="screenshots/photo-intake.png" width="700" alt="Photo Intake — reviewing books detected from a shelf photo">
-</p>
-
-Snap a photo of a shelf — or of books stacked or laid face-up — and Shelf
-reads the spines it can read and recognizes the covers it can't. Open
-**Photo Intake** in the nav, take or upload the photo, and the detected books appear
-as an editable candidate list: title, author, the ISBN read off a back cover
-if one was in frame, a per-row media type, and a marker on rows identified
-from the cover rather than read. Nothing is imported until you confirm.
-Rows with an ISBN then get the same lookup a barcode scan does; books are
-matched on title and author behind an author-match guard; and a row set to
-DVD or Video Game is looked up on TMDb or IGDB, which fills in its year,
-description and cover when the title matches the catalogue exactly. The Done
-panel shows which rows found no metadata, and marks separately the rows whose
-lookup was **declined** because the title did not match.
-
-Configure a vision backend under Settings → Integrations → Photo Intake:
-
-- **Anthropic API** — best accuracy; pay-per-photo (typically a few cents)
-- **OpenAI-compatible** — any endpoint that speaks the OpenAI Chat Completions
-  API: OpenAI itself, OpenRouter, or a local server (vLLM, LM Studio, LocalAI).
-  Set the base URL, an optional API key, and a vision-capable model
-- **Ollama** — free and fully local with any vision-capable model
-  (gemma3, qwen2.5vl, llama3.2-vision, …); accuracy depends on the model
-
-For high-resolution photos that exceed what the model actually ingests,
-Shelf shows a preview of what the model will see and offers to split the
-photo into overlapping tiles for better accuracy — with a cost estimate for
-each option before anything is sent.
-
-### Collection Management
-- **Home overview** — Shelf opens on a page that answers "what is happening in my library?": catalogue, owned and wishlist totals, what is lent out, missing covers, a media-type breakdown and recent additions. Browse stays the place for searching, filtering and bulk editing. See [Home](docs/user-guide/home.md)
-- **Filter and search** — by media type, location, reading status, ownership, lending status, source (which sync, provider or import an item arrived from), and free text
-- **Reading tracking** — want-to-read, reading, and read with start/finish dates
-- **Custom tags** — free-form tags (`signed`, `first-edition`, whatever you like) as chips on the item page, with a tag filter on Browse
-- **Synopses** — item descriptions fetched automatically on add, plus a one-click backfill for your existing catalog (Open Library, Google Books, Hardcover)
-- **Stats dashboard** — books read per year, collection growth, top authors, and value-over-time charts (server-rendered SVG, no JS)
-- **Locations** — organize by room, shelf, or any system you like, and nest them: a shelf inside a bookcase inside a room. Rename or move a location and everything beneath it follows. See [Locations](docs/user-guide/locations.md)
-- **Shelf Fill** — pick a room, bookcase or shelf and it stays selected while you scan item after item onto it. Items already catalogued move without a fresh metadata lookup; unrecognised barcodes fall through to the normal Add pipeline. See [Shelf Fill](docs/user-guide/shelf-fill.md)
-- **Physical copies** — own two of something and track them apart: add a copy on the item page, give each its own location, condition, acquired date, source, price, provenance and barcode, and remove one when it goes. Removing the copy marked primary promotes the next one and the item's location follows it
-- **Arrange a shelf** — any location gets an Arrange page where you drag the physical copies into the order they actually sit in, or order them automatically by title, creator, series, release or issue. The order belongs to the copy, so duplicates stay distinct and can sit side by side
-- **Related media groups** — connect the different forms of one work (a novel, its audiobook, its film adaptation) as `format`, `related` or `adaptation`. Every item shows its whole group in a panel on the item page, with direct links marked apart from the ones reached through a third item; editors search the catalogue to add a relationship, viewers see the group read-only. A group is the connected set of links, so linking A to B and B to C presents all three. Matching is manual by design. See [Related Media](docs/related-media.md)
-- **Game platforms** — customizable list of platforms, add your own for niche or retro systems
-- **Checkout system** — lend to borrowers with the Lend scan mode, filter by "Lent Out" in browse
-- **Loan reminders** — overdue loans get a red badge, and an optional daily digest (ntfy or webhook) nags you about them; configure under Settings → Library → Lending
-- **Wishlist** — a list of what you want, kept alongside your catalog. Owning and wishing are separate: an item can also be neither — a book you read from the library stays in your catalog, with its reading history, without being owned or wished for
-- **Series tracking** — a Series page groups your library by series with position numbers, flags likely gaps, and (with Hardcover configured) checks the full series and adds missing volumes to your wishlist in one click. Each series can carry its own synopsis, written inline or fetched from Hardcover. Rename a series (renaming onto an existing name merges the two — the quick fix for duplicate series records left by metadata lookup) or disband it entirely, right from the series card
-- **Bulk editing** — select multiple items in Browse to move them, change type or reading status, add them to or remove them from the wishlist, or set and clear their series in one go
-- **Choose your columns** — Browse's list view has a column picker (value, series, publisher, year, pages, language, added date, platform, ISBN/UPC, and more), on top of the author/type/location/status shown by default; the choice is remembered per browser, not per account
-- **Valuation report** — location-grouped, print-ready report of your collection's list-price value for insurance documentation ([print view](screenshots/valuation-report-print.png)); prices via ISBNdb
-- **Display currency** — pick from 20 currencies under Settings → Collection and every value surface follows. This is formatting, not conversion: Shelf never converts amounts between currencies, so the figure ISBNdb returns is the figure shown
-- **CSV import/export** — bulk operations and backups
-- **Portable archive** — export your whole collection as a single zip (items, tags, locations, series, reading log, checkouts, physical copies, **and your cover art**) and merge it back into any Shelf instance without refetching a single cover. No credentials or instance-specific data are included, so it's the safe way to move servers or hand your library to someone else — unlike a database backup, which carries password hashes and encrypted API keys but no covers at all. Importing previews first: you see how many items are new, how many are already yours, how each duplicate was matched (exactly on ISBN, or heuristically on title and author), and you can leave parts of the archive out before anything is written
-- **Goodreads & StoryGraph migration** — upload your library export as-is; the format is auto-detected, reading statuses and owned/wishlist flags are mapped, and covers are fetched automatically
-- **Store Mode (offline PWA)** — scan barcodes in a bookstore with no signal and get an instant Owned / On wishlist / Not in library verdict; unknown books queue on-device and are added to your wishlist automatically when you're back online (see [Store Mode](#store-mode-offline-pwa))
-
-### Integrations
-- **[Hardcover](https://hardcover.app)** — bidirectional reading status sync, import your library, discover new books
-- **[Audiobookshelf](https://www.audiobookshelf.org)** — sync selected libraries from your Audiobookshelf server, link physical + digital formats, and jump straight to an item in ABS from its Shelf page
-- **[IGDB](https://www.igdb.com)** — video game metadata, cover art, and platform info via Twitch developer credentials (free)
-- **[RomM](https://romm.app)** — sync a self-hosted RomM server's digital game library. A RomM game gets its own record rather than being matched onto a physical cartridge you already own; link the two yourself. See [RomM](docs/romm.md)
-- **[Komga](https://komga.org)** — sync a self-hosted Komga server's digital comics and manga, matching on ISBN where one exists. A library's Comic/Manga kind is kept apart from Shelf's own media type, so it never reclassifies an item you catalogued by hand. See [Komga](docs/komga.md)
-- **[ISBNdb](https://isbndb.com)** — collection valuation with list prices for insurance documentation
-
-### Store Mode (Offline PWA)
-
-<p align="center">
-  <img src="screenshots/store-mode.gif" width="420" alt="Store Mode demo — three ISBNs checked in turn, returning Owned, On wishlist, and Not in library with the unknown book queued for sync">
-</p>
-
-<p align="center"><em>Standing in the shop: scan, and know instantly whether you already own it.</em></p>
-
-Open **Store** in the nav (or visit `/store`), and Shelf caches your library's
-ISBNs on the device. From then on, scanning a barcode answers instantly from
-the local cache — even with zero signal in a bookstore basement. Books you
-scan that aren't in your library are queued on-device and added to your
-wishlist (with metadata and cover) the next time you're online.
-
-To install it as an app, use your browser's "Add to Home Screen" while on the
-store page. **One requirement:** service workers (the offline machinery) only
-run on an origin your phone trusts. Options, from simplest to cleanest:
-
-1. **Trust the self-signed cert on your phone** — download the cert from your
-   Shelf server and install it (Android: Settings → Security → Install a
-   certificate → CA certificate; iOS: install the profile, then enable full
-   trust under Settings → General → About → Certificate Trust Settings).
-2. **VPN home** (WireGuard/OpenVPN/Tailscale) — the offline cache still does
-   the work in the store; the VPN is only needed when syncing.
-3. **A real certificate** — reverse proxy with Let's Encrypt, or
-   `tailscale cert` for a ts.net HTTPS name. Set `SHELF_TRUST_PROXY=1` if a
-   proxy sits in front.
-
-Note that `localhost` is always trusted, so store mode works out of the box
-for local development.
-
-### Sharing
-
-Create public read-only links under Settings → Data → Sharing — a **wishlist
-link** for gift ideas or a **collection link** for browsing. Anyone with the
-URL sees titles, authors, covers, and series only (never locations, loans,
-values, notes, or ISBNs). Links are unguessable 128-bit tokens, rate-limited,
-marked `noindex`, and revocable at any time.
-
-### Administration
-- **Role-based access** — admin, editor, and viewer roles
-- **Web log viewer** — monitor auth events, sync activity, and errors from the browser
-- **HTTPS** — self-signed TLS certificates generated on first run
-- **Backup/restore** — database backup and restore from the settings page, with optional passphrase-encrypted (AES) backup downloads that are safe to store off-site
-- **Hardened by default** — strict Content-Security-Policy (no `unsafe-inline`/`unsafe-eval`, no CDNs), CSRF protection on all mutating requests, write-only API credentials in Settings, encrypted credential storage
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.12, FastAPI, SQLite (WAL mode) |
-| Frontend | Jinja2, HTMX, Alpine.js, Tailwind CSS |
-| Auth | bcrypt, JWT in HTTP-only secure cookies |
-| Container | Docker, non-root user, self-signed HTTPS |
-
-## Roles
-
-| Role | Can do |
-|------|--------|
-| **Admin** | Everything: settings, users, locations, sync, bulk ops, logs |
-| **Editor** | Add/edit/delete items, scan (all modes), covers (find/upload/paste URL/remove, and the cover review queue), checkout/checkin, import/export |
-| **Viewer** | Browse, search, reading status, export CSV, view stats |
-
-## Metadata Sources
-
-Shelf queries free, public APIs to look up book and game information — no API keys needed for core book functionality:
-
-| Source | What it provides | API key required? |
-|--------|-----------------|-------------------|
-| [Deutsche Nationalbibliothek](https://portal.dnb.de) | German (978-3) ISBNs, consulted before the rest: title, author, publisher, year, language; cover art | No |
-| [Servizio Bibliotecario Nazionale](https://opac.sbn.it) | Italian (978-88, 979-12) ISBNs, consulted before the rest: title, subtitle, author, publisher, year, language | No |
-| [Open Library](https://openlibrary.org) | Title, author, description, cover art, publish info, title search | No |
-| [Google Books](https://books.google.com) | Fallback metadata and cover art | No (optional key supported) |
-| [Amazon Images](https://www.amazon.com) | Fallback cover art via ISBN | No |
-| [UPC Item DB](https://www.upcitemdb.com) | Title lookup from UPC barcodes (games, DVDs) | No |
-| [MusicBrainz](https://musicbrainz.org) | Music releases by title, artist, barcode or catalogue number: pressing details, track lists, release groups | No |
-| [ISSN Portal](https://portal.issn.org) | Periodical publications from an ISSN, resolved from a 977 barcode | No |
-
-Metadata lookups send only the ISBN or UPC to these services. No personal data, account info, or collection details are transmitted.
-
-## Optional API Keys
-
-Configure in Settings to unlock additional features:
-
-| Service | Enables | Link |
-|---------|---------|------|
-| **Hardcover** | Reading status sync, richer metadata, import/export, Discover page | [hardcover.app](https://hardcover.app) |
-| **Google Books** | Optional credentialed metadata, synopsis, and cover requests; anonymous access remains available | [Google Books API](https://developers.google.com/books) |
-| **IGDB** (Twitch) | Video game metadata, cover art, and platform info — on UPC scan, title search, and Photo Intake confirm | [dev.twitch.tv/console](https://dev.twitch.tv/console) |
-| **ISBNdb** | Collection valuation with market prices | [isbndb.com](https://isbndb.com) |
-| **TMDb** | DVD/Blu-ray metadata — on UPC scan, title search, and Photo Intake confirm | [themoviedb.org](https://www.themoviedb.org) |
-| **Anthropic** | Photo Intake — reads spines and recognizes covers (best accuracy) | [console.anthropic.com](https://console.anthropic.com) |
-| **OpenAI-compatible** | Photo Intake via any OpenAI Chat Completions endpoint (OpenAI, OpenRouter, vLLM, LM Studio…) | [platform.openai.com](https://platform.openai.com) |
-| **Ollama** | Photo Intake with a fully local vision model — no key needed | [ollama.com](https://ollama.com) |
-
-## Development
-
-See [docs/development.md](docs/development.md) for the full guide and [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. The essentials:
-
-```bash
-# Rebuild after code changes
-docker compose build && docker compose up -d
-
-# View logs
-docker compose logs -f shelf
-
-# Access the database
-sqlite3 data/shelf.db
-
-# Rebuild the Tailwind stylesheet after changing templates or static/js
-# (all JS/CSS is vendored locally — no CDNs; requires node/npx)
-make css
-```
-
-### QA Pipeline
-
-Shelf ships with a `Makefile` that orchestrates a two-pass local QA workflow — no CI/CD required.
-
-**One-time setup:**
-
-```bash
-pip install -r requirements-dev.txt
-make install-playwright   # downloads headless Chromium
-```
-
-**Common targets:**
-
-| Target | What it does |
-|--------|-------------|
-| `make test` | Unit and integration tests (pytest, excludes E2E) |
-| `make test-e2e` | Playwright E2E browser tests against a live local server |
-| `make test-contract` | Live UPC Item DB contract check — spends one trial lookup; run at release, never on a gate |
-| `make test-all` | `test` and `test-e2e` |
-| `make check-deps` | `pip-audit` vulnerability scan of `requirements.txt` |
-| `make check-licenses` | License compliance report |
-| `make check-secrets` | Scan tracked files for accidentally hardcoded secrets |
-| `make check-csrf` | Lint that raw `fetch()` calls send the CSRF token |
-| `make check-deleted` | Lint that every read of `items` goes through `items_live`, and every read of `item_copies` through `copies_live` |
-| `make check-alpine` | Verify templates stay compatible with the Alpine CSP build, and that the script load order in `<head>` is intact |
-| `make check-sw-version` | Verify the service worker's cache version matches what it caches |
-| `make check-tests` | Lint the test suite's own conventions |
-| `make checks` | All of the checks above |
-| `make report-review` | Code review report via Claude agent |
-| `make report-security` | Security audit report via Claude agent |
-| `make report-test` | Test coverage audit report via Claude agent |
-| `make reports` | All three reports |
-| `make qa` | Full Pass 1: `test-all` → `checks` → `reports` |
-| `make fix` | Pass 2a: interactive Claude session reads reports and applies fixes |
-| `make verify` | Pass 2b: re-run all tests after fixes |
-| `make release-check` | Alias for `make qa` |
-| `make install-hooks` | Install a pre-push git hook that runs `make test-all` |
-
-**Typical pre-release workflow:**
-
-```bash
-make qa          # run tests, checks, and generate reports
-# review reports/CODE_REVIEW_*.md, SECURITY_AUDIT_*.md, TEST_AUDIT_*.md
-make fix         # Claude reads reports and applies fixes interactively
-make verify      # confirm all tests still pass
-```
-
-Reports land in `reports/` with today's date (e.g. `reports/CODE_REVIEW_2026-03-27.md`) and are gitignored — they're regenerated each QA cycle, so keep a copy elsewhere if you want to compare against a previous run.
-
-Report targets default to `claude-sonnet-4-6`. Override with `MODEL=` for a deeper pre-release audit:
-
-```bash
-make reports MODEL=claude-opus-4-6
-```
-
-## License
-
-[AGPL-3.0](LICENSE) — free to use, self-host, and modify. If you offer a
-modified version of Shelf as a network service, you must make your changes
-available under the same license.
+# Shelf – Changes in This Fork
+
+## Highlights
+
+- **Collector-ready game catalogue:** platform logos, regions, alternate names, languages, release years and CIB, Boxed or Loose condition.
+- **AI Photo Intake:** recognizes books, games and physical media; identifies platforms, editions and condition, with review, progress and cancellation.
+- **Stronger metadata and covers:** IGDB-based game data, configurable missing-data checks, provider health checks and cover recovery.
+- **Faster collection work:** inline editing, bulk updates, custom columns, sorting, filters, adjustable grids and persistent Browse views.
+- **A better wishlist:** dedicated wishlist adds, clear heart indicators and simple transitions between owned and wishlisted items.
+- **Personalised appearance:** per-user themes, account icons or initials, and selectable Home tiles, card details and filters.
+- **Smarter Home and Browse:** platform and missing-data summaries, direct filter links, optional cards and responsive layouts.
+- **Polished daily use:** mobile/PWA improvements, remembered sign-in, feedback toasts and consistent Lucide icons.
+- **Multi-architecture releases:** every `main` build publishes `latest` for both AMD64 and ARM64, so Docker automatically serves the right image to PCs, servers and Raspberry Pis.
+- **Self-hosting ready:** Windows/WSL developer tooling, Docker local development and multi-architecture GitHub Container Registry images.
+
+This file is the central record of customizations in this fork. The upstream
+[`README.md`](README.md) continues to document Shelf itself; this file covers
+only added or changed fork-specific features.
+
+## V1.2.5 — Upgrade V1.2.5
+
+- **Accounts are easier to recognize.** Each user can choose the header's
+  standard account icon or their bold initial, and can set optional background
+  and text colours with safe hex values from Settings → Users or Account.
+- **Appearance now has a per-user theme picker.** The original dark Shelf
+  palette remains the default, with **Light**, blue/petrol **Navi**,
+  green-petrol **Ocean**, cherry-pink **Sakura**, warm **Coffee**,
+  amber **Retro**, and terminal-green **Matrix** variants. Semantic success,
+  warning and error colours remain consistent across themes.
+
+## V1.2.4 — Upgrade V1.2.4
+
+- **Wishlist additions now retain their chosen mode.** Adding a title-search
+  result from Add to Wishlist creates a wishlist item rather than an owned
+  item; the owned/wishlist transition on item pages is clearer and centered.
+- **Item details are quicker to correct.** Title and Platform can now be
+  edited inline, and Language no longer lists Unknown twice.
+- **Home and collection cards are more configurable.** Collection mix and
+  Useful places can be independently hidden per user. Platform cards have
+  tighter, centered layouts, and Recently added now uses the same hover
+  treatment as Browse.
+- **Photo Intake better recognizes physical media.** Bare cartridges and
+  optical discs are classified as Loose instead of Boxed.
+
+## V1.2.3 — Upgrade V1.2.3
+
+- **Game metadata is configurable where it matters.** Settings now lets an
+  administrator choose which empty game fields make an item count as *Missing
+  game data*. The Home tile and Browse filter use exactly that selection.
+  Platform also has an **Unknown** tile and filter for games with no assigned
+  platform.
+- **Browse is easier to tailor.** Users can choose the visible filters,
+  including Lent out, Platform, Tag and Author. Grid density can be adjusted
+  with **Grid**, **Grid +1**, **Grid +2** or **Grid +3** at every screen size.
+- **Editing games needs fewer page changes.** Developer, Publisher, Language
+  and Year can be edited inline from the item page with consistent icon-only
+  save controls. Region, Platform and Collector state remain controlled
+  dropdowns in the details form; Language now includes Unknown.
+- **Bulk editing covers more collection work.** Platform and Collector state
+  can be applied to a selection, and the page reserves space below the bulk
+  action bar so it no longer covers the last items.
+- **Photo Intake identifies game collections more carefully.** Recognition
+  now reads shelves and spines as shared platform context, avoids treating
+  logos as titles, checks rotated spines, improves PAL/USK/PEGI and language
+  inference, and fills developer, publisher and year once a game is securely
+  identified. Confirmed IGDB lookups now retain the developer as well as
+  publisher and year before cover recovery begins.
+- **Long-running intake actions are easier to follow.** Photo analysis and
+  item confirmation show their current Shelf phase and a progress indicator,
+  from image preparation through recognition, metadata matching and saving.
+- **Metadata maintenance filters now follow their configuration exactly.**
+  The Name checkbox checks the actual catalogue title rather than the optional
+  alternate title, and existing saved selections are migrated automatically.
+  Browse also offers one **Missing** filter for unset name, alternate name,
+  developer, publisher, platform, region, language, year or collector state.
+- **Collection cards are less noisy when desired.** The per-user Appearance
+  settings can hide the New label. The Home **Unknown platform** tile appears
+  only when at least one game needs a platform.
+- **Maintenance links land in the right place.** Reviewing missing game
+  metadata now opens the Library settings tab and scrolls directly to its
+  configuration section.
+- **Browse filter choices now persist after every result refresh.** Missing
+  cover is part of the central Missing filter, and the Home tile opens that
+  same filter instead of a separate control.
+- **Missing values can be combined.** The Missing filter is now a checkbox
+  menu, so one Browse view can include several empty metadata fields at once.
+  Opening it from the Missing game metadata tile preselects the configured
+  fields in that menu.
+- **The Missing menu behaves like the other custom menus.** It has a Lucide
+  chevron that rotates with its state and closes when clicking outside it.
+- **List sorting uses consistent Lucide controls.** Neutral, ascending and
+  descending sort states use the same icon set as the Browse toolbar.
+  Those icons now also render after asynchronous sorting and filtering.
+- **Wishlist status is clearer in the collection.** Wishlisted items use a
+  filled primary-colour heart beside the list cover and before the collector
+  state on grid cards. Their detail page now has a direct add/remove button.
+  Appearance settings can hide those collection hearts per user.
+- **Wishlist actions now match collection state.** Manual additions in
+  Wishlist mode stay out of Owned. The item-page heart moves an owned item
+  to the wishlist, while removing it asks whether it should become owned
+  again or remain in neither list.
+- **Loose media is classified more accurately.** Photo Intake now treats
+  visible NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, DS and 3DS
+  cartridges — and bare PlayStation, Xbox, GameCube, Wii, DVD and Blu-ray
+  discs — as Loose; Boxed and CIB require their original packaging to be
+  visible. Home-summary icons also keep their intended size on small screens.
+- **Home overview cards are optional per user.** Appearance now controls the
+  Collection mix and Useful places cards independently, both enabled by default.
+
+## V1.2.2 — Upgrade V1.2.2
+
+- Photo Intake is more useful for games and international releases: it now
+  captures language, region, alternate searchable names, publisher, developer
+  and release year, while preserving titles in their original script. The
+  review screen makes those fields easy to correct before saving.
+- AI recognition prompts and validation were strengthened for front-cover
+  scans. Recognized titles retain their exact edition name, alternate names
+  are normalized for searching, and malformed legacy Unicode escapes are
+  repaired on display and on future saves.
+- Collection browsing is more practical on desktop and mobile: list columns
+  can be selected and sorted, filters include region and missing covers, text
+  matches are highlighted, and filter state survives opening an item and
+  returning to the collection.
+- Item pages and bulk editing now support alternate names, language and region
+  alongside existing collection metadata. The inline alternate-name editor
+  gives clear save feedback and returns to its normal read-only view.
+- The installable web app and sign-in experience were polished for mobile,
+  including updated app icons, a persistent Remember me option, and reliable
+  navigation back to the collection when Store Mode is disabled.
+- Platform coverage and metadata tooling were extended with Nintendo Switch 2,
+  additional platform-logo mappings, provider connection status, and more
+  resilient IGDB cover and game-metadata lookups.
+- Photo Intake now treats releases for different game platforms as distinct
+  physical editions when checking for an existing item. A Nintendo Switch scan
+  therefore cannot offer an identically named Nintendo Switch 2 entry for
+  replacement.
+
+## V1.2.0.1 — Upgrade V1.2.1
+
+- Locations can be made the current user's default while creating or editing
+  them; Photo Intake selects that location automatically. Browse list view
+  now starts with Platform, Publisher, Year and Collector state after Title.
+- Photo Intake exposes an **Edit Config** shortcut to its Settings card and
+  displays the last Ollama connection check beside Provider. Settings can run
+  that check with toast and inline success/error feedback. Mac defaults to
+  the bundled Apple Macintosh platform logo.
+- Photo Intake now offers **Cancel** for a running analysis. Replacing a
+  photo, leaving the page, or a client-side analysis error also cancels the
+  active Shelf task, which closes the outstanding Ollama request instead of
+  leaving it to continue in the background. Intake and add failures now also
+  appear as error toasts.
+- Cancelled analyses return a clear confirmation instead of an invalid JSON
+  error. The recognition prompt explicitly preserves titles in Japanese and
+  other non-Latin scripts rather than translating or romanizing them.
+- A single slow Ollama vision request may now run for just over 18 minutes,
+  leaving headroom below the documented 20-minute reverse-proxy setting.
+- Settings can retrieve the models installed on the configured Ollama server
+  and presents them in a selectable list, marking models which report vision
+  capability. The refresh control re-reads the server after a model is pulled.
+- The global **Features** controls now consistently govern the matching UI.
+  When Lending is off, Scan no longer offers Lend or Return, the Home "Lent
+  out" tile and its personal Appearance option are hidden, and the Lending
+  settings card points to Features instead of exposing inactive controls.
+  A browser that remembered Lend or Return automatically returns to Add.
+- When Statistics is off, its direct Home link is hidden too.
+- These are availability rules for the whole Shelf; personal Appearance
+  preferences are deliberately retained and become visible again when the
+  feature is enabled. No collection or lending data is deleted.
+- Browse now supplies platform labels consistently to both first-page and
+  asynchronously refreshed list views, including the optional Platform
+  column.
+- The current default location is marked with a blue **Default** badge in
+  Settings and with `(default)` in both Photo Intake location selectors.
+- In Collection list view, data columns can be sorted directly from their
+  headers. The active direction is shown with an arrow and uses the same
+  single server-side sort as the standard Sort by control.
+- The Photo Intake Settings card owns its stable `#photo-intake-vision` link
+  and connection test; the Discogs integration card now keeps the same visual
+  spacing as the other integrations. The bundled platform list also adds Mac
+  on startup without altering user-created platforms.
+- Photo Intake offers provider-specific model and reasoning selectors for
+  Anthropic and OpenAI. The defaults prioritize efficient image recognition:
+  Claude Haiku 4.5 with no forced thinking, or GPT-6 Luna at low reasoning.
+  API-key expiry is explicitly marked as unavailable where the providers do
+  not expose it through the ordinary key.
+
+## V1.0.0 — Upgrade V1
+
+This first fork release bundles the platform-aware game catalogue, Lucide UI
+icons, enhanced photo intake and metadata retrieval, collector states, cover
+recovery, configurable Home tiles, and ARM64 container publishing described
+below. Use the Git tag `v1.0.0`; its human-readable release title is **Upgrade V1**.
+
+## Game Platforms on the Home Page
+
+- The Home page shows a tile for every platform with catalogued video games.
+- Every tile contains the platform name, game count, and platform logo when
+  available.
+- Clicking a tile opens Browse already filtered to that platform.
+- Counts and filtering use the existing platform metadata (`game_platforms` and
+  `items.platform`), not duplicate tags. Only video games are included.
+
+## Platform Filter
+
+- Browse includes a platform filter with dynamic result counts.
+- The filter combines with the other Browse filters and only considers video
+  games.
+- A platform's stored slug can be explicitly chosen when creating it:
+  `Testconsole (blubb)` displays **Testconsole** and uses `blubb` for filters,
+  game metadata, and logo mappings. Without a non-empty value in parentheses,
+  the existing automatic slug generation is retained.
+
+## Platform Logos
+
+- **Settings → Library → Platform Logos** maps a platform to a logo file.
+- Creating or changing a mapping is saved directly with **Save mapping**; there
+  is no second global save step.
+- SVG selection shows readable logo names rather than internal file paths.
+  Personal mappings override the built-in first guesses.
+- Default mappings are only first guesses and can be changed at any time in
+  Settings.
+- The pinned source SVGs are downloaded by `make setup` (or
+  `make platform-logos`) into ignored `static/icons/platforms`; they are not
+  carried in this fork's Git history.
+
+The monochrome platform logos come from
+[HVR88/Monochrome-Gaming-Logos](https://github.com/HVR88/Monochrome-Gaming-Logos).
+Please observe that project's license and notices when distributing or changing
+logos.
+
+The Shelf favicon and installable web-app icon are based on
+[Papirus icon theme](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)
+by [PapirusDevelopmentTeam](https://github.com/PapirusDevelopmentTeam).
+
+## Personal Collection Appearance
+
+- Under **Settings → Library → Appearance**, every user can independently
+  choose whether game titles are always visible in the Collection.
+- Platform-logo display can also be enabled per user. The logo then appears as
+  a 32-px icon at the top-left of applicable game cards.
+- The platform-logo checkbox now always reflects its saved per-user value, so
+  the Settings control and rendered game cards remain in sync.
+
+## Local Development on Windows/WSL
+
+- `make dev` builds and starts the Docker development instance at
+  `https://localhost:18889`.
+- Docker Compose explicitly publishes the HTTPS port so the instance is also
+  reachable from a Windows browser.
+- `make dev-local` starts a local Uvicorn development server with hot reload at
+  `http://localhost:8000`.
+- Local development also starts Tailwind in watch mode and BrowserSync. The
+  development view is `http://localhost:3000`: CSS is injected without a manual
+  refresh, while template, JavaScript, and Python changes reload the page.
+- Styling uses Tailwind CSS v4 with a CSS-based theme definition in
+  `static/css/input.css`; `tailwind.config.js` is no longer needed.
+
+## Feedback and Intake
+
+- Shelf now uses reusable, accessible Success, Error, Warning, and Info toast
+  notifications. They slide in, remain visible for 2.5 seconds, then slide
+  out; simultaneous notifications stack with a 12-px gap.
+- Settings actions now use the same feedback system for their asynchronous
+  operations, including connection tests, imports, syncs, and save actions.
+- The low-resolution Intake warning includes **Try anyway**, which submits the
+  selected photo for analysis without requiring the user to leave the warning.
+- Ollama Intake explicitly treats recognizable cartridges, discs, box art, and
+  covers as catalog items. This prevents the legacy JSON key `books` from
+  making a local model discard recognizable video games.
+- Scan review rows now keep each title on its own line, with a separator
+  between entries. Video games show **Publisher** rather than Author and ISBN,
+  and their detected platform is normalized to the configured Shelf slug (for
+  example, `Nintendo 64` and `N64` become `n64`).
+- **Fetch & Add to Library** fetches type-specific metadata before saving.
+  Games use IGDB with the title, platform, and available year as the lookup
+  context; DVDs use TMDb.
+- Intake also offers **Just add** for selected rows when the photographed text
+  is already correct and no external metadata lookup is wanted.
+
+## Collector States and Cover Recovery
+
+- Non-book physical collection items can be marked as **CIB**, **Boxed**, or **Loose** during manual add, photo intake,
+  or editing. Browse can filter by
+  the saved state.
+- The Home "Missing covers" number opens the matching filtered collection.
+  Administrators can retry it directly from the card; book items use the book
+  cover flow, games use IGDB, and DVDs use TMDb. Game and DVD retries keep the
+  item title as the primary query and pass platform and release year where
+  available.
+- Vision intake now asks for publisher, release year, platform and a physical
+  collector state when those details are visible. All-caps OCR titles are
+  converted to readable title case while normally-cased transcriptions remain
+  untouched.
+- Platform matching first uses exact slugs/names and then the longest contained
+  configured platform key. This covers variants such as Nintendo 64 DD without
+  hard-coding each console variant.
+
+## Home and Cover Editing
+
+- Each user can choose which default Home summary tiles are visible under **Settings → Library → Appearance → Home**.
+- Collection cards can optionally show their saved collector state below the
+  title.
+- Cover controls use the consistent name **Edit cover**. The item edit page
+  includes upload, public URL, provider search, and remove actions.
+
+## Multi-Architecture Container Publishing
+
+- `.github/workflows/docker-publish.yml` publishes `linux/amd64` and
+  `linux/arm64` variants to `ghcr.io/chrisser73/shelf` only from `main`.
+  The `latest` tag always points to that current `main` image, and Docker
+  automatically pulls the correct variant for the host.
+- `docker-compose.release.yml` deploys that image on either architecture:
+  `docker compose -f docker-compose.release.yml up -d`.
+
+## Small Interface Improvements
+
+- Select controls, buttons, and links use the pointer cursor consistently.
+- The Platform Logos selector has padded space for its chevron and flips the
+  chevron while open, resetting it as soon as a selection changes.
+- Infinite-scroll spinners are centered as an overlay in their loading space.
+- The photo-intake flow uses generic item terminology and asks the vision model
+  to classify books, audiobooks, movies, music, comics, and video games.
+- Toast notifications are centered at the top of the viewport.
+- The navigation uses 20-px Lucide icons that inherit the active or hover text
+  color. It uses Lucide's official `data-lucide` and `createIcons` API with a
+  locally served, pinned package bundle; `make setup` prepares that bundle.
+
+---
+
+## Original Project
+
+For the original project documentation, see the
+[upstream README](https://github.com/dgahagan/shelf#readme).

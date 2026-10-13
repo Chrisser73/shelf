@@ -1,5 +1,6 @@
 """Tests for item deletion (editor role, FK handling) and browse lent_out filter."""
 
+import io
 import logging
 import re
 import sqlite3
@@ -18,6 +19,7 @@ from app.database import (
     get_db,
     init_db,
 )
+from app.routers import items_common
 from app.services import provider_result
 from tests.conftest import (
     _insert_item,
@@ -34,7 +36,7 @@ class TestDeleteItem:
         resp = admin_client.delete(f"/api/items/{item_id}")
         assert resp.status_code == 200
         with get_db() as check_db:
-            row = check_db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+            row = check_db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
         assert row is None
 
     def test_editor_can_delete(self, editor_client, db):
@@ -43,7 +45,7 @@ class TestDeleteItem:
         resp = editor_client.delete(f"/api/items/{item_id}")
         assert resp.status_code == 200
         with get_db() as check_db:
-            row = check_db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+            row = check_db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
         assert row is None
 
     def test_viewer_cannot_delete(self, client, viewer_user):
@@ -57,7 +59,9 @@ class TestDeleteItem:
         assert resp.status_code in (401, 403)
 
     def test_delete_with_scan_log_entries(self, admin_client, db):
-        """Items with scan_log entries should delete cleanly (FK nullified)."""
+        """Delete moves the item to Trash and leaves its scan history linked,
+        so a restore finds it; the recent-scans strip renders the row unlinked
+        meanwhile, because it joins items_live."""
         item_id = _insert_item(db, title="Scanned Book", isbn="9780000002037")
         db.execute(
             "INSERT INTO scan_log (isbn, media_type, result, item_id, mode) VALUES (?, ?, ?, ?, ?)",
@@ -69,14 +73,36 @@ class TestDeleteItem:
 
         # Verify item is gone but scan_log entry remains with null item_id
         with get_db() as check_db:
-            item = check_db.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+            item = check_db.execute("SELECT id FROM items_live WHERE id = ?", (item_id,)).fetchone()
             assert item is None
             log = check_db.execute("SELECT item_id FROM scan_log WHERE isbn = '9780000002037'").fetchone()
             assert log is not None
-            assert log["item_id"] is None
+            assert log["item_id"] == item_id
+        # The strip still lists the scan, unlinked: its item is in Trash.
+        strip = admin_client.get("/api/recent-scans", params={"mode": "add"}).text
+        assert "9780000002037" in strip
+        assert f'href="/item/{item_id}"' not in strip
 
-    def test_delete_with_checkout_cascades(self, admin_client, db):
-        """Deleting an item with checkouts should cascade delete them."""
+    def test_delete_moves_the_row_to_trash(self, admin_client, db):
+        item_id = _insert_item(db, title="Trash Bound", isbn="9780000002051")
+        db.commit()
+        resp = admin_client.delete(f"/api/items/{item_id}")
+        assert resp.status_code == 200
+        assert "Moved to Trash: Trash Bound" in resp.headers["HX-Trigger"]
+        with get_db() as check_db:
+            row = check_db.execute(
+                "SELECT deleted_at FROM items WHERE id = ?", (item_id,)
+            ).fetchone()
+            assert row is not None and row["deleted_at"] is not None
+            assert check_db.execute(
+                "SELECT 1 FROM items_live WHERE id = ?", (item_id,)
+            ).fetchone() is None
+        # A second delete is a no-op, not an error.
+        assert admin_client.delete(f"/api/items/{item_id}").status_code == 200
+
+    def test_delete_keeps_the_loan_hidden_and_restore_brings_it_back(self, admin_client, db):
+        """Delete no longer cascades: the loan survives, hidden from every
+        lent-out count, and returns with the item."""
         item_id = _insert_item(db, title="Checked Out", isbn="9780000002044")
         bid = _insert_borrower(db, "Test")
         db.execute(
@@ -87,9 +113,20 @@ class TestDeleteItem:
         resp = admin_client.delete(f"/api/items/{item_id}")
         assert resp.status_code == 200
 
+        from app.services import item_write
+        from app.services.home_dashboard import dashboard_summary
+
         with get_db() as check_db:
             checkout = check_db.execute("SELECT id FROM checkouts WHERE item_id = ?", (item_id,)).fetchone()
-            assert checkout is None
+            assert checkout is not None
+            assert dashboard_summary(check_db)["lent_out_count"] == 0
+        browse = admin_client.get("/api/search", params={"lent_out": "1"}).text
+        assert "Checked Out" not in browse
+
+        with get_db() as check_db:
+            assert item_write.restore_item(check_db, item_id)
+        with get_db() as check_db:
+            assert dashboard_summary(check_db)["lent_out_count"] == 1
 
 
 class TestBrowseLentOutFilter:
@@ -381,8 +418,11 @@ class TestMigrationLoggingDefersOutsideTransaction:
         # Everything after 14 is pending in this fixture — derived rather than
         # hardcoded so adding a migration doesn't fail this test.
         pending = [m for m in MIGRATIONS if m[0] > 14]
-        assert len(logs) == len(pending)
+        applied = [line for line in logs if line.startswith("Applied migration")]
+        assert len(applied) == len(pending)
         assert any("Applied migration 15" in line for line in logs)
+        # The boot steps report through the same list (the author index build).
+        assert any(line.startswith("Built author index") for line in logs)
         # Nothing was emitted while the transaction was open.
         assert [r for r in caplog.records if "Applied migration" in r.getMessage()] == []
 
@@ -1494,8 +1534,10 @@ class TestLanguageFilter:
         })
         html = resp.content.decode()
         import re
-        m = re.search(r'<option value="read"[^>]*>Read(?: \((\d+)\))?</option>', html)
-        assert m, "Read option missing"
+        # No media_type_filter is active, so the option carries the neutral
+        # word ("Finished"), not the book word "Read".
+        m = re.search(r'<option value="read"[^>]*>Finished(?: \((\d+)\))?</option>', html)
+        assert m, "Finished option missing"
         # 2 items are 'read' overall but only 1 is German.
         assert m.group(1) == "1", m.group(0)
 
@@ -1653,6 +1695,17 @@ class TestEditFormValueFunnel:
         assert resp.headers["location"].startswith(f"/item/{item_id}")
         row = self._row(item_id, "isbn", "isbn10")
         assert (row["isbn"], row["isbn10"]) == ("9780547928227", "054792822X")
+
+    def test_a_dvd_edit_form_carries_watch_words_and_round_trips_status(self, editor_client, db):
+        item_id = _insert_item(db, title="Edit DVD", isbn=None, media_type="dvd")
+        db.commit()
+        _, html = _rendered_form(editor_client, item_id)
+        select = re.search(r'<select id="reading_status".*?</select>', html, re.S)
+        assert select and ">Want to Watch</option>" in select.group(0)
+
+        resp = self._post(editor_client, item_id, reading_status="read")
+        assert resp.status_code == 303
+        assert self._row(item_id, "reading_status")["reading_status"] == "read"
 
     def test_bad_check_digit_redirects_back_with_the_code_and_saves_nothing(self, editor_client, db):
         item_id = _insert_item(db, title="Edit Bad", isbn="9780000000026")
@@ -1909,6 +1962,98 @@ class TestEditFormLegacyInvalidIdentifierNote:
         assert 'data-testid="upc-stored-invalid"' not in html
 
 
+class TestRefusedEditSaveLeavesTheCoverAlone:
+    """#127: a refused edit save must not write the uploaded cover — the
+    existing file stays byte-identical and no new file appears."""
+
+    OLD = b"\xff\xd8\xff" + b"old-cover" * 40
+    NEW = b"\xff\xd8\xff" + b"new-cover" * 50
+
+    def _cover(self, item_id):
+        import app.config
+        return app.config.COVERS_DIR / f"{item_id}.jpg"
+
+    def _seed_cover(self, db, item_id):
+        path = self._cover(item_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(self.OLD)
+        db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (f"covers/{item_id}.jpg", item_id))
+        db.commit()
+
+    def _post(self, client, item_id, data=None, **changes):
+        if data is None:
+            data, _ = _rendered_form(client, item_id)
+            data.update(changes)
+        return client.post(f"/api/items/{item_id}", data=data,
+                           files={"cover": ("c.jpg", io.BytesIO(self.NEW), "image/jpeg")},
+                           follow_redirects=False)
+
+    def _row(self, item_id):
+        with get_db() as check_db:
+            return check_db.execute(
+                "SELECT title, cover_path FROM items WHERE id = ?", (item_id,)
+            ).fetchone()
+
+    def _assert_refused_untouched(self, resp, item_id, code):
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/item/{item_id}/edit?error={code}"
+        assert self._cover(item_id).read_bytes() == self.OLD
+        assert self._row(item_id)["cover_path"] == f"covers/{item_id}.jpg"
+
+    def test_invalid_isbn_keeps_the_existing_cover(self, editor_client, db):
+        item_id = _insert_item(db, title="Cover ISBN", isbn="9780000000026")
+        self._seed_cover(db, item_id)
+        resp = self._post(editor_client, item_id, isbn=TestEditFormValueFunnel.INVALID_ISBN)
+        self._assert_refused_untouched(resp, item_id, "invalid_isbn")
+
+    def test_invalid_upc_keeps_the_existing_cover(self, editor_client, db):
+        item_id = _insert_item(db, title="Cover UPC", isbn=None, upc="078073003501", media_type="dvd")
+        self._seed_cover(db, item_id)
+        resp = self._post(editor_client, item_id, upc=TestEditFormValueFunnel.INVALID_UPC)
+        self._assert_refused_untouched(resp, item_id, "invalid_upc")
+
+    def test_funnel_refusal_keeps_the_existing_cover(self, editor_client, db):
+        item_id = _insert_item(db, title="Cover Location", isbn="9780000000026")
+        self._seed_cover(db, item_id)
+        resp = self._post(editor_client, item_id, location_id="999999")
+        self._assert_refused_untouched(resp, item_id, "unknown_location")
+
+    def test_refusal_on_a_coverless_row_writes_no_file(self, editor_client, db):
+        item_id = _insert_item(db, title="No Cover", isbn="9780000000026")
+        db.commit()
+        resp = self._post(editor_client, item_id, isbn=TestEditFormValueFunnel.INVALID_ISBN)
+        assert resp.headers["location"] == f"/item/{item_id}/edit?error=invalid_isbn"
+        assert not self._cover(item_id).exists()
+        assert self._row(item_id)["cover_path"] is None
+
+    def test_stale_form_for_a_trashed_item_writes_no_file(self, editor_client, db):
+        from app.services.item_write import trash_item
+        item_id = _insert_item(db, title="Trashed", isbn="9780000000026")
+        trash_item(db, item_id)
+        db.commit()
+        resp = self._post(editor_client, item_id, data={"title": "Stale"})
+        assert resp.status_code == 404
+        assert not self._cover(item_id).exists()
+
+    def test_a_successful_save_writes_the_cover(self, editor_client, db):
+        item_id = _insert_item(db, title="Cover Saved", isbn="9780000000026")
+        self._seed_cover(db, item_id)
+        resp = self._post(editor_client, item_id, title="Cover Saved 2")
+        assert resp.headers["location"] == f"/item/{item_id}"
+        assert self._cover(item_id).read_bytes() == self.NEW
+        row = self._row(item_id)
+        assert (row["title"], row["cover_path"]) == ("Cover Saved 2", f"covers/{item_id}.jpg")
+
+    def test_a_failed_cover_write_rolls_the_row_back(self, editor_client, db):
+        item_id = _insert_item(db, title="Rollback", isbn="9780000000026")
+        db.commit()
+        with patch("app.services.covers.write_uploaded_cover", side_effect=OSError("disk full")):
+            with pytest.raises(OSError):
+                self._post(editor_client, item_id, title="Should Roll Back")
+        row = self._row(item_id)
+        assert (row["title"], row["cover_path"]) == ("Rollback", None)
+
+
 class TestBulkUpdateValueFunnel:
     def _ids(self, db, n=3):
         ids = [_insert_item(db, title=f"Bulk {i}", isbn=None) for i in range(n)]
@@ -2087,3 +2232,94 @@ class TestTheRetiredKidsBookAliasOnEdit:
         ).fetchone()["c"] == 1, (
             "the conflict must be caught, leaving the original owner alone"
         )
+
+
+class TestScanAddIntegrityErrorGuard:
+    """F-BUG-1 (review 2026-09-23): the ISBN scan-add and title-search-add
+    paths saved through `_save_item` with no `sqlite3.IntegrityError` catch,
+    unlike the UPC path (`items_common._scan_upc`, see
+    `TestScanIntegrityErrorGuard` in test_scan_upc_enrichment.py) and Photo
+    Intake (`intake.py`). A rival insert landing during this request's own
+    metadata lookup — a double submit, or two devices scanning the same
+    ISBN — tripped `UNIQUE(isbn, media_type)` as an uncaught 500 instead of
+    the duplicate card the pre-check above already knows how to render."""
+
+    ISBN13 = "9780000009005"
+
+    def _race_during_lookup(self, monkeypatch, media_type="book", title="Raced In",
+                             **rival_kwargs):
+        async def lookup(isbn13, hc_token, client, *, google_api_key=None):
+            # The rival writer commits on a separate connection, inside the
+            # window this request's own lookup occupies — exactly the
+            # `TestScanIntegrityErrorGuard._race_during_lookup` shape.
+            with get_db() as rival:
+                _insert_item(rival, title=title, isbn=isbn13, media_type=media_type,
+                             **rival_kwargs)
+            return {"title": "Winner", "authors": None}, "openlibrary", {}, None
+
+        monkeypatch.setattr(items_common, "_lookup_metadata", lookup)
+
+    def test_scan_add_reports_duplicate_not_500(self, editor_client, db, monkeypatch):
+        self._race_during_lookup(monkeypatch)
+
+        resp = editor_client.post(
+            "/api/scan", data={"isbn": self.ISBN13, "media_type": "book", "mode": "add"},
+        )
+
+        assert resp.status_code == 200
+        assert "duplicate" in resp.text.lower()
+        assert db.execute(
+            "SELECT COUNT(*) c FROM items WHERE isbn = ?", (self.ISBN13,)
+        ).fetchone()["c"] == 1
+
+    def test_scan_add_promotes_a_wishlisted_row_that_lands_during_the_race(
+        self, editor_client, db, monkeypatch
+    ):
+        """The pre-check promotes a wishlisted row it finds before the
+        lookup starts (#125); the race catch must apply the same rule to
+        one that lands during it, not just report it as a plain
+        duplicate — G100's "apply the transition at every guard"."""
+        self._race_during_lookup(monkeypatch, owned=0, wishlisted=True)
+
+        resp = editor_client.post(
+            "/api/scan", data={"isbn": self.ISBN13, "media_type": "book", "mode": "add"},
+        )
+
+        assert resp.status_code == 200
+        assert "Now owned" in resp.text
+        row = db.execute(
+            "SELECT owned FROM items WHERE isbn = ?", (self.ISBN13,)
+        ).fetchone()
+        assert row["owned"] == 1
+
+    def test_scan_add_in_wishlist_mode_does_not_promote_the_raced_in_row(
+        self, editor_client, db, monkeypatch
+    ):
+        """A wishlist-mode scan must never promote, even a row that lands
+        owned during the race — the same `mode != "wishlist"` gate the
+        pre-check applies."""
+        self._race_during_lookup(monkeypatch)  # owned=1 (default), not wishlisted
+
+        resp = editor_client.post(
+            "/api/scan", data={"isbn": self.ISBN13, "media_type": "book", "mode": "wishlist"},
+        )
+
+        assert resp.status_code == 200
+        assert "duplicate" in resp.text.lower()
+        row = db.execute(
+            "SELECT owned FROM items WHERE isbn = ?", (self.ISBN13,)
+        ).fetchone()
+        assert row["owned"] == 1, "the rival's own ownership must be left alone"
+
+    def test_book_search_add_reports_duplicate_not_500(self, editor_client, db, monkeypatch):
+        self._race_during_lookup(monkeypatch)
+
+        resp = editor_client.post(
+            "/api/books/add", data={"isbn": self.ISBN13, "media_type": "book"},
+        )
+
+        assert resp.status_code == 200
+        assert "duplicate" in resp.text.lower()
+        assert db.execute(
+            "SELECT COUNT(*) c FROM items WHERE isbn = ?", (self.ISBN13,)
+        ).fetchone()["c"] == 1

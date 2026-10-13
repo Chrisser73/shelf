@@ -6,22 +6,37 @@ function browsePage() {
         bulkLocationVal: '',
         bulkTypeVal: '',
         bulkStatusVal: '',
+        bulkLanguageVal: '',
+        bulkRegionVal: '',
+        bulkPlatformVal: '',
+        bulkCollectorConditionVal: '',
         bulkWishlistVal: '',
         bulkSeriesVal: '',
+        bulkLanguageVal: '',
+        bulkTagVal: '',
         filterPills: [],
         viewMode: localStorage.getItem('shelf-view') || 'grid',
+        gridSize: localStorage.getItem('shelf-grid-size') || 'default',
         // viewMode is the only thing that decides whether the list view
         // exists at all; visibleCols only decides which cells of an existing
         // list are shown. Keep that distinction straight -- it is easy to
         // gate the wrong behaviour on the wrong flag.
         visibleCols: {},
+        visibleFilters: {},
         columnsOpen: false,
+        filterEditorOpen: false,
         filtersOpen: false,
+        missingValues: [],
+        configuredMissingValues: [],
+        showingConfiguredMissingValues: false,
         // Bound (x-model) to BOTH the mobile and desktop search inputs, which
         // share name="q". Keeping them in lockstep is what stops hx-include
         // from sending "q=typed&q=" — Starlette's QueryParams.get() returns the
         // LAST duplicate, so an empty second input used to wipe the search.
         searchQuery: '',
+        // The list view has one active sort at a time. Table-header clicks use
+        // the same query parameter and server-side ordering as the Sort by menu.
+        listSort: new URLSearchParams(window.location.search).get('sort') || 'newest',
 
         init() {
             // Must run before anything else touches the DOM. visibleCols needs
@@ -33,6 +48,15 @@ function browsePage() {
             // loadColumns() always returns a complete object, so it must run
             // first rather than being populated lazily.
             this.visibleCols = this.loadColumns();
+            this.visibleFilters = this.loadFilters();
+            var missingInput = document.querySelector('[name="missing_value"]');
+            this.missingValues = missingInput && missingInput.value
+                ? missingInput.value.split(',').filter(Boolean) : [];
+            this.configuredMissingValues = (this.$el.dataset.configuredMissingFields || '')
+                .split(',').filter(Boolean);
+            this.showingConfiguredMissingValues = !this.missingValues.length &&
+                this.$el.dataset.initialMissingGameMetadata === '1';
+            this.applyFilterVisibility();
             this.searchQuery = this.$el.dataset.initialQuery || '';
             // Returning to a bare /browse re-applies the last filter set.
             // Falls through to the sort-only restore when there's nothing stored
@@ -59,11 +83,31 @@ function browsePage() {
                 });
                 this.syncFilters();
                 this.updateUrl();
+                this.applyFilterVisibility();
+            });
+            // OOB dropdown replacements can happen after the first swap
+            // event. Reapply after htmx has settled every replacement so a
+            // user-hidden filter cannot reappear after a search.
+            document.body.addEventListener('htmx:afterSettle', () => {
+                this.applyFilterVisibility();
+                requestAnimationFrame(function() {
+                    if (window.renderShelfLucideIcons) window.renderShelfLucideIcons();
+                });
             });
             // Persist sort preference on change
+            var browse = this;
             document.querySelector('[name="sort"]')?.addEventListener('change', function(e) {
                 localStorage.setItem('shelf-sort', e.target.value);
+                browse.listSort = e.target.value;
             });
+            try {
+                var flash = sessionStorage.getItem('shelf-bulk-flash');
+                if (flash) {
+                    sessionStorage.removeItem('shelf-bulk-flash');
+                    flash = JSON.parse(flash);
+                    showToast(flash.message, flash.type);
+                }
+            } catch (e) {}
             // Show keyboard shortcut hint on first visit
             if (!localStorage.getItem('shelf-shortcuts-seen')) {
                 localStorage.setItem('shelf-shortcuts-seen', '1');
@@ -73,6 +117,16 @@ function browsePage() {
             this._keyHandler = (e) => this.handleKey(e);
             document.addEventListener('keydown', this._keyHandler);
             this.watchGridForHtmx();
+            this.$watch('selectedIds', () => this.$nextTick(() => this.syncBulkBarSpacing()));
+            this.$watch('selectMode', () => this.$nextTick(() => this.syncBulkBarSpacing()));
+        },
+
+        // The fixed bulk bar must never hide the final collection cards.
+        // It wraps on small screens, so measure rather than guessing a height.
+        syncBulkBarSpacing() {
+            var bar = this.$refs && this.$refs.bulkBar;
+            var active = this.selectMode && this.selectedIds.length > 0 && bar;
+            document.body.style.paddingBottom = active ? (bar.offsetHeight + 24) + 'px' : '';
         },
 
         // Both branches of item_grid.html live inside <template x-if="viewMode
@@ -84,15 +138,37 @@ function browsePage() {
         watchGridForHtmx() {
             var grid = document.getElementById('item-grid');
             if (!grid || !window.MutationObserver) return;
+            var iconRenderQueued = false;
             var observer = new MutationObserver(function(records) {
+                var hasNewLucidePlaceholder = false;
                 records.forEach(function(rec) {
                     rec.addedNodes.forEach(function(node) {
                         // ELEMENT_NODE only; htmx.process ignores text nodes.
                         // Re-processing an already-wired element is a no-op for
                         // htmx, so overlapping mutations are safe.
-                        if (node.nodeType === 1) htmx.process(node);
+                        if (node.nodeType === 1) {
+                            htmx.process(node);
+                            // Lucide replaces an <i> with an <svg>, which is
+                            // itself another mutation. Only schedule a render
+                            // for a genuinely new placeholder, never for the
+                            // SVG Lucide just produced; otherwise cards keep
+                            // repainting their icons in a loop.
+                            if (node.matches('i[data-lucide]') || node.querySelector('i[data-lucide]')) {
+                                hasNewLucidePlaceholder = true;
+                            }
+                        }
                     });
                 });
+                // Alpine's x-if inserts the list-table contents in a later
+                // mutation. A frame after that is the first point at which
+                // the Lucide placeholders exist as real nodes to replace.
+                if (hasNewLucidePlaceholder && !iconRenderQueued) {
+                    iconRenderQueued = true;
+                    requestAnimationFrame(function() {
+                        iconRenderQueued = false;
+                        if (window.renderShelfLucideIcons) window.renderShelfLucideIcons();
+                    });
+                }
             });
             observer.observe(grid, {childList: true, subtree: true});
             this._gridObserver = observer;
@@ -143,6 +219,76 @@ function browsePage() {
         // Every filter control, for the htmx re-process loop.
         filterNames() {
             return this.filterDefs().map(function(def) { return def.name; });
+        },
+
+        editableFilterDefs() {
+            return this.filterDefs().filter(function(def) {
+                return !['q', 'sort', 'view', 'missing_game_metadata', 'unknown_platform', 'cover_missing'].includes(def.name);
+            });
+        },
+
+        filterLabel(def) {
+            return {owned: 'Lists', lent_out: 'Lent out', platform_filter: 'Platform',
+                tag: 'Tag', author_filter: 'Author', missing_value: 'Missing'}[def.name] || def.prefix || def.name;
+        },
+
+        loadFilters() {
+            var stored = {};
+            try { stored = JSON.parse(localStorage.getItem('shelf-filters') || '{}') || {}; } catch (e) {}
+            var visible = {};
+            this.editableFilterDefs().forEach(function(def) {
+                visible[def.name] = typeof stored[def.name] === 'boolean' ? stored[def.name] : true;
+            });
+            return visible;
+        },
+
+        toggleFilter(name) {
+            var next = Object.assign({}, this.visibleFilters, {[name]: !this.visibleFilters[name]});
+            this.visibleFilters = next;
+            localStorage.setItem('shelf-filters', JSON.stringify(next));
+            this.applyFilterVisibility();
+        },
+
+        resetFilters() {
+            this.visibleFilters = this.editableFilterDefs().reduce(function(out, def) { out[def.name] = true; return out; }, {});
+            localStorage.removeItem('shelf-filters');
+            this.applyFilterVisibility();
+        },
+
+        applyFilterVisibility() {
+            var self = this;
+            this.editableFilterDefs().forEach(function(def) {
+                document.querySelectorAll('[name="' + def.name + '"]').forEach(function(el) {
+                    // Search has the same name but remains permanently visible.
+                    if (el.type === 'search') return;
+                    var control = el.closest('[data-filter-control]') || el;
+                    control.style.display = self.visibleFilters[def.name] ? '' : 'none';
+                });
+            });
+        },
+
+        toggleMissingValue(value, checked) {
+            var currentValues = this.showingConfiguredMissingValues
+                ? this.configuredMissingValues : this.missingValues;
+            var values = currentValues.filter(function(current) { return current !== value; });
+            if (checked) values.push(value);
+            this.missingValues = values;
+            this.showingConfiguredMissingValues = false;
+            this.setControlValue('missing_value', values.join(','));
+            var input = document.querySelector('[name="missing_value"]');
+            if (input) htmx.trigger(input, 'change');
+        },
+
+        missingValueSummary() {
+            var values = this.showingConfiguredMissingValues
+                ? this.configuredMissingValues : this.missingValues;
+            return values.length ? 'Missing (' + values.length + ')' : 'Missing';
+        },
+
+        missingValueSelected(value) {
+            var values = this.showingConfiguredMissingValues
+                ? this.configuredMissingValues : this.missingValues;
+            return values.includes(value);
         },
 
         // The Browse list-view column set, read from the JSON block
@@ -241,8 +387,20 @@ function browsePage() {
         // assigning Alpine state alone because htmx serializes the form
         // synchronously on `change`, before Alpine flushes its DOM effects.
         setControlValue(name, value) {
+            if (name === 'missing_value') {
+                this.missingValues = value ? value.split(',').filter(Boolean) : [];
+                this.showingConfiguredMissingValues = false;
+            }
             document.querySelectorAll('[name="' + name + '"]').forEach(function(el) {
                 el.value = value;
+            });
+        },
+
+        ensureSortOption(value) {
+            document.querySelectorAll('[name="sort"]').forEach(function(select) {
+                if (select.querySelector('option[value="' + value + '"]')) return;
+                var label = value.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+                select.add(new Option(label, value));
             });
         },
 
@@ -257,9 +415,16 @@ function browsePage() {
             var saved = localStorage.getItem('shelf-sort');
             if (!saved || saved === 'newest') return;
             var sortEl = document.querySelector('[name="sort"]');
-            if (!sortEl || !sortEl.querySelector('option[value="' + saved + '"]')) return;
+            if (!sortEl) return;
+            this.ensureSortOption(saved);
             this.setControlValue('sort', saved);
-            this.runSearch(new URLSearchParams({sort: saved}));
+            this.listSort = saved;
+            // Keep filters supplied by a Home tile or shared link. Applying a
+            // stored sort must supplement the current query, never replace it
+            // (for example, /browse?owned=0 must remain the wishlist view).
+            var params = new URLSearchParams(window.location.search);
+            params.set('sort', saved);
+            this.runSearch(params);
         },
 
         // Shared by restoreSort() and restoreFilters(). `view` is mandatory:
@@ -269,6 +434,35 @@ function browsePage() {
             params.set('view', this.viewMode);
             htmx.ajax('GET', '/api/search?' + params.toString(),
                       {target: '#item-grid', swap: 'innerHTML'});
+        },
+
+        sortListColumn(column) {
+            var sorts = {
+                title: ['title_asc', 'title_desc'], author: ['author', 'author_desc'],
+                platform: ['platform', 'platform_desc'], publisher: ['publisher', 'publisher_desc'],
+                year: ['year_asc', 'year_desc'], collector_condition: ['collector_condition', 'collector_condition_desc'],
+                media_type: ['media_type', 'media_type_desc'], location: ['location', 'location_desc'],
+                status: ['status', 'status_desc'], value: ['value', 'value_desc'],
+                series: ['series', 'series_desc'], pages: ['pages', 'pages_desc'],
+                language: ['language', 'language_desc'], added: ['oldest', 'newest'],
+                region: ['region', 'region_desc'],
+                identifier: ['identifier', 'identifier_desc']
+            };
+            var pair = sorts[column];
+            if (!pair) return;
+            var next = this.listSort === pair[0] ? pair[1] : pair[0];
+            this.listSort = next;
+            this.ensureSortOption(next);
+            this.setControlValue('sort', next);
+            localStorage.setItem('shelf-sort', next);
+            var params = new URLSearchParams();
+            var self = this;
+            this.urlFilterNames().forEach(function(name) {
+                var el = document.querySelector('[name="' + name + '"]');
+                if (el && el.value) params.set(name, el.value);
+            });
+            params.set('sort', next);
+            self.runSearch(params);
         },
 
         // Issue #8: filters lived only in DOM controls + history.replaceState,
@@ -281,6 +475,14 @@ function browsePage() {
             var stored = sessionStorage.getItem('shelf-browse-qs');
             if (!stored) return false;
             var params = new URLSearchParams(stored);
+            // #117b: the author chip's name comes from the server, which a
+            // fragment replay never asks for — the chip would show an id. So
+            // an author filter restores as a full page load instead.
+            var author = document.querySelector('[name="author_filter"]');
+            if (params.get('author_filter') && author && !author.dataset.label) {
+                window.location.replace('/browse?' + stored);
+                return true;
+            }
             var applied = new URLSearchParams();
             var any = false;
             var self = this;
@@ -325,6 +527,19 @@ function browsePage() {
             if (trigger) htmx.trigger(trigger, 'change');
         },
 
+        setGridSize(size) {
+            this.gridSize = size;
+            localStorage.setItem('shelf-grid-size', size);
+        },
+
+        listSortDirection(column) {
+            if (this.listSort === column || this.listSort === column + '_asc' ||
+                (column === 'title' && this.listSort === 'title_asc')) return 'asc';
+            if (this.listSort === column + '_desc' ||
+                (column === 'title' && this.listSort === 'title_desc')) return 'desc';
+            return 'none';
+        },
+
         syncFilters() {
             var pills = [];
             this.filterDefs().forEach(function(def) {
@@ -336,7 +551,17 @@ function browsePage() {
                     var opt = el.options[el.selectedIndex];
                     label = opt ? opt.text.replace(/ \(\d+\)$/, '') : el.value;
                 } else {
-                    label = def.prefix ? def.prefix + ': ' + el.value : el.value;
+                    // A hidden control may carry a display label (the author
+                    // filter's name) in place of its raw value.
+                    var shown = el.dataset.label || (el.options && el.selectedIndex >= 0 && el.options[el.selectedIndex].text) || el.value;
+                    var prefix = def.prefix;
+                    if (def.name === 'author_filter') {
+                        // Author/Artist/Director/Developer, as the sort option
+                        // already switches with the Type filter.
+                        var creator = document.getElementById('sort-option-author');
+                        if (creator && creator.text) prefix = creator.text;
+                    }
+                    label = prefix ? prefix + ': ' + shown : shown;
                 }
                 if (def.prefix && el.tagName === 'SELECT') label = def.prefix + ': ' + label;
                 pills.push({name: def.name, label: label});
@@ -367,7 +592,11 @@ function browsePage() {
             var el = document.querySelector('[name="' + name + '"]');
             if (el) {
                 this.setControlValue(name, def ? def.clearTo : '');
-                htmx.trigger(el, el.tagName === 'SELECT' ? 'change' : 'keyup');
+                if (el.dataset.label) el.dataset.label = '';
+                // A hidden input ignores keyup, so it listens for change like
+                // a select does; text inputs keep their keyup trigger.
+                var isChange = el.tagName === 'SELECT' || el.type === 'hidden';
+                htmx.trigger(el, isChange ? 'change' : 'keyup');
             }
         },
 
@@ -381,6 +610,8 @@ function browsePage() {
                 if (def.clearTo === null) return;
                 self.setControlValue(def.name, def.clearTo);
             });
+            var author = document.querySelector('[name="author_filter"]');
+            if (author) author.dataset.label = '';
             sessionStorage.removeItem('shelf-browse-qs');
             var trigger = document.querySelector('[name="media_type_filter"]') || document.querySelector('[name="q"]');
             if (trigger) htmx.trigger(trigger, 'change');
@@ -402,6 +633,11 @@ function browsePage() {
         // anchor markup, which never reaches this handler).
         openOrToggle(id, url, event) {
             if (this.selectMode) { this.toggleItem(id); return; }
+            // Carry a normalized Browse query to the detail page. This makes
+            // “Back to collection” return to the exact filtered result set,
+            // rather than relying on tab-scoped session storage.
+            var query = window.location.search.slice(1);
+            if (query) url += '?browse=' + encodeURIComponent(query);
             if (event && (event.ctrlKey || event.metaKey)) window.open(url, '_blank');
             else window.location = url;
         },
@@ -452,12 +688,49 @@ function browsePage() {
             }
         },
 
+        async bulkTags(mode) {
+            // Capture both before the await -- selectedIds/bulkTagVal can
+            // change (or the component re-render) while the fetch is in
+            // flight (G2).
+            var name = (this.bulkTagVal || '').trim();
+            if (!name || !this.selectedIds.length) return;
+            var ids = this.selectedIds;
+            try {
+                var resp = await fetch('/api/items/bulk-tags', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken()},
+                    body: JSON.stringify({
+                        item_ids: ids,
+                        add: mode === 'add' ? [name] : [],
+                        remove: mode === 'remove' ? [name] : []
+                    })
+                });
+                var data = await resp.json();
+                if (data.ok) {
+                    // The reload below would wipe a toast shown now; init()
+                    // shows this one after the page comes back.
+                    try {
+                        sessionStorage.setItem('shelf-bulk-flash', JSON.stringify({
+                            message: data.message, type: data.updated ? 'success' : 'info'
+                        }));
+                    } catch (e) {}
+                    this.selectedIds = [];
+                    this.bulkTagVal = '';
+                    location.reload();
+                } else {
+                    showToast(data.message || 'Tag update failed', 'error');
+                }
+            } catch (e) {
+                showToast('Tag update failed: ' + e.message, 'error');
+            }
+        },
+
         async bulkDelete() {
-            if (!confirm('Delete ' + this.selectedIds.length + ' items?')) return;
+            if (!confirm('Move ' + this.selectedIds.length + ' items to Trash?')) return;
             for (var id of this.selectedIds) {
                 await fetch('/api/items/' + id, {method: 'DELETE', headers: {'X-CSRF-Token': window.csrfToken()}});
             }
-            showToast('Deleted ' + this.selectedIds.length + ' items', 'success');
+            showToast('Moved ' + this.selectedIds.length + ' items to Trash', 'success');
             this.selectedIds = [];
             location.reload();
         }

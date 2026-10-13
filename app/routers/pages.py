@@ -2,22 +2,34 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse
+from starlette.datastructures import QueryParams
 
-from app import browse_filters, nav
+from app import browse_filters, features, nav
 from app.auth import require_role
-from app.config import MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES
+from app.features import feature_enabled,  require_feature
+from app.config import (
+    MEDIA_TYPES, DEFAULT_PAGE_SIZE, BOOK_MEDIA_TYPES, STATUS_MEDIA_TYPES,
+    status_labels, READ_LABELS, WATCH_LABELS, PLAY_LABELS,
+)
 from app.services.synopsis import SYNOPSIS_MEDIA_TYPES
 from app.currency import get_currency
+from app.services import author_index
 from app.services import browse_counts
 from app.services import lists
 from app.services import isbn as isbn_svc
+from app.services.item_write import COLLECTOR_CONDITIONS
 from app.services import upc as upc_svc
+from app.services import tags as tags_svc
+from app.services import price_alerts
+from app.services import wrapups
 from app.database import get_db, get_setting, get_game_platforms, get_reading_history
 from app.routers import items_common
 from app.routers.items_common import SORT_OPTIONS
 from app.routers.series import find_gaps
-from app.services import item_copies, item_template
+from app.services import item_copies, item_template, item_write
+from app.services import locations as location_svc
 from app.services.home_dashboard import dashboard_summary
+from app.services.platform_logos import available_svg_choices, logo_path
 
 router = APIRouter()
 
@@ -29,7 +41,24 @@ async def index(
 ):
     """Render a collection overview while leaving Browse for exploration."""
     with get_db() as db:
-        summary = dashboard_summary(db, recent_limit=8)
+        summary = dashboard_summary(db, recent_limit=8, user_id=request.state.user["id"])
+        from app.services import game_metadata
+        missing_game_metadata_labels = [
+            game_metadata.MISSING_FIELD_LABELS[field]
+            for field in game_metadata.configured_missing_fields(db)
+        ]
+        from app.services.user_preferences import get_preference
+        home_tiles = {key: get_preference(db, request.state.user["id"], f"home_tile:{key}", "1") == "1"
+                      for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types")}
+        collection_appearance = {
+            "always_show_game_title": get_preference(db, request.state.user["id"], "always_show_game_title") == "1",
+            "show_platform_logo": get_preference(db, request.state.user["id"], "show_platform_logo_in_collection") == "1",
+            "show_collector_condition": get_preference(db, request.state.user["id"], "show_collector_condition_in_collection") == "1",
+            "show_region": get_preference(db, request.state.user["id"], "show_region_in_collection") == "1",
+            "show_new_label": get_preference(db, request.state.user["id"], "show_new_label_in_collection", "1") == "1",
+            "show_home_collection_mix": get_preference(db, request.state.user["id"], "show_home_collection_mix", "1") == "1",
+            "show_home_useful_places": get_preference(db, request.state.user["id"], "show_home_useful_places", "1") == "1",
+        }
 
     return request.app.state.templates.TemplateResponse(
         request,
@@ -37,6 +66,13 @@ async def index(
         {
             **summary,
             "media_type_labels": MEDIA_TYPES,
+            "home_tiles": home_tiles,
+            "missing_game_metadata_labels": missing_game_metadata_labels,
+            "collection_appearance": collection_appearance,
+            "feature_flags": {
+                "lending": feature_enabled("lending"),
+                "stats": feature_enabled("stats"),
+            },
         },
     )
 
@@ -57,9 +93,10 @@ async def browse(
     values = browse_filters.values_from(request.query_params)
     # Truncate search query to prevent slow LIKE scans (parity with /api/search)
     values["q"] = values["q"][:200]
-    where, params = browse_filters.build_where(values)
-
     with get_db() as db:
+        from app.services import game_metadata
+        missing_fields = game_metadata.configured_missing_fields(db)
+        where, params = browse_filters.build_where(values, missing_fields=missing_fields)
         _, order_clause = SORT_OPTIONS.get(values["sort"], SORT_OPTIONS["newest"])
 
         from app.routers.checkouts import OVERDUE_CONDITION, get_overdue_days
@@ -74,6 +111,7 @@ async def browse(
             f"{where} ORDER BY {order_clause} LIMIT ?",
             [get_overdue_days(db)] + params + [DEFAULT_PAGE_SIZE],
         ).fetchall()
+        tags_by_item = tags_svc.tags_for_items(db, [row["id"] for row in items])
 
         total_filtered = db.execute(
             f"SELECT COUNT(*) as c FROM items_live i {where}", params
@@ -91,16 +129,21 @@ async def browse(
         # Cross-filter dropdown counts — `locations`, `type_counts`,
         # `location_counts`, `reading_status_counts`, `owned_count`,
         # `wishlist_count` and `filtered_total` all come from here.
-        counts = browse_counts.filter_counts(db, values, total_filtered)
+        counts = browse_counts.filter_counts(db, values, total_filtered, missing_fields=missing_fields)
 
         # Deliberately still global (design §5): none of these appears in
         # `fragments/filter_counts_oob.html`, so none can diverge.
         lent_out_count = db.execute(
-            "SELECT COUNT(DISTINCT item_id) as c FROM checkouts WHERE checked_in IS NULL"
+            "SELECT COUNT(DISTINCT c.item_id) as c FROM checkouts c "
+            "JOIN items_live i ON i.id = c.item_id WHERE c.checked_in IS NULL"
         ).fetchone()["c"]
 
         from app.services.tags import get_all_tags
         all_tags = get_all_tags(db)
+        browse_authors = db.execute(
+            "SELECT a.id, a.name FROM authors a JOIN item_authors ia ON ia.author_id = a.id "
+            "JOIN items_live i ON i.id = ia.item_id GROUP BY a.id, a.name ORDER BY a.name COLLATE NOCASE"
+        ).fetchall()
 
         # Languages present in the library — the filter only renders/offers
         # what actually exists.
@@ -111,8 +154,43 @@ async def browse(
                 "WHERE language IS NOT NULL AND language != '' ORDER BY language"
             ).fetchall()
         ]
+        item_regions = [
+            row["region"]
+            for row in db.execute(
+                "SELECT DISTINCT region FROM items_live "
+                "WHERE region IS NOT NULL AND region != '' ORDER BY region"
+            ).fetchall()
+        ]
 
         has_more = len(items) < total_filtered
+        from app.services.user_preferences import get_preference
+        always_show_game_title = get_preference(
+            db, request.state.user["id"], "always_show_game_title"
+        ) == "1"
+        show_platform_logo_in_collection = get_preference(
+            db, request.state.user["id"], "show_platform_logo_in_collection"
+        ) == "1"
+        show_collector_condition_in_collection = get_preference(
+            db, request.state.user["id"], "show_collector_condition_in_collection"
+        ) == "1"
+        show_region_in_collection = get_preference(
+            db, request.state.user["id"], "show_region_in_collection"
+        ) == "1"
+        show_new_label_in_collection = get_preference(
+            db, request.state.user["id"], "show_new_label_in_collection", "1"
+        ) == "1"
+        show_wishlist_icon_in_collection = get_preference(
+            db, request.state.user["id"], "show_wishlist_icon_in_collection", "1"
+        ) == "1"
+        from app.services.user_preferences import platform_logo_map
+        platform_logo_paths = platform_logo_map(db, request.state.user["id"])
+        game_platforms = get_game_platforms(db)
+
+        # The author filter's chip shows a name, not an id (#117b).
+        author_filter_label = (
+            author_index.name_for(db, values["author_filter"])
+            if values["author_filter"] else None
+        )
 
         load_more_url = "/api/search?" + browse_filters.querystring(
             values, extra=["page=2"]
@@ -120,17 +198,32 @@ async def browse(
 
     ctx = {
         "items": items,
+        "tags_by_item": tags_by_item,
         "media_types": MEDIA_TYPES,
         "series_names": series_names,
         "all_tags": all_tags,
+        "browse_authors": browse_authors,
         "lent_out_count": lent_out_count,
         "item_languages": item_languages,
+        "item_regions": item_regions,
+        "missing_value_options": browse_filters.MISSING_VALUE_OPTIONS,
+        "configured_missing_fields": missing_fields,
         "has_more": has_more,
         "has_filters": browse_filters.has_active_filters(values),
         "load_more_url": load_more_url,
         "seven_days_ago": (datetime.now(tz=None) - timedelta(days=7)).strftime("%Y-%m-%d"),
         "initial_query": values["q"],
+        "search_query": values["q"],
+        "author_filter_label": author_filter_label,
         "initial_filters": {name: values[name] for name in browse_filters.FILTER_NAMES},
+        "always_show_game_title": always_show_game_title,
+        "show_platform_logo_in_collection": show_platform_logo_in_collection,
+        "show_collector_condition_in_collection": show_collector_condition_in_collection,
+        "show_region_in_collection": show_region_in_collection,
+        "show_new_label_in_collection": show_new_label_in_collection,
+        "show_wishlist_icon_in_collection": show_wishlist_icon_in_collection,
+        "platform_logo_paths": platform_logo_paths,
+        "game_platforms": game_platforms,
     }
     # `render_oob_counts` is deliberately NOT set: `browse.html` includes
     # `fragments/filter_counts_oob.html` via the item grid, and setting it
@@ -145,7 +238,8 @@ async def browse(
 
 
 @router.get("/discover")
-async def discover(request: Request, _=Depends(require_role("viewer"))):
+async def discover(request: Request, _=Depends(require_role("viewer")),
+                   __=Depends(require_feature("hardcover"))):
     with get_db() as db:
         has_hardcover = bool(get_setting(db, "hardcover_token"))
     return request.app.state.templates.TemplateResponse(
@@ -203,12 +297,26 @@ async def scan(
         "scan.html",
         {"media_types": MEDIA_TYPES, "game_platforms": game_platforms,
          "locations": locations, "borrowers": borrowers,
-         "manual_open": add == "manual", "manual_prefill": manual_prefill},
+         "manual_open": add == "manual", "manual_prefill": manual_prefill,
+         "off_scan_modes": features.disabled_scan_modes(),
+         "lending_enabled": feature_enabled("lending"),
+         "status_label_sets": _status_label_sets()},
     )
 
 
+def _status_label_sets():
+    """The Scan card's default-status words per media type: `auto` gets the
+    neutral set, and every status-capable type its own. The keys other than
+    `auto` are the types the control is enabled for."""
+    def words(labels):
+        return [labels.want, labels.doing, labels.done]
+    sets = {t: words(status_labels(t)) for t in sorted(STATUS_MEDIA_TYPES)}
+    return {"auto": words(status_labels(None)), **sets}
+
+
 @router.get("/intake")
-async def intake(request: Request, _=Depends(require_role("editor"))):
+async def intake(request: Request, _=Depends(require_role("editor")),
+                 __=Depends(require_feature("intake"))):
     """Shelf-photo bulk intake page."""
     from app.database import get_all_settings
     with get_db() as db:
@@ -216,12 +324,25 @@ async def intake(request: Request, _=Depends(require_role("editor"))):
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
         app_settings = get_all_settings(db)
+        game_platforms = get_game_platforms(db)
+        from app.services.user_preferences import get_preference
+        default_location_id = get_preference(db, request.state.user["id"], "default_location_id")
     provider = app_settings.get("vision_provider") or ""
+    from app.services import vision
+    vision_model = app_settings.get({
+        "anthropic": "anthropic_vision_model", "openai": "openai_vision_model", "ollama": "ollama_model",
+    }.get(provider, "")) or {
+        "anthropic": vision.DEFAULT_ANTHROPIC_MODEL,
+        "openai": vision.DEFAULT_OPENAI_MODEL,
+        "ollama": vision.DEFAULT_OLLAMA_MODEL,
+    }.get(provider, "")
     return request.app.state.templates.TemplateResponse(
         request,
         "intake.html",
-        {"locations": locations, "vision_provider": provider,
-         "media_types": MEDIA_TYPES},
+        {"locations": locations, "vision_provider": provider, "vision_model": vision_model,
+         "default_location_id": default_location_id,
+         "vision_connection_status": app_settings.get("vision_connection_status", ""),
+         "media_types": MEDIA_TYPES, "game_platforms": game_platforms},
     )
 
 
@@ -230,9 +351,17 @@ async def item_detail(
     request: Request,
     item_id: int,
     from_: str = Query("", alias="from"),
+    browse: str = Query(""),
     _=Depends(require_role("viewer")),
 ):
     back = nav.back_target(from_)
+    # A detail page may only return to a Browse URL made from the declared
+    # filter registry.  Do not echo a user-provided path/query back into HTML.
+    if browse:
+        browse_values = browse_filters.values_from(QueryParams(browse))
+        browse_query = browse_filters.querystring(browse_values)
+        if browse_query:
+            back = {"key": "", "path": f"/browse?{browse_query}", "label": "Back to collection"}
     with get_db() as db:
         item = db.execute(
             f"SELECT i.*, l.name as location_name, "
@@ -244,6 +373,10 @@ async def item_detail(
         ).fetchone()
         if not item:
             return RedirectResponse(url="/browse")
+        # Display legacy values correctly before the startup migration has
+        # rewritten the stored row.
+        item = dict(item)
+        item["alternate_title"] = item_write.repair_malformed_unicode(item.get("alternate_title"))
 
         # Checkout info
         current_checkout = db.execute(
@@ -310,12 +443,18 @@ async def item_detail(
         locations = db.execute(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
+        from app.services.user_preferences import get_preference
+        default_location_id = get_preference(
+            db, request.state.user["id"], "default_location_id"
+        )
 
         from app.services.tags import get_item_tags, get_all_tags
         item_tags = get_item_tags(db, item_id)
-        all_tags = get_all_tags(db)
+        all_tags = get_all_tags(db, media_type=item["media_type"])
 
         reading_history = get_reading_history(db, item_id)
+
+        item_authors = author_index.authors_for(db, item_id)
 
         # Series progress from two labelled sources: local siblings and the
         # Hardcover series_meta row. Never blended into one number — see
@@ -343,6 +482,9 @@ async def item_detail(
                 "gaps": find_gaps(positions),
                 "hc_total": meta["hc_total"] if meta else None,
             }
+        # The list-price line reads history only for the live item on screen;
+        # the template also gates it on feature_on('price_alerts').
+        price_line = price_alerts.price_line(db, item_id) if item["wishlisted"] else None
 
     return request.app.state.templates.TemplateResponse(
         request,
@@ -353,10 +495,12 @@ async def item_detail(
             "back": back,
             "copies": copies,
             "locations": locations,
+            "default_location_id": default_location_id,
             "item_tags": item_tags,
             "all_tags": all_tags,
             "media_types": MEDIA_TYPES,
             "book_media_types": BOOK_MEDIA_TYPES,
+            "status_media_types": STATUS_MEDIA_TYPES,
             "synopsis_media_types": SYNOPSIS_MEDIA_TYPES,
             "game_platforms": game_platforms,
             "has_hardcover": has_hardcover,
@@ -369,6 +513,8 @@ async def item_detail(
             "abs_url": abs_url,
             "reading_history": reading_history,
             "series_progress": series_progress,
+            "item_authors": item_authors,
+            "price_line": price_line,
         },
     )
 
@@ -379,20 +525,32 @@ async def item_edit(
     item_id: int,
     from_: str = Query("", alias="from"),
     error: str | None = Query(None),
+    trashed: int | None = Query(None),
     _=Depends(require_role("editor")),
 ):
     back = nav.back_target(from_)
+    trashed_title = None
     with get_db() as db:
         item = db.execute(
             f"SELECT i.*, {lists.WISHLISTED_SQL} AS wishlisted FROM items_live i WHERE i.id = ?",
             (item_id,),
         ).fetchone()
+        if not item:
+            return RedirectResponse(url="/browse")
+        item = dict(item)
+        item["alternate_title"] = item_write.repair_malformed_unicode(item.get("alternate_title"))
+        # An identifier_in_trash refusal names the blocking row by id; the
+        # title is resolved here and escaped by the template, so nothing the
+        # user typed is ever echoed back through the query string (G58).
+        # FastAPI rejects a non-integer `trashed`, so no parsing is needed.
+        if trashed is not None:
+            trashed_title = item_write.trashed_title(db, trashed)
         locations = db.execute(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
         game_platforms = get_game_platforms(db)
-    if not item:
-        return RedirectResponse(url="/browse")
+        item_tags = tags_svc.get_item_tags(db, item_id)
+        all_tags = tags_svc.get_all_tags(db, media_type=item["media_type"])
     # #87 T2: the edit funnel now saves a legacy checksum-invalid isbn/upc
     # unchanged rather than bouncing every save on that row (T1). Surface
     # that silently-kept state to the editor instead of leaving it invisible.
@@ -402,13 +560,22 @@ async def item_edit(
         request,
         "item_edit.html",
         {"item": item, "back": back, "media_types": MEDIA_TYPES, "game_platforms": game_platforms,
+         "collector_conditions": COLLECTOR_CONDITIONS,
          "locations": locations, "error": error,
+         "trashed_title": trashed_title,
+         "item_id": item_id, "item_tags": item_tags, "all_tags": all_tags,
          "isbn_invalid": isbn_invalid, "upc_invalid": upc_invalid},
     )
 
 
+def _today() -> date:
+    """The date the Stats pages read — one seam, so a test can pin January."""
+    return date.today()
+
+
 @router.get("/stats")
-async def stats(request: Request, _=Depends(require_role("viewer"))):
+async def stats(request: Request, _=Depends(require_role("viewer")),
+                __=Depends(require_feature("stats"))):
     with get_db() as db:
         by_type = db.execute(
             "SELECT media_type, COUNT(*) as c FROM items_live GROUP BY media_type ORDER BY c DESC"
@@ -440,9 +607,9 @@ async def stats(request: Request, _=Depends(require_role("viewer"))):
 
         # --- Dashboard chart data (see .devdocs/archive/completed/STATS_DASHBOARD.md) ---
         read_by_year = db.execute(
-            "SELECT substr(date_finished, 1, 4) as y, COUNT(*) as c FROM items_live "
+            "SELECT substr(date_finished, 1, 4) AS y, media_type, COUNT(*) AS c FROM items_live "
             "WHERE reading_status = 'read' AND date_finished IS NOT NULL "
-            "GROUP BY y ORDER BY y"
+            "GROUP BY y, media_type ORDER BY y"
         ).fetchall()
         growth_rows = db.execute(
             "SELECT substr(created_at, 1, 7) as m, COUNT(*) as c FROM items_live "
@@ -462,10 +629,24 @@ async def stats(request: Request, _=Depends(require_role("viewer"))):
             "WHERE COALESCE(manual_value, estimated_value) IS NOT NULL AND owned = 1"
         ).fetchone()["v"]
 
-    from datetime import date as _date
-    current_year = str(_date.today().year)
-    read_pairs = [(r["y"], r["c"]) for r in read_by_year]
-    read_this_year = dict(read_pairs).get(current_year, 0)
+    today = _today()
+    current_year = str(today.year)
+
+    by_key: dict[str, dict[str, int]] = {}
+    book_by_year: dict[str, int] = {}
+    for r in read_by_year:
+        key = status_labels(r["media_type"]).key
+        by_key.setdefault(key, {})
+        by_key[key][r["y"]] = by_key[key].get(r["y"], 0) + r["c"]
+        if r["media_type"] in BOOK_MEDIA_TYPES:
+            book_by_year[r["y"]] = book_by_year.get(r["y"], 0) + r["c"]
+
+    read_pairs = sorted(book_by_year.items())
+    finished_this_year = [
+        (by_key.get(k, {}).get(current_year, 0), labels.done_lower)
+        for k, labels in (("read", READ_LABELS), ("watch", WATCH_LABELS), ("play", PLAY_LABELS))
+    ]
+    finished_this_year = [(n, word) for n, word in finished_this_year if n > 0]
 
     running = 0
     growth_pairs = []
@@ -512,13 +693,38 @@ async def stats(request: Request, _=Depends(require_role("viewer"))):
             "without_isbn": without_isbn,
             "recent": recent,
             "media_types": MEDIA_TYPES,
-            "read_this_year": read_this_year,
+            "finished_this_year": finished_this_year,
             "current_year": current_year,
             "current_value": current_value,
             "chart_read": chart_read,
             "chart_growth": chart_growth,
             "chart_authors": chart_authors,
             "chart_valuation": chart_valuation,
+            # January only: the previous year's wrap-up, as "<year> in Books".
+            "year_in_books": str(today.year - 1) if today.month == 1 else None,
+        },
+    )
+
+
+@router.get("/stats/wrapup")
+async def stats_wrapup(request: Request, period: str | None = None,
+                       _=Depends(require_role("viewer")),
+                       __=Depends(require_feature("stats"))):
+    today = _today()
+    with get_db() as db:
+        # No `period` at all (the link from Stats) opens on the newest month with
+        # content; a supplied but bad one still falls back to the current month.
+        chosen = (wrapups.latest_period(db, today) if period is None
+                  else wrapups.parse_period(period, today))
+        summary = wrapups.summarize(db, chosen)
+        first_year = wrapups.earliest_year(db, today)
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "stats_wrapup.html",
+        {
+            "period": chosen,
+            "summary": summary,
+            "period_options": wrapups.period_options(today, first_year),
         },
     )
 
@@ -585,7 +791,7 @@ BORROWER_ERROR_MESSAGES = {
 
 
 @router.get("/settings")
-async def settings(request: Request, _=Depends(require_role("admin"))):
+async def settings(request: Request, _=Depends(require_role("viewer"))):
     from app.config import SECRET_ENV_VARS, is_env_override
     from app.database import get_all_settings
     from app.nav import hideable_tab_states
@@ -594,9 +800,52 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
     borrower_error_message = BORROWER_ERROR_MESSAGES.get(request.query_params.get("borrower_error"))
     with get_db() as db:
         settings = get_all_settings(db)
+        from app.services import game_metadata
+        settings["missing_game_metadata_fields"] = set(game_metadata.configured_missing_fields(db))
+        from app.services.user_preferences import get_preference
+        settings["always_show_game_title"] = get_preference(
+            db, request.state.user["id"], "always_show_game_title"
+        )
+        settings["show_platform_logo_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_platform_logo_in_collection"
+        )
+        settings["show_collector_condition_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_collector_condition_in_collection"
+        )
+        settings["show_region_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_region_in_collection"
+        )
+        settings["show_new_label_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_new_label_in_collection", "1"
+        )
+        settings["show_wishlist_icon_in_collection"] = get_preference(
+            db, request.state.user["id"], "show_wishlist_icon_in_collection", "1"
+        )
+        settings["show_home_collection_mix"] = get_preference(
+            db, request.state.user["id"], "show_home_collection_mix", "1"
+        )
+        settings["show_home_useful_places"] = get_preference(
+            db, request.state.user["id"], "show_home_useful_places", "1"
+        )
+        settings["default_location_id"] = get_preference(
+            db, request.state.user["id"], "default_location_id"
+        )
+        settings["user_symbol_background"] = get_preference(
+            db, request.state.user["id"], "user_symbol_background"
+        )
+        settings["user_symbol_text"] = get_preference(
+            db, request.state.user["id"], "user_symbol_text"
+        )
+        settings["user_symbol_show_initial"] = get_preference(
+            db, request.state.user["id"], "user_symbol_show_initial"
+        )
+        settings["theme"] = get_preference(db, request.state.user["id"], "theme")
+        for key in ("catalogue", "owned", "wishlist", "lent_out", "missing_covers", "missing_game_metadata", "media_types"):
+            settings[f"home_tile:{key}"] = get_preference(db, request.state.user["id"], f"home_tile:{key}", "1")
         locations = db.execute(
             "SELECT * FROM locations ORDER BY sort_order, name"
         ).fetchall()
+        locations = location_svc.location_tree(db)
         item_count = db.execute("SELECT COUNT(*) as c FROM items_live").fetchone()["c"]
         # Excludes items dismissed from the cover-review queue
         # (items.cover_review_dismissed, migration 32) — this figure and the
@@ -605,6 +854,8 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
         missing_covers = db.execute(
             "SELECT COUNT(*) AS c FROM items_live WHERE cover_path IS NULL AND cover_review_dismissed = 0"
         ).fetchone()["c"]
+        from app.services import game_metadata
+        missing_game_metadata = game_metadata.missing_metadata_count(db)
         cover_queue_stats = cover_queue.stats()
         # Carries each borrower's *returned* loan count for the delete
         # confirmation's copy. Returned rows only: the dialog fires before the
@@ -619,11 +870,18 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
             "GROUP BY b.id ORDER BY b.name"
         ).fetchall()
         game_platforms_list = db.execute(
-            "SELECT * FROM game_platforms ORDER BY sort_order, name"
-        ).fetchall()
+            "SELECT p.*, l.svg_path FROM game_platforms p "
+            "LEFT JOIN user_platform_logos l ON l.platform_slug = p.slug AND l.user_id = ? "
+            "ORDER BY p.sort_order, p.name"
+        , (request.state.user["id"],)).fetchall()
+        game_platform_logos = [
+            {**dict(platform), "effective_svg_path": logo_path(platform["slug"], platform["svg_path"])}
+            for platform in game_platforms_list
+        ]
         share_links = db.execute(
             "SELECT * FROM share_links ORDER BY created_at DESC"
         ).fetchall()
+        tags = tags_svc.list_tags_with_counts(db)
     # Iterate the env map, not `settings`: `get_all_settings` carries only keys
     # with a row, so an env-only credential is absent from it (G15) and a
     # comprehension over it can never see one. Keys here — `is_env_override`
@@ -637,6 +895,12 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
     # while the nav bar shows it. The no-arg path reads the same env-aware
     # snapshot the nav itself uses.
     hideable_nav_tab_states = hideable_tab_states()
+    # Outside the `with` above: the probes open their own connections (G112).
+    from app.features import feature_rows
+    features_rows = feature_rows()
+    # From the same rows, so the marker and the list below it agree.
+    profile_rows = features.profile_rows(features_rows)
+    current_profile = next((p["name"] for p in profile_rows if p["current"]), None)
     # Never hand decrypted credentials to the template — it only needs to know
     # whether one is saved. Fields are write-only; blank submit keeps the value.
     from app.crypto import SENSITIVE_KEYS
@@ -657,6 +921,8 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
     # for it — and both Audiobookshelf actions gate on the URL: Test on typed-or-
     # present, Sync Now on presence alone (issue #41).
     abs_url_present = bool(settings.get("abs_url")) or "abs_url" in env_overrides
+    price_alert_last_run_display = price_alerts.describe_last_run(
+        settings.get("price_alert_last_run"), settings.get("price_alert_last_summary"))
     for k in SENSITIVE_KEYS:
         if k in settings:
             settings[k] = ""
@@ -667,7 +933,23 @@ async def settings(request: Request, _=Depends(require_role("admin"))):
          "borrowers": borrowers, "secrets_saved": secrets_saved,
          "secrets_present": secrets_present, "abs_url_present": abs_url_present,
          "game_platforms_list": game_platforms_list,
+         "game_platform_logos": game_platform_logos,
+         "svg_logo_choices": available_svg_choices(),
          "hideable_nav_tab_states": hideable_nav_tab_states,
+         "feature_rows": features_rows,
+         "profile_rows": profile_rows,
+         "current_profile": current_profile,
+         "lending_enabled": feature_enabled("lending"),
          "borrower_error_message": borrower_error_message,
-         "missing_covers": missing_covers, "cover_queue_stats": cover_queue_stats},
+         "missing_covers": missing_covers, "missing_game_metadata": missing_game_metadata,
+         "cover_queue_stats": cover_queue_stats,
+         "tags": tags, "media_types": MEDIA_TYPES,
+         "price_alert_last_run_display": price_alert_last_run_display,
+         "price_alert_default_threshold": price_alerts.DEFAULT_THRESHOLD_PCT,
+         "price_alert_max_threshold": price_alerts.MAX_THRESHOLD_PCT,
+         "price_alert_default_cap": price_alerts.DEFAULT_NIGHTLY_CAP,
+         "price_alert_max_cap": price_alerts.MAX_NIGHTLY_CAP,
+         "game_platforms": {row["slug"]: row["name"] for row in game_platforms_list},
+         "is_admin": request.state.user["role"] == "admin"
+         },
     )

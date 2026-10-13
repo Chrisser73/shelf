@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
 
 from app.services import lists
+from app.services import game_metadata
+from app.services.search_text import fold as fold_search_text
 from urllib.parse import quote
 
 from markupsafe import Markup
@@ -82,10 +84,15 @@ def _column(column: str, cast: Callable[[str], object] = str) -> ConditionBuilde
 
 
 def _search(value):
-    like = f"%{value}%"
+    # SQLite LIKE is only accent-insensitive for ASCII.  Fold both sides so a
+    # natural prefix such as "Poke" still finds "Pokémon", while preserving
+    # the non-Latin characters users may search for verbatim.
+    like = f"%{fold_search_text(value)}%"
     return (
-        "(i.title LIKE ? OR i.authors LIKE ? OR i.isbn LIKE ? OR i.narrator LIKE ?)",
-        [like, like, like, like],
+        "(search_fold(i.title) LIKE ? OR search_fold(i.alternate_title) LIKE ? "
+        "OR search_fold(i.authors) LIKE ? OR search_fold(i.isbn) LIKE ? "
+        "OR search_fold(i.narrator) LIKE ?)",
+        [like, like, like, like, like],
     )
 
 
@@ -118,6 +125,104 @@ def _tag(value):
         "JOIN tags t ON it.tag_id = t.id WHERE t.name = ?)",
         [value],
     )
+
+
+def _author(value):
+    """One author from the index (#117b) — an id, cast exactly as
+    `location_filter` is, so a hand-edited or stale value gives an empty grid
+    rather than a 500 (#40). `i` is already `items_live`, so a trashed item
+    cannot match whatever its index rows say."""
+    built = _column("ia.author_id", cast=int)(value)
+    if built == _NEVER:
+        return _NEVER
+    return (
+        "EXISTS (SELECT 1 FROM item_authors ia "
+        "WHERE ia.item_id = i.id AND ia.author_id = ?)",
+        built[1],
+    )
+
+
+def _platform(value):
+    """Match games on their stored platform, never unrelated media rows."""
+    return "i.platform = ? AND i.media_type = 'video_game'", [value]
+
+
+def _unknown_platform(value):
+    if value != "1":
+        return None
+    return "i.media_type = 'video_game' AND (i.platform IS NULL OR TRIM(i.platform) = '')", []
+
+
+def _missing_cover(value):
+    if value != "1":
+        return None
+    return "(i.cover_path IS NULL OR TRIM(i.cover_path) = '') AND i.cover_review_dismissed = 0", []
+
+
+def _missing_game_metadata(value):
+    # This deliberately has no visible filter control. It is the narrow link
+    # from Home's maintenance tile, not a second hand-maintained filter UI.
+    if value != "1":
+        return None
+    return game_metadata.missing_sql("i."), []
+
+
+# One negative metadata control is clearer than several misleading "Unknown"
+# values: an unset value is not necessarily the literal value "unknown".
+MISSING_VALUE_OPTIONS = {
+    "cover": "Missing cover",
+    "title": "Missing name",
+    "alternate_title": "Missing alternate name",
+    "authors": "Missing developer",
+    "publisher": "Missing publisher",
+    "platform": "Missing platform",
+    "region": "Missing region",
+    "language": "Missing language",
+    "publish_year": "Missing year",
+    "collector_condition": "Missing collector state",
+    "location": "Missing location",
+}
+
+
+def _missing_value_clause(value):
+    if value == "cover":
+        return _missing_cover("1")[0]
+    if value == "location":
+        # The UI label is deliberately plain "location", while the item
+        # table stores the primary location as a foreign-key id.
+        return "i.location_id IS NULL"
+    condition = (
+        f"(i.{value} IS NULL OR TRIM(i.{value}) = '')"
+        if value != "publish_year" else "i.publish_year IS NULL"
+    )
+    # These metadata fields are game-only. Collector state is meaningful for
+    # physical non-book media, while title/creator/publisher and location work
+    # everywhere.
+    if value in {"platform", "region", "language", "publish_year"}:
+        condition = "i.media_type = 'video_game' AND " + condition
+    elif value == "collector_condition":
+        condition = "i.media_type != 'book' AND " + condition
+    return condition
+
+
+def _missing_value(value):
+    # Comma-separated values come from the checkbox menu. Missing any selected
+    # field is useful maintenance work, so the clauses are deliberately ORed.
+    selected = list(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
+    selected = [value for value in selected if value in MISSING_VALUE_OPTIONS]
+    if not selected:
+        return _NEVER
+    return "(" + " OR ".join(_missing_value_clause(value) for value in selected) + ")", []
+
+
+def _collector_condition(value):
+    values = [part.strip().lower() for part in value.split(",") if part.strip()]
+    allowed = {"cib", "boxed", "loose"}
+    values = [value for value in values if value in allowed]
+    if not values:
+        return _NEVER
+    placeholders = ", ".join("?" for _ in values)
+    return f"i.collector_condition IN ({placeholders})", values
 
 
 @dataclass(frozen=True)
@@ -182,8 +287,19 @@ FILTERS: tuple[BrowseFilter, ...] = (
     BrowseFilter("reading_status", prefix="Status", condition=_column("i.reading_status")),
     BrowseFilter("owned", condition=_owned),
     BrowseFilter("lent_out", condition=_lent_out),
+    BrowseFilter("platform_filter", prefix="Platform", condition=_platform),
+    BrowseFilter("unknown_platform", prefix="Platform", condition=_unknown_platform),
+    BrowseFilter("cover_missing", prefix="Missing cover", condition=_missing_cover),
+    BrowseFilter("missing_game_metadata", prefix="Missing metadata", condition=_missing_game_metadata, chip=False),
+    BrowseFilter("missing_value", prefix="Missing", condition=_missing_value),
+    BrowseFilter("collector_condition", prefix="Condition", condition=_collector_condition),
     BrowseFilter("tag", prefix="Tag", condition=_tag, quote_in_qs=True),
+    # Set from an item page's author link; a hidden control, since hundreds
+    # of authors make no usable dropdown. The chip shows the author's name
+    # (the control's data-label), never the id.
+    BrowseFilter("author_filter", prefix="Author", condition=_author),
     BrowseFilter("language", prefix="Language", condition=_column("i.language")),
+    BrowseFilter("region", prefix="Region", condition=_column("i.region")),
     # `view` is the odd one: client-owned state (localStorage) that is sent to
     # the server so it can pick the grid or list template. It is not a filter
     # the user clears, chips, or reads out of the URL — hence all three opt-outs.
@@ -223,7 +339,7 @@ def filter_includes(exclude=None) -> Markup:
     return Markup(",".join(f"[name='{f.name}']" for f in FILTERS if f.name not in names))
 
 
-def build_where(values: Mapping[str, str], exclude=None) -> "tuple[str, list]":
+def build_where(values: Mapping[str, str], exclude=None, missing_fields=None) -> "tuple[str, list]":
     """Build a WHERE clause from filter values, optionally dropping some.
 
     Excluding a filter is how each dropdown's cross-filter counts are built:
@@ -242,7 +358,7 @@ def build_where(values: Mapping[str, str], exclude=None) -> "tuple[str, list]":
         value = values.get(f.name, "")
         if not f.is_active(value):
             continue
-        built = f.condition(value)
+        built = (game_metadata.missing_sql("i.", fields=missing_fields), []) if f.name == "missing_game_metadata" and value == "1" else f.condition(value)
         if built is None:
             continue
         sql, sql_params = built
@@ -260,7 +376,13 @@ def values_from(query_params: Mapping[str, str]) -> dict:
     without `.get()` and a new filter needs no route-signature change. Values
     stay raw strings — parsing belongs to each filter's condition builder.
     """
-    return {f.name: query_params.get(f.name, f.default) or f.default for f in FILTERS}
+    values = {f.name: query_params.get(f.name, f.default) or f.default for f in FILTERS}
+    # Keep pre-1.2.3 Missing-cover links functional while rendering them in
+    # the consolidated Missing dropdown.
+    if values["cover_missing"] == "1" and not values["missing_value"]:
+        values["cover_missing"] = ""
+        values["missing_value"] = "cover"
+    return values
 
 
 def has_active_filters(values: Mapping[str, str]) -> bool:

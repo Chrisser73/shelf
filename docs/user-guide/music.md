@@ -27,6 +27,10 @@ Each track can retain its MusicBrainz recording identity, artist credit and dura
 
 After adding an exact release, Shelf asks Cover Art Archive for artwork associated with that MusicBrainz release. A front image is preferred. Existing Shelf cover artwork is never overwritten by a refresh.
 
+Music artwork is shown square and uncropped wherever Shelf shows a cover: Browse, Home, share pages, the list view and other thumbnails, the cover review queue, the cover picker, scan cards, and the Music item page, which shows the cover in its header. Books, games and films keep their taller portrait box. In a Browse grid showing all types, a record sits beside taller book covers, so a row can be uneven; pick a music type in the **Type** filter and the grid is uniform.
+
+The creator field is labelled **Artist** for music when you add or edit a release, in Photo Intake, and in Browse's list view when a music type is picked in the **Type** filter.
+
 ## Alternate formats
 
 MusicBrainz Release Group identity is stored separately from the exact release identity. If two catalogued releases share a Release Group, Shelf links them using its existing `format` item relationship while preserving each exact release as its own catalogue item.
@@ -41,4 +45,8 @@ Release metadata does not store condition, acquisition details or provenance. Th
 
 ## Discogs
 
-Discogs enrichment is intentionally separate from the core Music contribution. MusicBrainz provides the canonical release identity in this feature; Discogs can be added later as optional pressing enrichment without making the core catalogue depend on a Discogs credential.
+Discogs is optional exact-pressing enrichment for a Music item. Add a personal access token under **Settings → Integrations → Discogs**, then open a Music item and use the Discogs panel to search concrete releases by title, artist, barcode or catalogue number.
+
+Choosing **Use this pressing** validates the concrete Discogs Release and remembers only that Release ID in Shelf. MusicBrainz remains the canonical release identity, and choosing or clearing a Discogs pressing does not replace the MusicBrainz release.
+
+Shelf does not permanently copy the Discogs API response into its release metadata. The panel can load fresh Discogs details on demand and links back to the selected release with attribution. Discogs artwork is not imported, and condition, acquisition details and provenance continue to belong to Shelf's physical-copy records rather than to the Discogs selection.

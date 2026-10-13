@@ -38,6 +38,13 @@ URL and token, **Test**, then choose which libraries to include. Set an
 interval for automatic sync or run it by hand. Items removed from ABS can be
 cleaned up from the same card.
 
+**Move Excluded Items to Trash** saves the library selection, then moves every
+Shelf item that came from an unchecked library to [Trash](items.md#trash).
+Audiobookshelf itself is not touched, and nothing is lost: restore any of them
+from Trash. **A sync does not bring them back on its own.** Re-checking the
+library and syncing again skips every item that is in Trash, and the summary
+counts them under **In Trash** — restore the ones you want first, then sync.
+
 **If Shelf reaches ABS at a different address than your browser does, fill in
 the Browser URL.** Shelf commonly talks to Audiobookshelf over a Docker network
 or a LAN hostname — `http://audiobookshelf:80` — while you open it through a
@@ -102,7 +109,8 @@ now probes TMDb exactly the way a real lookup does.
 [isbndb.com](https://isbndb.com) — paid.
 
 **Adds:** list-price valuation per item and in bulk, the insurance report's
-numbers, value-over-time stats. See
+numbers, value-over-time stats, and nightly wishlist
+[price alerts](wishlist-and-store-mode.md#price-alerts). See
 [Stats & valuation](stats-and-valuation.md).
 
 ## Google Books (optional API key)
@@ -168,8 +176,9 @@ Anthropic, any OpenAI-compatible endpoint, or Ollama. See
 ## Notifications (ntfy / webhook)
 
 Not an integration card — lives under Settings → Library → Lending — but the
-same idea: an ntfy topic or JSON webhook URL for the overdue-loan digest. See
-[Lending](lending.md#reminders).
+same idea: an ntfy topic or JSON webhook URL for the overdue-loan digest and
+the wishlist price-drop digest. See [Lending](lending.md#reminders) and
+[Price alerts](wishlist-and-store-mode.md#price-alerts).
 
 ## Always-on sources (no key)
 

@@ -8,32 +8,45 @@ plus title search and **Add by hand** for the things a barcode cannot reach.
 
 **Phone or tablet camera.** Tap the camera button. Shelf picks the decoder
 for the device — ZXing on iOS Safari, html5-qrcode everywhere else — and
-reads EAN-13, EAN-8, UPC-A and UPC-E. Requires HTTPS (you have it) and a
+reads EAN-13, EAN-8, UPC-A and UPC-E. Requires HTTPS (the default, or a TLS reverse proxy in front) and a
 one-time camera permission. Hold steady about 10–15 cm away; the viewfinder
 beeps and fills the field on a read.
 
 **USB or Bluetooth barcode scanner.** Any scanner that types the barcode and
 sends Enter (the default for nearly all of them) works: click into the
 barcode field once and scan away. No camera involved, no configuration.
+Let each result appear before scanning the next item: a scan made while the
+previous one is still being looked up is ignored.
 
 **Keyboard.** Type an ISBN-10, ISBN-13 or UPC and press Enter.
 
 ## Scan modes
 
-The mode is sticky — set it once and scan a pile.
+The mode is sticky — set it once and scan a pile. With Lending turned off in
+Settings → **Features**, Scan offers no **Lend** or **Return** mode, and a
+device last left in one of them opens in **Add**.
 
 | Mode | What happens on each scan |
 |---|---|
-| **Add** | Look up metadata, download the cover, add the item as owned. Scanning a barcode you already own shows the existing item instead of duplicating it — whatever the media-type dropdown says. Scanning something on your wishlist marks it owned and takes it off the wishlist (*Now owned*). A dropdown pick the barcode contradicts is corrected rather than obeyed (see [Media types](#media-types)) |
+| **Add** | Look up metadata, download the cover, add the item as owned. Scanning a barcode you already own shows the existing item instead of duplicating it — whatever the media-type dropdown says. Scanning something on your wishlist marks it owned and takes it off the wishlist (*Now owned*). Scanning something you deleted brings it back from Trash as it was (*Restored from Trash*) rather than adding a second record. A dropdown pick the barcode contradicts is corrected rather than obeyed (see [Media types](#media-types)) |
 | **Wishlist** | Same lookup, but the item is added to your wishlist, not as owned. A barcode already in your library is left as it is |
 | **Lend** | Pick a borrower first; each scan checks that item out to them. Optional due date |
 | **Return** | Each scan checks the item back in, whoever had it |
 | **Move** | Pick a location first; each scan relocates the item there. To work along a shelf putting things away in order, use [Shelf Fill](shelf-fill.md) instead — it keeps the shelf selected and numbers each scan's position |
 | **Inventory** | Pick a location; scan everything physically present; then **Check for missing** lists items Shelf thinks are there but you didn't scan. Counts *copies*, not records — see [Auditing a shelf with more than one copy](#auditing-a-shelf-with-more-than-one-copy) |
 | **Lookup** | Read-only: tells you whether the item is in your library (and where, and whether it's lent out). Changes nothing |
-| **Quick Rate** | Marks the item as read / finished with today's date |
+| **Quick Rate** | Marks the item finished with today's date — Watched for a disc, Played for a game, Read otherwise |
 
 The Scan tab is for editors and admins; viewers don't see it.
+
+### Scanning an item that is in Trash
+
+**Lend, Return, Move, Inventory, Lookup and Quick Rate never act on an item in
+[Trash](items.md#trash).** The card says *In Trash since* the date it was
+deleted, with an amber **in Trash** badge, and nothing else happens: no loan,
+no move, no rating, no inventory mark. A **Restore** button on the card brings
+the item back, and the card turns into *Restored from Trash*; scan it again to
+lend, move or rate it. Both scans appear in Recent scans.
 
 ### Auditing a shelf with more than one copy
 
@@ -56,6 +69,64 @@ A book with only one copy still relocates on a scan, as it always has — there
 is only one object the scan can mean. **Lookup** mode names every room a copy
 is in, for the same reason.
 
+## Default tags
+
+To file a whole pile under one heading — a stack of cookbooks, a box of
+signed copies — type it once in **Default tags** before you start. The field
+sits below the barcode field in **Add** and **Wishlist** modes, and every item
+those modes file from then on gets the tag.
+
+- **Several tags:** separate them with `;` — `Cookbook; Signed`.
+- **New names are fine.** A tag that does not exist yet is created, as a
+  global tag, on the first successful add. There is no trip to Settings.
+- **It is sticky per device**, like the mode and location: it is still there
+  after a reload, until you clear it. A phone and a laptop keep their own.
+  Renaming or deleting a tag in [Settings](settings.md#tags) does not change
+  what a saved field holds — the next add creates the old name again, so
+  retype the field after a rename.
+- **Suggestions follow the media type.** The field suggests your own tags
+  that suit the selected type, plus a few starter ideas for it (Cookbook,
+  Signed, First edition… for books). A type's starters stop showing once you
+  have a tag of your own scoped to that type. With **Auto**, everything is
+  suggested.
+- **Only an item filed now is tagged:** a new item, a wishlist add, or an
+  item a scan brings back from Trash. A duplicate is never tagged — Shelf
+  would be editing an item you did not just file. Nor is a wishlist item a
+  scan marks as owned.
+- It carries through everywhere an Add can finish: the [legacy-barcode
+  follow-up](#legacy-price-point-book-barcodes), [title search](#title-search-no-barcode),
+  and the [Add by hand](#add-by-hand) form — including the one a failed scan
+  offers.
+
+Tags are applied on the item page or its edit page, or in bulk from
+[Browse](browse-and-search.md#bulk-editing), and an admin renames, scopes and
+deletes them in [Settings](settings.md#tags).
+
+## Default reading status
+
+Started a stack, or cataloguing a shelf you have already read? Pick it once in
+**Default status**, just below Default tags, and every item **Add** or
+**Wishlist** files from then on takes that status — no second edit per item.
+
+- **Choices:** None, or the three statuses. **The words follow the media
+  type**, as on the item page: Want to Read / Reading / Read for books, Want
+  to Watch / Watching / Watched for discs, Want to Play / Playing / Played
+  for games. Under **Auto** it shows neutral words until the scan says what
+  the item is.
+- **Disabled where it would do nothing:** in every mode other than Add and
+  Wishlist, and for a type with no reading status (music, magazines…). Under
+  Auto a scan that turns out to be one of those files with no status.
+- **It is sticky per device**, like the mode, location and default tags.
+- **Only an item filed now takes it:** a new item, a wishlist add, or an
+  item a scan brings back from Trash *that has no status of its own*. A
+  restored item that already had one keeps it. A duplicate never changes,
+  nor does a wishlist item a scan marks as owned.
+- **No dates are recorded.** Setting Read here does not stamp a finish date
+  or add a reading-log entry; set dates on the item page if you want them.
+- It carries through the same places default tags do: the [legacy-barcode
+  follow-up](#legacy-price-point-book-barcodes), [title search](#title-search-no-barcode),
+  and the [Add by hand](#add-by-hand) form.
+
 ## Title search (no barcode)
 
 Below the barcode field, **Title search** covers the things barcodes miss —
@@ -72,6 +143,9 @@ An empty result box tells you *why* it is empty, in the same words the scan
 card uses: a rejected key, a provider that is rate-limiting us, or a provider
 Shelf could not reach at all. "No books found for …" now means only what it
 says — the provider answered and genuinely had nothing.
+
+An item added from the results takes the [default tags](#default-tags) and
+the [default reading status](#default-reading-status) set on the card.
 
 ## Add by hand
 
@@ -93,6 +167,8 @@ anywhere else switches you to Add mode so the panel is there when you land.
 - The **creator field** renames itself to match the type — Author(s) for
   books, Developer for games, Director for discs, Artist for music.
 - The **platform** picker appears only for video games.
+- The card's [default tags](#default-tags) and [default reading
+  status](#default-reading-status) apply here too.
 
 Five ways in, all landing on the same panel:
 

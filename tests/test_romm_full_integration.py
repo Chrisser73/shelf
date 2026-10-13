@@ -73,7 +73,7 @@ async def test_full_sync_honours_platform_exclusions_and_keeps_game_digital(db, 
         progress.append((current, total, title, status))
 
     stats = await romm_sync.sync(on_progress=callback)
-    assert stats == {"created": 1, "updated": 0, "skipped": 0, "errors": 0}
+    assert stats == {"created": 1, "updated": 0, "skipped": 0, "in_trash": 0, "errors": 0}
     assert progress == [(1, 1, "Chrono Trigger", "created")]
     row = db.execute("SELECT media_type, source, location_id FROM items").fetchone()
     assert dict(row) == {"media_type": "video_game", "source": "romm", "location_id": None}

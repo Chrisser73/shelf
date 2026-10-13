@@ -9,9 +9,14 @@ def test_item_edit_is_sectioned_without_changing_the_save_contract():
     script = (ROOT / "static/js/item_edit.js").read_text(encoding="utf-8")
 
     assert 'data-testid="edit-section-nav"' in template
-    for section in ("general", "artwork", "series", "identifiers", "location", "media"):
+    for section in ("general", "artwork", "series", "identifiers", "location", "media", "tags"):
         assert f'id="edit-{section}"' in template
         assert f'data-testid="edit-section-{section}"' in template
+
+    # The tags island sits outside the save form (it carries its own
+    # hx-post/hx-delete controls; nesting forms is invalid HTML).
+    assert template.index('id="edit-tags"') > template.rindex('</form>')
+    assert 'href="#edit-tags"' in template
 
     # This is still the existing item edit form: sectioning must not create
     # another persistence path or make navigation itself save anything.

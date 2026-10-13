@@ -48,8 +48,8 @@ class TestClean:
             "garbage",
         ]}
         assert vision._clean(raw) == [
-            {"title": "Dune", "authors": "Frank Herbert", "isbn": None, "source": "read"},
-            {"title": "Hobbit", "authors": None, "isbn": None, "source": "read"},
+            {"title": "Dune", "authors": "Frank Herbert", "isbn": None, "media_type": "book", "source": "read"},
+            {"title": "Hobbit", "authors": None, "isbn": None, "media_type": "book", "source": "read"},
         ]
 
     def test_non_dict(self):
@@ -90,6 +90,9 @@ class TestClean:
             "read", "read", "read", "read", "recognized",
         ]
 
+    def test_media_type_is_retained_when_recognized(self):
+        assert vision._clean({"books": [{"title": "Mario Kart 64", "media_type": "video_game"}]})[0]["media_type"] == "video_game"
+
 
 class TestCleanIsbn:
     def test_valid_forms_become_isbn13(self):
@@ -104,10 +107,15 @@ class TestCleanIsbn:
 
 
 class TestPromptAndSchema:
-    def test_schema_requires_all_four_keys(self):
+    def test_schema_requires_all_five_keys(self):
         items = vision.BOOKS_SCHEMA["properties"]["books"]["items"]
-        assert items["required"] == ["title", "authors", "isbn", "source"]
+        assert items["required"] == ["title", "authors", "isbn", "media_type", "source"]
         assert items["properties"]["isbn"]["type"] == ["string", "null"]
+        assert items["properties"]["collector_condition"] == {
+            "type": "string", "enum": ["cib", "boxed", "loose"]
+        }
+        assert "collector_condition" not in items["required"]
+        assert "video_game" in items["properties"]["media_type"]["enum"]
         assert items["properties"]["source"]["enum"] == ["read", "recognized"]
         assert items["additionalProperties"] is False
 
@@ -117,11 +125,24 @@ class TestPromptAndSchema:
         # The ISBN-from-knowledge ban is the one rule with no other defence.
         assert "from memory" in vision.PROMPT
 
+    def test_prompt_preserves_non_latin_titles(self):
+        assert "Japanese kana" in vision.PROMPT
+        assert "do not translate" in vision.PROMPT
+
+    def test_prompt_requests_confident_catalogue_metadata(self):
+        assert "supplement publisher and original release/publication year" in vision.PROMPT
+        assert "omit them rather than guess" in vision.PROMPT
+
     def test_json_only_suffix_gives_a_rule_not_placeholder_literals(self):
         assert 'must be exactly "read" or "recognized"' in vision.JSON_ONLY_SUFFIX
         assert "null" in vision.JSON_ONLY_SUFFIX
+        assert '"collector_condition": null' not in vision.JSON_ONLY_SUFFIX
         assert "read or recognized" not in vision.JSON_ONLY_SUFFIX
         assert "... or null" not in vision.JSON_ONLY_SUFFIX
+
+    def test_ollama_prompt_explicitly_keeps_recognized_games(self):
+        assert "media_type video_game" in vision.OLLAMA_RECOGNITION_SUFFIX
+        assert "empty books array" in vision.OLLAMA_RECOGNITION_SUFFIX
 
 
 ONE_IMAGE = [(FAKE_JPEG, "image/jpeg")]
@@ -559,6 +580,54 @@ class TestAnalyzeEndpoint:
         resp = self._upload(admin_client)
         assert resp.json() == {"ok": True, "books": [{"title": "Dune", "authors": "Frank Herbert"}]}
 
+    def test_media_type_hint_reaches_the_vision_provider(self, admin_client, monkeypatch):
+        seen = {}
+
+        async def fake_detect(images, settings, *, media_type_hint=None):
+            seen["hint"] = media_type_hint
+            return [{"title": "Dune", "authors": "Frank Herbert"}]
+
+        monkeypatch.setattr(vision, "detect_spines", fake_detect)
+        response = admin_client.post(
+            "/api/intake/analyze",
+            files={"photos": ("shelf.jpg", FAKE_JPEG, "image/jpeg")},
+            data={"media_type_hint": "video_game"},
+        )
+        assert response.json()["ok"] is True
+        assert seen["hint"] == "video_game"
+
+    def test_game_existing_marker_requires_the_same_platform(self, admin_client, db, monkeypatch):
+        """A Switch scan must not offer the separate Switch 2 edition for replacement."""
+        switch2_id = _insert_item(
+            db, title="Metroid Prime 4: Beyond", isbn=None,
+            media_type="video_game", platform="switch2",
+        )
+        db.commit()
+
+        async def fake_detect(images, settings):
+            return [{
+                "title": "Metroid Prime 4: Beyond",
+                "media_type": "video_game",
+                "platform": "Nintendo Switch",
+            }]
+
+        monkeypatch.setattr(vision, "detect_spines", fake_detect)
+        resp = self._upload(admin_client)
+        book = resp.json()["books"][0]
+        assert book["platform"] == "switch"
+        assert "existing" not in book
+
+        async def fake_same_platform(images, settings):
+            return [{
+                "title": "Metroid Prime 4: Beyond",
+                "media_type": "video_game",
+                "platform": "Nintendo Switch 2",
+            }]
+
+        monkeypatch.setattr(vision, "detect_spines", fake_same_platform)
+        same_edition = self._upload(admin_client).json()["books"][0]
+        assert same_edition["existing"]["id"] == switch2_id
+
     def test_multiple_tiles_reach_provider_in_order(self, admin_client, monkeypatch):
         seen = {}
 
@@ -579,6 +648,25 @@ class TestAnalyzeEndpoint:
             ("photos", ("tile-1.pdf", FAKE_JPEG, "application/pdf")),
         ])
         assert resp.json()["ok"] is False
+
+    def test_rejects_tiles_whose_combined_size_exceeds_the_budget(self, admin_client, monkeypatch):
+        """B-4: no cap on the *combined* size of a tiled submission let an
+        editor force arbitrarily many near-per-file-limit tiles into one
+        request — RAM plus billed vision calls. The third tile here must
+        never reach vision.detect_spines."""
+        monkeypatch.setattr(vision, "MAX_TOTAL_INTAKE_BYTES", 250)  # two tiles fit, a third does not
+        seen = []
+        async def fake_detect(images, settings):
+            seen.extend(images)
+            return []
+        monkeypatch.setattr(vision, "detect_spines", fake_detect)
+        resp = admin_client.post("/api/intake/analyze", files=[
+            ("photos", ("tile-0.jpg", b"tile0" + FAKE_JPEG, "image/jpeg")),
+            ("photos", ("tile-1.jpg", b"tile1" + FAKE_JPEG, "image/jpeg")),
+            ("photos", ("tile-2.jpg", b"tile2" + FAKE_JPEG, "image/jpeg")),
+        ])
+        assert resp.json()["ok"] is False
+        assert seen == []
 
     @respx.mock
     def test_language_persisted_from_preferred_language_match(self, admin_client, db):
@@ -653,7 +741,7 @@ class TestAnalyzeEndpoint:
             return []
         monkeypatch.setattr(vision, "detect_spines", fake_detect)
         resp = self._upload(admin_client)
-        assert resp.json() == {"ok": False, "message": "No books were recognized in this photo"}
+        assert resp.json() == {"ok": False, "message": "No catalog items were recognized in this photo"}
 
     def test_provider_message_reaches_the_response(self, admin_client, monkeypatch):
         async def fake_detect(images, settings):
@@ -923,6 +1011,102 @@ class TestConfirmEndpoint:
         assert resp.status_code in (401, 403)
 
 
+class TestConfirmDefaultTags:
+    @respx.mock
+    def test_tags_every_confirmed_row(self, admin_client, db):
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [
+                {"title": "Cookbook One", "authors": None},
+                {"title": "Cookbook Two", "authors": None},
+            ],
+            "tags": ["Cookbook"],
+        })
+        data = resp.json()
+        assert len(data["added"]) == 2
+        for entry in data["added"]:
+            row = db.execute(
+                "SELECT t.name FROM tags t JOIN item_tags it ON it.tag_id = t.id "
+                "WHERE it.item_id = ?", (entry["id"],)
+            ).fetchall()
+            assert [r["name"] for r in row] == ["Cookbook"]
+
+    @respx.mock
+    def test_skipped_duplicate_is_not_tagged(self, admin_client, db):
+        _insert_item(db, title="Dune", isbn="9780441172719", authors="Frank Herbert")
+        db.execute("COMMIT")
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [{"title": "dune", "authors": "frank herbert"}],
+            "tags": ["Cookbook"],
+        })
+        data = resp.json()
+        assert data["added"] == []
+        assert data["skipped"][0]["reason"] == "already in library"
+        row = db.execute("SELECT id FROM tags WHERE name = 'Cookbook'").fetchone()
+        assert row is None
+
+    @respx.mock
+    def test_omitted_tags_creates_no_tag(self, admin_client, db):
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [{"title": "No Tags Here", "authors": None}],
+        })
+        assert len(resp.json()["added"]) == 1
+        assert db.execute("SELECT id FROM tags").fetchall() == []
+
+    @respx.mock
+    def test_empty_tags_list_creates_no_tag(self, admin_client, db):
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [{"title": "Empty Tags List", "authors": None}],
+            "tags": [],
+        })
+        assert len(resp.json()["added"]) == 1
+        assert db.execute("SELECT id FROM tags").fetchall() == []
+
+    @respx.mock
+    def test_case_variant_tags_dedupe_to_one(self, admin_client, db):
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        resp = admin_client.post("/api/intake/confirm", json={
+            "books": [{"title": "Dedupe Me", "authors": None}],
+            "tags": ["Cookbook", "cookbook "],
+        })
+        assert len(resp.json()["added"]) == 1
+        assert len(db.execute("SELECT id FROM tags").fetchall()) == 1
+
+    @respx.mock
+    def test_tag_write_failure_commits_no_untagged_row_and_retry_files_it(
+            self, admin_client, db):
+        # G118: each row and its tags commit together, so a failed tag write
+        # leaves no untagged row for the retry to skip as a duplicate.
+        from unittest.mock import patch
+
+        from app.services import tags as tags_svc
+
+        respx.get(OL_SEARCH_URL).mock(return_value=httpx.Response(200, json={"docs": []}))
+        payload = {"books": [{"title": "Atomic Intake", "authors": None}],
+                   "tags": ["Cookbook"]}
+        with patch.object(tags_svc, "attach_tags",
+                          side_effect=RuntimeError("simulated tag write failure")):
+            try:
+                resp = admin_client.post("/api/intake/confirm", json=payload)
+                assert resp.status_code >= 500
+            except RuntimeError:
+                pass
+        assert db.execute(
+            "SELECT COUNT(*) FROM items WHERE title = 'Atomic Intake'"
+        ).fetchone()[0] == 0
+
+        data = admin_client.post("/api/intake/confirm", json=payload).json()
+        assert len(data["added"]) == 1
+        row = db.execute(
+            "SELECT t.name FROM tags t JOIN item_tags it ON it.tag_id = t.id "
+            "WHERE it.item_id = ?", (data["added"][0]["id"],)
+        ).fetchall()
+        assert [r["name"] for r in row] == ["Cookbook"]
+
+
 ISBN13 = "9780441172719"
 ISBN10 = "0441172717"
 
@@ -964,7 +1148,7 @@ class TestConfirmWithIsbn:
         data = resp.json()
         assert data["added"] == [{
             "title": "Dune", "id": data["added"][0]["id"],
-            "matched": True, "lookup": "matched"}]
+            "matched": True, "lookup": "matched", "restored": False}]
         row = db.execute("SELECT * FROM items WHERE isbn = ?", (ISBN13,)).fetchone()
         assert row["title"] == "Dune"                 # catalogue's, not the row's
         assert row["subtitle"] == "A Novel"
@@ -1277,6 +1461,21 @@ class TestIntakePage:
             assert f'<option value="{key}">' in html
         assert 'data-testid="intake-no-metadata"' in html
 
+    def test_confirm_row_renders_default_tags_control(self, admin_client, db):
+        import re
+
+        db.execute("INSERT INTO settings (key, value) VALUES ('vision_provider', 'ollama')")
+        db.execute("COMMIT")
+        html = admin_client.get("/intake").text
+        tag = re.search(r'<input[^>]*id="default-tags"[^>]*>', html, re.S).group(0)
+        assert 'name="tags"' in tag
+        assert 'list="tag-suggestions"' in tag
+        assert 'data-storage-key="shelf.intake.tags"' in tag
+        # Decision 7: no type source — Intake's type is per row.
+        assert 'data-type-source' not in tag
+        assert '<datalist id="tag-suggestions">' in html
+        assert '/static/js/tag-suggest.js' in html
+
     def test_chooser_renders_two_inputs_and_two_buttons(self, admin_client, db):
         db.execute("INSERT INTO settings (key, value) VALUES ('vision_provider', 'ollama')")
         db.execute("COMMIT")
@@ -1296,6 +1495,7 @@ class TestIntakePage:
         assert 'data-testid="intake-viewfinder"' in html
         assert 'data-testid="intake-low-res"' in html
         assert 'data-testid="intake-retake"' in html
+        assert 'data-testid="intake-try-anyway"' in html
 
     def test_exactly_one_read_photo_button(self, admin_client, db):
         """The e2e click target is `button` has_text "Read Photo" — a second

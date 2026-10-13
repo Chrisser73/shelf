@@ -17,8 +17,9 @@ from starlette.responses import Response
 from app.auth import require_role
 from app.database import get_db
 from app.routers import items_common
-from app.services import cover_queue
+from app.services import cover_queue, csv_import
 from app.services import isbn as isbn_svc
+from app.services import item_copies, item_write
 from app.services import lists
 from app.services import tags as tags_svc
 from app.services.item_write import ItemValueError, insert_item, update_item_fields
@@ -34,22 +35,34 @@ router = APIRouter(prefix="/api")
 MAX_CSV_UPLOAD_SIZE = 50 * 1024 * 1024
 
 @router.get("/export/csv")
-async def export_csv(_=Depends(require_role("viewer"))):
+async def export_csv(user=Depends(require_role("viewer"))):
     import csv
     import io
     from fastapi.responses import StreamingResponse
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "series_name", "location", "source", "estimated_value", "manual_value", "owned", "wishlisted", "tags"])
+    writer.writerow(["title", "authors", "isbn", "media_type", "platform", "publisher", "publish_year", "page_count", "language", "series_name", "series_position", "location", "source", "estimated_value", "manual_value", "owned", "wishlisted", "deleted", "tags"])
 
+    # editor/admin exports carry Trash; the Trash page itself is editor+, so
+    # a viewer export must not become the one place a viewer sees a trashed
+    # row (design plan-soft-delete-export, Decision 1). Both branches write
+    # the same `deleted` cell shape below — a viewer's is just always 0.
     with get_db() as db:
-        rows = db.execute(
-            f"SELECT i.*, l.name as location_name, {lists.WISHLISTED_SQL} AS wishlisted "
-            "FROM items_live i "
-            "LEFT JOIN locations l ON i.location_id = l.id "
-            "ORDER BY i.title"
-        ).fetchall()
+        if user["role"] in ("editor", "admin"):
+            rows = db.execute(
+                f"SELECT i.*, l.name as location_name, {lists.WISHLISTED_SQL} AS wishlisted "
+                "FROM items i "
+                "LEFT JOIN locations l ON i.location_id = l.id "
+                "ORDER BY i.title"
+            ).fetchall()
+        else:
+            rows = db.execute(
+                f"SELECT i.*, l.name as location_name, {lists.WISHLISTED_SQL} AS wishlisted "
+                "FROM items_live i "
+                "LEFT JOIN locations l ON i.location_id = l.id "
+                "ORDER BY i.title"
+            ).fetchall()
         # One grouped query for the whole result set — never a per-row query.
         tags_by_item = tags_svc.tags_for_items(db, [row["id"] for row in rows])
 
@@ -57,9 +70,11 @@ async def export_csv(_=Depends(require_role("viewer"))):
         writer.writerow([
             row["title"], row["authors"], row["isbn"], row["media_type"],
             row["platform"], row["publisher"], row["publish_year"], row["page_count"],
-            row["series_name"], row["location_name"], row["source"],
+            row["language"], row["series_name"], row["series_position"],
+            row["location_name"], row["source"],
             row["estimated_value"], row["manual_value"],
             row["owned"], 1 if row["wishlisted"] else 0,
+            1 if row["deleted_at"] else 0,
             "; ".join(tags_by_item.get(row["id"], [])),
         ])
 
@@ -102,8 +117,23 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
     raw = await csv_file.read(MAX_CSV_UPLOAD_SIZE + 1)
     if len(raw) > MAX_CSV_UPLOAD_SIZE:  # 50 MB cap
         return {"error": "File too large (max 50 MB)", "imported": 0, "skipped": 0, "errors": []}
-    content = raw.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(content))
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        # A whole-file error, in the same shape as "No file uploaded" above.
+        # Guessing the encoding instead would import mojibake titles
+        # silently, which is worse than refusing (design plan-imports-lt-libib
+        # §"Reading the file").
+        return {
+            "error": "The file is not UTF-8 text. Re-export it as UTF-8 "
+                      "(in a spreadsheet app: Save As → CSV UTF-8) and "
+                      "upload it again.",
+            "imported": 0,
+            "skipped": 0,
+            "errors": [],
+        }
+    delimiter = reading_imports.choose_delimiter(content.split("\n", 1)[0])
+    reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
 
     # Normalize headers (lowercase, strip)
     if reader.fieldnames:
@@ -115,18 +145,36 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
 
     imported = 0
     skipped = 0
+    restored = 0
+    trashed = 0
     errors = []
     new_item_ids: list[int] = []
-    # Keyed ('isbn', isbn, media) or ('title', title, authors, media) — the
-    # tag keeps the two key spaces from colliding.
+    # Keyed ('isbn', isbn, media), ('upc', upc, media) or ('title', title,
+    # authors, media) — the tag keeps the key spaces from colliding.
     seen_in_file: set[tuple] = set()
+    # For the `dropped` report: every column that held data in some row, and
+    # the (column, reason) pairs rows reported themselves.
+    nonblank: set[str] = set()
+    row_drops: set[tuple[str, str]] = set()
 
     _CSV_MAX_TEXT = 1000
 
     with get_db() as db:
+        locs = csv_import.RowLocations(db)
         for i, row in enumerate(reader, start=2):
             try:
+                # DictReader files overflow fields under the key None.
+                nonblank.update(
+                    k for k, v in row.items()
+                    if k is not None and isinstance(v, str) and v.strip()
+                )
                 norm = normalize(row)
+                row_drops.update(norm.get("dropped") or [])
+                # LibraryThing acquisition columns that held data on this row
+                # — they land only on a newly created item's copy.
+                acq_given = [
+                    c for c in csv_import.LT_ACQUISITION_COLUMNS if (row.get(c) or "").strip()
+                ] if fmt == reading_imports.LIBRARYTHING else []
 
                 title = norm["title"]
                 if not title:
@@ -144,22 +192,36 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 if norm["series_name"] and len(norm["series_name"]) > _CSV_MAX_TEXT:
                     errors.append(f"Row {i}: series_name too long (max {_CSV_MAX_TEXT} chars)")
                     continue
-                # Only the generic format reads a `tags` column. StoryGraph's
-                # own export already has a `Tags` column, and the header
-                # lowercasing above means row["tags"] exists for StoryGraph
-                # rows too — length-checking it unconditionally would start
-                # failing rows a StoryGraph file used to import fine, for a
-                # cell normalize_storygraph never reads.
-                if fmt == reading_imports.GENERIC:
-                    raw_tags = row.get("tags")
+                # Gate on the normalizer *emitting* a `tags` key, not on the
+                # format. StoryGraph's export has its own `Tags` column that
+                # normalize_storygraph never reads and never emits, and the
+                # header lowercasing above means row["tags"] exists for a
+                # StoryGraph row too — length-checking it unconditionally
+                # would start failing rows a StoryGraph file used to import
+                # fine, for a cell its normalizer never reads. Checking the
+                # emitted key instead of the format also covers LibraryThing
+                # and Libib, whose normalizers do read and emit tags.
+                if "tags" in norm:
+                    # Check the raw cell the normalizer actually read: the
+                    # generic and Libib formats read `tags`, LibraryThing
+                    # reads `tags` or `your_tags` — check whichever is
+                    # present rather than tracking which alias each format
+                    # used.
+                    raw_tags = row.get("tags") or row.get("your_tags")
                     if raw_tags and len(raw_tags) > _CSV_MAX_TEXT:
                         errors.append(f"Row {i}: tags too long (max {_CSV_MAX_TEXT} chars)")
                         continue
 
                 isbn_val = norm["isbn"]
                 media = norm["media_type"]
+                # Refuse now whatever a later write would (G85): the location
+                # is created before the insert, and update mode applies the
+                # platform after restore_item.
+                csv_import.precheck_row(db, norm, isbn_val, media)
+                if norm.get("location"):
+                    locs.check(norm["location"])
 
-                owned, wishlisted, owned_given, wishlisted_given = _resolve_state(
+                owned, wishlisted, owned_given, wishlisted_given = csv_import.resolve_state(
                     norm, to_read_wishlist, tracker=fmt != reading_imports.GENERIC
                 )
 
@@ -188,13 +250,22 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                 # different edition of the same title that does have one.
                 # Comparison is done in SQL so both sides go through the same
                 # collation.
+                # `isbn IN (?, ?)` can match two different rows (the ISBN-13
+                # and ISBN-10 forms can each be held by a different item), and
+                # the title/author fallback below is covered by no UNIQUE
+                # constraint at all — so neither read may just take whatever
+                # SQLite's unordered LIMIT 1 hands back. ORDER BY puts a live
+                # row first when one exists; a trashed row is only acted on
+                # when no live row matches (claude-R4, "live wins").
                 authors_val = norm["authors"] or ""
                 isbn_pair = isbn_svc.canonical_isbn_pair(isbn_val) if isbn_val else None
                 if isbn_pair:
                     isbn13, isbn10 = isbn_pair
                     file_key = ("isbn", isbn13, media)
                     existing = db.execute(
-                        "SELECT id FROM items WHERE media_type = ? AND isbn IN (?, ?)",
+                        "SELECT id, deleted_at FROM items WHERE media_type = ? "
+                        "AND isbn IN (?, ?) "
+                        "ORDER BY deleted_at IS NOT NULL, id LIMIT 1",
                         (media, isbn13, isbn10),
                     ).fetchone()
                 elif isbn_val:
@@ -205,13 +276,29 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     # duplicate that check here.
                     file_key = None
                     existing = None
+                elif norm.get("upc"):
+                    # A disc or game with no ISBN (Libib's films, music and
+                    # games). Keyed on the EAN-13 storage form, which the
+                    # normalizer already produced (G130), so a 12-digit UPC-A
+                    # in the file matches the 13-digit value a scan stored.
+                    # Physical table for the same reason as the ISBN read: it
+                    # predicts idx_items_upc_type, UNIQUE(upc, media_type),
+                    # whose slot a trashed row still holds (G107).
+                    upc = norm["upc"]
+                    file_key = ("upc", upc, media)
+                    existing = db.execute(
+                        "SELECT id, deleted_at FROM items WHERE upc = ? AND media_type = ? "
+                        "ORDER BY deleted_at IS NOT NULL, id LIMIT 1",
+                        (upc, media),
+                    ).fetchone()
                 else:
                     file_key = ("title", title.strip().lower(), authors_val.strip().lower(), media)
                     existing = db.execute(
-                        "SELECT id FROM items WHERE "
+                        "SELECT id, deleted_at FROM items WHERE "
                         "TRIM(title) = TRIM(?) COLLATE NOCASE AND "
                         "TRIM(COALESCE(authors, '')) = TRIM(?) COLLATE NOCASE AND "
-                        "media_type = ? AND (isbn IS NULL OR isbn = '')",
+                        "media_type = ? AND (isbn IS NULL OR isbn = '') "
+                        "ORDER BY deleted_at IS NOT NULL, id LIMIT 1",
                         (title, authors_val, media),
                     ).fetchone()
 
@@ -221,13 +308,55 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                         continue
                     seen_in_file.add(file_key)
 
+                # Whether the file itself marks this row deleted (the CSV's
+                # own `deleted` column, generic-only — None on a
+                # reading-tracker row, which has no Trash concept).
+                incoming_deleted = bool(norm.get("deleted"))
+
                 if existing:
+                    # Update mode never touches copies: an existing item may
+                    # have several, and a flat row cannot say which one it
+                    # means. Its acquisition data is reported instead.
+                    row_drops.update((c, "existing_item") for c in acq_given)
+                    # A trashed hit is restored before anything else about
+                    # this row is decided — it must be the row's first write
+                    # (G85): the per-row except below carries on to the next
+                    # row on any later failure, and the whole import commits
+                    # at the end, so nothing after this call may raise for a
+                    # reason a pre-check above could already have caught.
+                    if existing["deleted_at"] is not None:
+                        if incoming_deleted:
+                            # The file and the database already agree this
+                            # row is gone — leave it alone. Restoring it
+                            # would fight the very state the column exists
+                            # to carry, so this is neither a restore nor an
+                            # update; it is counted with the rows that
+                            # caused no write at all.
+                            skipped += 1
+                            continue
+                        item_write.restore_item(db, existing["id"])
+                        restored += 1
+                    # A live hit is never trashed by an import, regardless of
+                    # what the incoming row's `deleted` column says (the
+                    # safety property) — `incoming_deleted` plays no further
+                    # part below; the skip/update path runs exactly as it
+                    # does for a row that has no opinion on Trash at all.
                     if mode == "skip":
-                        skipped += 1
+                        # Restored or not, a skip-mode hit leaves the row's
+                        # own fields untouched — restore_item only clears
+                        # deleted_at. Do not also count a restored row as
+                        # `skipped`: something *did* happen to it.
+                        if existing["deleted_at"] is None:
+                            skipped += 1
                         continue
                     # mode == update: refresh metadata, and reading state
-                    # for reading-tracker imports
-                    _update_from_csv_row(db, existing["id"], norm)
+                    # for reading-tracker imports — identical path for a
+                    # live hit and a just-restored one.
+                    loc_id = locs.ensure(norm["location"]) if norm.get("location") else None
+                    csv_import.update_from_row(
+                        db, existing["id"], norm,
+                        generic=fmt == reading_imports.GENERIC, location_id=loc_id,
+                    )
                     # Additive only — import never removes a tag. An absent
                     # `tags` column and an empty `tags` cell are deliberately
                     # the *same* answer here (contrast the owned/wishlisted
@@ -253,17 +382,33 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                         state_fields["date_finished"] = norm["date_finished"]
                     if state_fields:
                         update_item_fields(db, existing["id"], state_fields)
-                    imported += 1
+                    # Disjoint counts, in both modes: a restored row is
+                    # `restored` and nothing else. Counting it as `imported`
+                    # too made "Imported: 5, Restored: 1" unreadable — five
+                    # rows or six? — and disagreed with skip mode, which
+                    # already keeps them apart.
+                    if existing["deleted_at"] is None:
+                        imported += 1
                     continue
 
                 pub_year = norm["publish_year"]
                 page_count = norm["page_count"]
 
+                # Only keys with a value: a None would bypass the SCHEMA
+                # default, and location_id=None would still call the seam.
+                extra = {k: norm[k] for k in ("language", "platform", "manual_value",
+                                              "estimated_value") if norm.get(k) is not None}
+                if norm.get("location"):
+                    # Created only now, after every pre-check passed (G85). A
+                    # trashed twin insert_item restores ignores location_id;
+                    # the location is still created and reported.
+                    extra["location_id"] = locs.ensure(norm["location"])
                 new_id = insert_item(
                     db,
                     title=title,
                     authors=norm["authors"],
                     isbn=isbn_val,
+                    upc=norm.get("upc"),
                     media_type=media,
                     publisher=norm["publisher"],
                     publish_year=int(pub_year) if pub_year and str(pub_year).isdigit() else None,
@@ -275,16 +420,52 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
                     owned=int(owned),
                     wishlisted=wishlisted,
                     source=source,
+                    # No hit in the database: a row the file marks deleted
+                    # is created directly rather than resurrected, so a
+                    # trashed twin that this row's own dedup keys somehow
+                    # missed is refused, not restored, on this path.
+                    restore_trashed=not incoming_deleted,
+                    **extra,
                 )
                 if norm.get("tags"):  # additive only — see the update path's comment
                     tags_svc.attach_tags(db, new_id, norm["tags"])
-                if isbn_val:
-                    new_item_ids.append(new_id)
-                imported += 1
+                if incoming_deleted:
+                    # G85: nothing that can raise sits between the insert
+                    # and this write — the tag attach above is the only
+                    # thing in between, and it cannot fail on a row this
+                    # loop just created. Trashed "now": a CSV row carries no
+                    # deletion timestamp of its own.
+                    item_write.trash_item(db, new_id)
+                    trashed += 1
+                else:
+                    if item_write.was_restored(new_id):
+                        # insert_item restored a trashed twin, which may
+                        # already have copies — same rule as a matched row.
+                        row_drops.update((c, "existing_item") for c in acq_given)
+                    elif norm.get("copy") and owned:
+                        # The new item's first copy, so it is the primary;
+                        # no location_id, so add_copy never writes back
+                        # through the location seam (G96). No BEGIN
+                        # IMMEDIATE (G18): the item was inserted a moment ago
+                        # on this connection, in this still-open write
+                        # transaction, so no other writer can see it, let
+                        # alone add a copy to it. Every value was parsed in
+                        # the normalizer, so nothing here can raise on bad
+                        # file data (G85), and the copy commits with the item
+                        # (G118).
+                        item_copies.add_copy(db, new_id, norm["copy"])
+                    if isbn_val:
+                        new_item_ids.append(new_id)
+                    imported += 1
             except ItemValueError as e:
                 errors.append(f"Row {i}: {e}")
             except Exception as e:
                 errors.append(f"Row {i}: {e}")
+
+    dropped = sorted(
+        {(c, "unmapped") for c in nonblank - reading_imports.CONSUMED_COLUMNS[fmt]}
+        | row_drops
+    )
 
     covers_queued = 0
     if enrich_covers and new_item_ids and not os.environ.get("SHELF_DISABLE_COVER_ENRICH"):
@@ -295,68 +476,33 @@ async def import_csv(request: Request, _=Depends(require_role("admin"))):
         asyncio.create_task(items_common._enrich_import_covers(eligible))
 
     return {
+        # `imported`, `skipped`, `restored` and `trashed` partition every row
+        # that reached a decision (a row that raised before one is in
+        # `errors` instead, never in these four): imported (created live, or
+        # a live hit updated), skipped (a live hit in skip mode, an in-file
+        # duplicate, or an already-trashed row the file also marks deleted),
+        # restored (a trashed hit the file's row says is live again), and
+        # trashed (no hit, and the file's own row says it is deleted — see
+        # `incoming_deleted` above).
         "imported": imported,
         "skipped": skipped,
+        # Disjoint from `imported`/`skipped`: a restored row is counted here
+        # only, even when update mode refreshes it after restoring, and it is
+        # never `skipped` — something was written to it.
+        "restored": restored,
+        "trashed": trashed,
         # `errors` is capped for the wire; `error_count` is the true total, so
         # the UI can list twenty of thirty-seven and still say thirty-seven.
         "errors": errors[:20],
         "error_count": len(errors),
         "format": fmt,
         "covers_queued": covers_queued,
+        # Columns that held data and were not imported, as codes the import
+        # card turns into words (G58): `unmapped` (this format does not read
+        # the column), `existing_item` (LibraryThing acquisition data on a
+        # row that matched an item already in Shelf), `game_platform` (a
+        # Libib game's `creators`).
+        "dropped": [{"column": c, "reason": r} for c, r in dropped],
+        # Locations a `location` cell named that did not exist, each once.
+        "locations_created": locs.created,
     }
-
-def _resolve_state(norm: dict, to_read_wishlist: bool,
-                   tracker: bool) -> tuple[bool, bool, bool, bool]:
-    """Resolve a row's (owned, wishlisted) once, and whether it states each.
-
-    `owned` comes from the normaliser untouched. A generic row with no
-    `owned` value is one of two things: a 0.41.1-era export, where
-    `wishlisted=1` meant not owned, or any other file, where the historical
-    default is owned (applied on insert; an update leaves the row alone).
-
-    `wishlisted`, in order: an owned row is never on the wishlist (the funnel
-    would refuse the pair, and an import must not fail a row that only says
-    "I have it" — G96); else the file's own `wishlisted` column; else the
-    to-read option. A present `wishlisted=0` is honoured, not replaced by the
-    option (G87).
-    """
-    owned = norm["owned"]
-    column_wish = norm["wishlisted"]
-    if owned is None and column_wish:
-        owned = False
-    owned_given = owned is not None
-    if owned is None:
-        owned = True
-
-    if owned:
-        wishlisted = False
-    elif column_wish is not None:
-        wishlisted = column_wish
-    else:
-        wishlisted = to_read_wishlist and norm["reading_status"] == "want_to_read"
-
-    # A reading-tracker row states both flags. A generic row states
-    # `wishlisted` only through its column, or by being owned (rule 1).
-    wishlisted_given = tracker or column_wish is not None or (owned_given and owned)
-    return owned, wishlisted, owned_given, wishlisted_given
-
-
-def _update_from_csv_row(db, item_id: int, row: dict):
-    """Update an existing item from CSV row data (non-empty fields only)."""
-    field_map = {
-        "authors": "authors", "author": "authors",
-        "publisher": "publisher",
-        "publish_year": "publish_year", "year": "publish_year",
-        "page_count": "page_count", "pages": "page_count",
-        "series_name": "series_name", "series": "series_name",
-    }
-    updates = {}
-    for csv_key, db_key in field_map.items():
-        val = (row.get(csv_key) or "").strip()
-        if val and db_key not in updates:
-            if db_key in ("publish_year", "page_count"):
-                updates[db_key] = int(val) if val.isdigit() else None
-            else:
-                updates[db_key] = val
-    if updates:
-        update_item_fields(db, item_id, updates)

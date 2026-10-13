@@ -86,7 +86,7 @@ async def test_full_sync_honours_exclusions_and_persists_candidates(db, monkeypa
 
     stats = await komga_sync.sync(on_progress=callback)
 
-    assert stats == {"created": 1, "adopted": 0, "updated": 0, "skipped": 0, "errors": 0}
+    assert stats == {"created": 1, "adopted": 0, "updated": 0, "skipped": 0, "in_trash": 0, "errors": 0}
     assert progress == [(1, 1, "Example Comic", "created")]
     row = db.execute("SELECT media_type, source, location_id FROM items").fetchone()
     assert dict(row) == {"media_type": "comic", "source": "komga", "location_id": None}

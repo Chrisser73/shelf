@@ -7,6 +7,7 @@ call through it so tests can patch.
 """
 
 import logging
+import sqlite3
 
 import httpx
 
@@ -17,7 +18,8 @@ from app.auth import require_role
 from app.config import BOOK_MEDIA_TYPES, HTTP_TIMEOUT, MEDIA_TYPES, canonical_media_type
 from app.database import get_db, get_game_platforms, get_setting
 from app.routers import items_common
-from app.services import covers, igdb, openlibrary, scan_outcome, tmdb
+from app.services import covers, igdb, item_write, openlibrary, restore_report, scan_outcome, tmdb
+from app.services import tags as tags_svc
 from app.services import isbn as isbn_svc
 from app.services import upc as upc_svc
 from app.services.item_write import ItemValueError, insert_item, validated_location_id
@@ -73,12 +75,16 @@ async def add_game_from_search(
     igdb_id: int = Form(...),
     platform: str = Form(""),
     location_id: int | None = Form(None),
+    tags: str = Form(""),
+    mode: str = Form("add"),
+    reading_status: str = Form(""),
     _=Depends(require_role("editor")),
 ):
     """Add a video game to the collection from an IGDB search result."""
     templates = request.app.state.templates
 
     platform = (platform or "").strip()
+    mode = "wishlist" if mode == "wishlist" else "add"
     with get_db() as db:
         valid_platforms = get_game_platforms(db)
     if platform and platform not in valid_platforms:
@@ -130,18 +136,22 @@ async def add_game_from_search(
             # ItemValueError and the card carries its message. Rendered after
             # the block so nothing runs under the write.
             try:
-                item_id = insert_item(
-                    db,
-                    title=metadata["title"],
-                    description=metadata.get("description"),
-                    media_type="video_game",
-                    publisher=metadata.get("publisher"),
-                    publish_year=metadata.get("publish_year"),
-                    series_name=metadata.get("series_name"),
-                    platform=platform_val,
-                    location_id=loc_id,
-                    source="igdb",
-                )
+                with tags_svc.default_tags(tags), \
+                     item_write.default_reading_status(reading_status):
+                    item_id = insert_item(
+                        db,
+                        owned=0 if mode == "wishlist" else 1,
+                        wishlisted=(mode == "wishlist"),
+                        title=metadata["title"],
+                        description=metadata.get("description"),
+                        media_type="video_game",
+                        publisher=metadata.get("publisher"),
+                        publish_year=metadata.get("publish_year"),
+                        series_name=metadata.get("series_name"),
+                        platform=platform_val,
+                        location_id=loc_id,
+                        source="igdb",
+                    )
             except ItemValueError as e:
                 value_error = str(e)
 
@@ -168,18 +178,21 @@ async def add_game_from_search(
             with get_db() as db:
                 db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
 
-    items_common._log_scan("", "video_game", "added", item_id)
+    status = "wishlisted" if mode == "wishlist" else "added"
+    items_common._log_scan("", "video_game", status, item_id, mode)
 
     resp = templates.TemplateResponse(
         request, "fragments/scan_result.html",
         {
-            "status": "added", "isbn": "", "title": metadata["title"],
+            "status": status, "isbn": "", "title": metadata["title"],
             "authors": metadata.get("developer"),
             "cover_path": cover_path, "item_id": item_id,
-            "source": "igdb", "media_type_label": "Video Game",
+            "source": "igdb", "media_type_label": "Video Game", "media_type": "video_game",
         },
     )
-    resp.headers["HX-Trigger"] = items_common._toast_header(f"Added: {metadata['title'][:50]}")
+    resp.headers["HX-Trigger"] = items_common._toast_header(
+        f"{'Added to wishlist' if mode == 'wishlist' else 'Added'}: {metadata['title'][:50]}"
+    )
     return resp
 
 @router.get("/title-search")
@@ -246,11 +259,15 @@ async def add_book_from_search(
     isbn: str = Form(...),
     media_type: str = Form("book"),
     location_id: int | None = Form(None),
+    tags: str = Form(""),
+    reading_status: str = Form(""),
+    mode: str = Form("add"),
     _=Depends(require_role("editor")),
 ):
     """Add a book to the collection from a title search result (by ISBN)."""
     templates = request.app.state.templates
     media_type = canonical_media_type(media_type)
+    mode = "wishlist" if mode == "wishlist" else "add"
     # The `auto` guard, kept in front of the lookup below so a bad value never
     # costs a provider call; the funnel checks the value again on the save.
     if not items_common.is_valid_media_type(media_type):
@@ -310,31 +327,76 @@ async def add_book_from_search(
                 {"status": "error", "isbn": isbn13, "message": "Could not fetch metadata for this ISBN"},
             )
 
-        item_id = items_common._save_item(metadata, isbn13, media_type, location_id, source, hc_ids)
-
-        hc_cover = metadata.get("cover_url") if source == "hardcover" else hc_ids.get("cover_url")
-        cover_path = await covers.download_cover(
-            item_id, isbn13,
-            metadata.get("cover_url") if source != "hardcover" else None,
-            metadata.get("cover_id"), client,
-            hardcover_cover_url=hc_cover,
-        )
-        if cover_path:
+        try:
+            # One write path carries all three creation intents.  Saving once
+            # before entering the default-status context was a bad rebase
+            # merge: it either raised a duplicate error or discarded the
+            # requested wishlist state and reading status.
+            with tags_svc.default_tags(tags), \
+                 item_write.default_reading_status(reading_status):
+                item_id = items_common._save_item(
+                    metadata, isbn13, media_type, location_id, source, hc_ids,
+                    owned=(mode != "wishlist"),
+                )
+        except sqlite3.IntegrityError:
+            # A rival add (this same route, or a scan of the same ISBN) can
+            # win the insert during this request's own metadata lookup — the
+            # same race the duplicate check above defends against before the
+            # lookup starts. Re-run it rather than let the UNIQUE violation
+            # reach the caller as a 500 (F-BUG-1).
             with get_db() as db:
-                db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
+                existing = db.execute(
+                    "SELECT id, title FROM items_live WHERE isbn = ? AND media_type = ?",
+                    (isbn13, media_type),
+                ).fetchone()
+            if existing is None:
+                raise
+            items_common._log_scan(isbn13, media_type, "duplicate", existing["id"])
+            return templates.TemplateResponse(
+                request, "fragments/scan_result.html",
+                {"status": "duplicate", "isbn": isbn13, "title": existing["title"], "item_id": existing["id"]},
+            )
+        except ItemValueError as e:
+            # A reading_status outside the three values raises on block entry,
+            # before any insert, so nothing was filed.
+            return templates.TemplateResponse(
+                request, "fragments/scan_result.html",
+                {"status": "error", "isbn": isbn13, "message": str(e)},
+            )
 
-    items_common._log_scan(isbn13, media_type, "added", item_id)
+        # Cover kept: skip the download entirely on a restored row that
+        # already has one — a skipped download is also a skipped outbound
+        # call for a cover we would then discard (claude-R8).
+        cover_path = None
+        if not restore_report.keeps_stored_cover(item_id):
+            hc_cover = metadata.get("cover_url") if source == "hardcover" else hc_ids.get("cover_url")
+            cover_path = await covers.download_cover(
+                item_id, isbn13,
+                metadata.get("cover_url") if source != "hardcover" else None,
+                metadata.get("cover_id"), client,
+                hardcover_cover_url=hc_cover,
+            )
+            if cover_path:
+                with get_db() as db:
+                    db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
+
+    status = restore_report.restored_status(item_id, "wishlisted" if mode == "wishlist" else "added")
+    items_common._log_scan(isbn13, media_type, status, item_id, mode)
 
     resp = templates.TemplateResponse(
         request, "fragments/scan_result.html",
         {
-            "status": "added", "isbn": isbn13, "title": metadata["title"],
-            "authors": metadata.get("authors"), "cover_path": cover_path,
+            "status": status, "isbn": isbn13,
+            **({"title": metadata["title"], "authors": metadata.get("authors"),
+                "cover_path": cover_path}
+               if status != "restored" else restore_report.restored_card(item_id)),
             "item_id": item_id, "source": source,
-            "media_type_label": MEDIA_TYPES.get(media_type, media_type),
+            "media_type_label": MEDIA_TYPES.get(media_type, media_type), "media_type": media_type,
         },
     )
-    resp.headers["HX-Trigger"] = items_common._toast_header(f"Added: {metadata['title'][:50]}")
+    resp.headers["HX-Trigger"] = items_common._toast_header(
+        f"{'Added to wishlist' if mode == 'wishlist' else 'Added'}: {metadata['title'][:50]}"
+    )
     return resp
 
 @router.get("/dvds/search")
@@ -380,12 +442,16 @@ async def add_dvd_from_search(
     publish_year: str = Form(""),
     cover_url: str = Form(""),
     location_id: int | None = Form(None),
+    tags: str = Form(""),
+    mode: str = Form("add"),
+    reading_status: str = Form(""),
     _=Depends(require_role("editor")),
 ):
     """Add a DVD/Blu-ray to the collection from a TMDb search result."""
     templates = request.app.state.templates
 
     title = (title or "").strip()
+    mode = "wishlist" if mode == "wishlist" else "add"
     if not title:
         return templates.TemplateResponse(
             request, "fragments/scan_result.html",
@@ -428,15 +494,19 @@ async def add_dvd_from_search(
             # ItemValueError and the card carries its message. Rendered after
             # the block so nothing runs under the write.
             try:
-                item_id = insert_item(
-                    db,
-                    title=title,
-                    description=description or None,
-                    media_type="dvd",
-                    publish_year=year,
-                    location_id=loc_id,
-                    source="tmdb",
-                )
+                with tags_svc.default_tags(tags), \
+                     item_write.default_reading_status(reading_status):
+                    item_id = insert_item(
+                        db,
+                        owned=0 if mode == "wishlist" else 1,
+                        wishlisted=(mode == "wishlist"),
+                        title=title,
+                        description=description or None,
+                        media_type="dvd",
+                        publish_year=year,
+                        location_id=loc_id,
+                        source="tmdb",
+                    )
             except ItemValueError as e:
                 value_error = str(e)
 
@@ -463,15 +533,18 @@ async def add_dvd_from_search(
             with get_db() as db:
                 db.execute("UPDATE items SET cover_path = ? WHERE id = ?", (cover_path, item_id))
 
-    items_common._log_scan("", "dvd", "added", item_id)
+    status = "wishlisted" if mode == "wishlist" else "added"
+    items_common._log_scan("", "dvd", status, item_id, mode)
 
     resp = templates.TemplateResponse(
         request, "fragments/scan_result.html",
         {
-            "status": "added", "isbn": "", "title": title,
+            "status": status, "isbn": "", "title": title,
             "cover_path": cover_path, "item_id": item_id,
-            "source": "tmdb", "media_type_label": "DVD / Blu-ray",
+            "source": "tmdb", "media_type_label": "DVD / Blu-ray", "media_type": "dvd",
         },
     )
-    resp.headers["HX-Trigger"] = items_common._toast_header(f"Added: {title[:50]}")
+    resp.headers["HX-Trigger"] = items_common._toast_header(
+        f"{'Added to wishlist' if mode == 'wishlist' else 'Added'}: {title[:50]}"
+    )
     return resp

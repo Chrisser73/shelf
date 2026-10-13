@@ -20,7 +20,9 @@ building it. *Exploring* means the idea is accepted but the shape is not.
 **Planned.** Shelf has grown a lot of surface, and not everyone wants all of it.
 A setup step and a settings page to turn whole feature areas on and off, so an
 install that only catalogues books does not carry lending, valuation, store mode
-and the rest in its navigation.
+and the rest in its navigation. The settings page shipped in 0.55.0 as
+Settings → **Features**, and the setup wizard now asks for a profile —
+Minimal, Standard or Everything — which Features can change later.
 
 Most of the groups below arrive switched off behind this, which is why it comes
 early.
@@ -73,17 +75,18 @@ household, and nothing visibly changes until you invite someone.
 Library, and thinner otherwise.
 
 - **More national sources.** German ISBNs already route to the Deutsche
-  Nationalbibliothek and Italian ones to Italy's national network. Other
+  Nationalbibliothek, Italian ones to Italy's national network, Dutch ones to
+  the Koninklijke Bibliotheek and Hungarian ones to OSZK NEKTÁR. Other
   countries deserve the same.
 - **A translated interface.** The UI is English-only today. Translating the
   templates and letting the browser or a per-user setting pick the language.
 
 ## Import and migration
 
-**Planned.** Goodreads, StoryGraph, CSV and a portable archive are supported
-today. Adding **LibraryThing** and **Libib**, and an importer for an
-**Audible/Libation library export** so an audiobook collection can be catalogued
-without retyping it. Shelf stores the catalogue record, never the audio.
+**Planned.** Goodreads, StoryGraph, LibraryThing, Libib, CSV and a portable
+archive are supported today. Next is an importer for an **Audible/Libation
+library export**, so an audiobook collection can be catalogued without retyping
+it. Shelf stores the catalogue record, never the audio.
 
 ## Collectors and inventory
 
@@ -104,7 +107,6 @@ anything, so it follows the households work.
 
 - **New-release alerts** for the series and authors you follow, plus a calendar
   of what is coming.
-- **Price alerts** on wishlist items.
 - **Buy links** on wishlist and series-gap rows — off by default, with
   Bookshop.org first because it supports independent bookshops. If you turn them
   on you enter *your own* affiliate tags, not the project's, and the link says
@@ -115,18 +117,18 @@ anything, so it follows the households work.
 ## Recently shipped
 
 The last five releases that changed something you can see. Some releases change
-only the foundations — 0.42.4 and 0.42.5 rearranged how Shelf reads its own
-data, ahead of a Trash you can restore from — and those are left out here
+only security or foundations — 0.50.1 and 0.51.0 hardened sign-in and fixed a
+security issue without changing what you see — and those are left out here
 rather than listed as "nothing visible". Full detail on every release, visible
 or not, is in the [changelog](../CHANGELOG.md).
 
 | Version | What landed |
 |---|---|
-| [0.45.0](https://github.com/dgahagan/shelf/releases/tag/v0.45.0) | Browse can tell you where a row came from. A **Source** filter sits in the filter bar beside the others, cross-filtered the same way and listing only the sources your library actually holds — a RomM, Komga or Audiobookshelf sync, a metadata provider, a CSV import, Photo Intake, or by hand. RomM games also get a **RomM ↗** badge on the card that opens the game where it lives. Settings moves its four sections into a sidebar, and a Komga series that arrived split into one series per volume is repaired by the next sync |
-| [0.44.0](https://github.com/dgahagan/shelf/releases/tag/v0.44.0) | A novel, its audiobook and the film made from it stay three records, but you can now say they belong together. Link an item to another as a Format, a Related item or an Adaptation, and every item in the group shows the whole group — including the ones it reaches only through a third item. Editors build the links by hand from a panel on the item page; Shelf never guesses from similar titles. The account menu also says who you are, and groups what it holds |
-| [0.43.0](https://github.com/dgahagan/shelf/releases/tag/v0.43.0) | Kids books are no longer a media type of their own. Every one becomes an ordinary book carrying a `Kids` tag on the first boot after the upgrade, so a filter for books finally finds all of them, and one that shares an ISBN or barcode with a book you already own is merged into it rather than left beside it. Tags now travel through the CSV export and the portable archive, so the label survives a backup. The conversion is one-way — read the upgrade note first |
-| [0.42.3](https://github.com/dgahagan/shelf/releases/tag/v0.42.3) | An older children's paperback is no longer catalogued as a DVD. Scholastic-era books carry a price-point barcode shared across a whole price band, with the title in a separate five-digit block beside it; scanners that read only the first part used to send it down the retail path, where the shared code looks like a disc. Shelf now stops the scan and asks you to type the five digits |
-| [0.42.2](https://github.com/dgahagan/shelf/releases/tag/v0.42.2) | An item whose stored ISBN or UPC is not valid — usually an ASIN an older Audiobookshelf sync left behind — can be edited again. A stored identifier you do not touch is left alone and marked on the form, so changing the title or the location no longer means fixing an identifier first |
+| [0.64.0](https://github.com/dgahagan/shelf/releases/tag/v0.64.0) | Set a reading status as you scan. The Scan page has a **Default status** beside Default tags, and every new item you add by barcode, title search or by hand takes it. No dates are recorded. **Find cover** also looks for a book's exact ISBN edition first. |
+| [0.63.0](https://github.com/dgahagan/shelf/releases/tag/v0.63.0) | Open Shelf from a link on another site and stay logged in. A link from a homelab dashboard, a chat message or another machine on your LAN now opens the page you clicked instead of the login form. `SHELF_SESSION_DAYS` sets how long a login lasts; Shelf defaults to 30 days. |
+| [0.62.0](https://github.com/dgahagan/shelf/releases/tag/v0.62.0) | Watch the wishlist's prices. Every night Shelf checks the publisher's list price of wishlisted books through ISBNdb and sends one message when any drop past your threshold; a book's page shows its list price and the one before. List price only, not used-market deals. Needs an ISBNdb key. |
+| [0.61.0](https://github.com/dgahagan/shelf/releases/tag/v0.61.0) | Turn a month or a year into one shareable image. Stats → **Wrap-up** draws what you finished and added, with a grid of covers, in your browser; download it, or share it from your phone. Nothing is stored or published. |
+| [0.60.0](https://github.com/dgahagan/shelf/releases/tag/v0.60.0) | Bring a LibraryThing or Libib export straight in. Shelf recognises either file, maps collections, status and tags, puts LibraryThing purchase details on the copy, and lists any column it did not import. Both importers are marked beta. |
 
 ---
 

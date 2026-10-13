@@ -54,6 +54,12 @@ into subagent prompts).
   are bound at call time, and after the await the component may have
   re-rendered, leaving the node stale or detached. Capture what you need
   before the await.
+- **`intake.js` is stricter: no `$el`/`$root` at all**, not even before an
+  await and not in a comment — `tests/test_intake.py::
+  test_intake_js_has_no_el_or_root_magics` fails on either. Copying
+  `manualAddForm`'s `rootEl = this.$el` shape into `intakePage` goes red there;
+  give the root an `id` and use `document.getElementById`, as the file already
+  does for `intake-video` (#119 T7, `3457291`, 2026-09-26).
 - **Status:** linted — `make check-alpine` flags `$el`/`$root` used after an
   `await` in `static/js/`.
 
@@ -139,8 +145,12 @@ PY
   registration. The CSP build has no global fallback, so an unregistered name
   is not an error — the component simply never initialises and the panel sits
   inert.
+- **And name it in the component-load guard.** `component-load-guard.js`'s
+  `SCRIPTS` map must list the registration under the file that makes it, or
+  losing that file is silent — five names had drifted out by 2026-09-23 (H-4).
 - **Status:** linted — `make check-alpine` resolves every `x-data` name
-  against the registrations under `static/js/`.
+  against the registrations under `static/js/`, and every registration
+  against the guard's `SCRIPTS` map.
 
 ## G5 — When Alpine state is dereferenced in a template guard expression
 
@@ -191,6 +201,14 @@ PY
   doesn't know about, iterating the registry in `app/browse_filters.py`. A new
   OOB-swapped interactive control must either be a declared filter or arrange
   its own re-process. Inherited from G24, which retired around it.
+- **The re-process restores htmx triggers only, not a plain
+  `addEventListener`.** `browse.js:65` binds the sort `<select>`'s `change`
+  listener (it persists `shelf-sort`) once, at load. So a server-driven change
+  to a control's *contents* swaps the `<option>` out of band, never the
+  `<select>`: `filter_counts_oob.html` swaps `#sort-option-author` for exactly
+  this reason (#119, 0.52.0). htmx 2 parses the response through `<template>`,
+  so a top-level OOB `<option>` survives the parse. Proposed as G122 by the
+  0.52.0 diff review and folded in here, since the trigger is the same.
 - **Evidence:** `8a4ce0b` (2026-08-16, found as a latent bug during the
   community-plan T8 work; documented in `static/js/browse.js`).
 - **Verify:** no listener on `afterSettle` remains, the vendored htmx still
@@ -252,7 +270,10 @@ grep -n "htmx.process" static/js/browse.js                  # expect >= 1, in th
 - **Rule:** Always pass the user's current DB `token_version` to
   `create_token()`. The parameter defaults to `1`, so a call site that
   omits it mints a token that is instantly invalidated for any user whose
-  version was bumped (password reset, role change).
+  version was bumped (password reset, role change). Inside a request the
+  resolved user carries it: `request.state.user["token_version"]`, read from
+  the row by `get_current_user` (`bf643eb`, 2026-09-24). Mint from that,
+  unless the route itself just bumped the version.
 - **Why:** The display-name handler did exactly this — the refreshed JWT
   logged the user out on their next request, but only for users with a
   bumped version, so it passed casual testing.
@@ -278,6 +299,15 @@ grep -n "htmx.process" static/js/browse.js                  # expect >= 1, in th
   `grep -n "str(resp.url)" app/services/covers.py` (expect ≥ 1, inside
   `_download`).
 - **Status:** documented.
+- **Watch — provider placeholder images (open, 2026-09-22).** `_download`
+  rejects only files under `MIN_COVER_SIZE` (100 bytes) and Open Library's
+  1×1 pixel. Google Books serves a generic "image not available" picture for
+  some volumes, and it is large enough to be saved as a real cover. The book
+  path (`googlebooks.py`) has always had this gap. #144 extends it
+  to magazine issues through the assisted periodical flow. No bad cover has
+  been reported yet. If one is, detect the placeholder in `_download` (a
+  content hash or known dimensions), so that every source gets the fix, not
+  only the one that was reported.
 
 ## G12 — When security-reviewing user-supplied integration URLs
 
@@ -309,6 +339,13 @@ grep -n "htmx.process" static/js/browse.js                  # expect >= 1, in th
   `cdf32ca` (2026-08-19, nav cache wired into the same resets);
   `03b93f0` (2026-08-24, issue #36 — `igdb._token_cache`, a cache that had
   been leaking across tests on `main` since IGDB was added).
+- **A cache its writers invalidate is blind to a raw write.** An E2E test
+  that backdates or inserts through sqlite directly, after the server has
+  already populated a module cache, reads the stale value until the TTL
+  lapses — `trash.expired_count()` holds for an hour. Seed before the first
+  render that fills the cache, or trigger an invalidation through the app
+  (`tests/e2e/test_trash.py` posts the unchanged retention setting;
+  `a41b16d`, 2026-09-21). The unit suite's per-test reset hides this.
 - **Verify:** the isolation suite still passes and the known caches are
   reset: `python -m pytest tests/test_conftest_isolation.py -q` and
   `grep -c "_cached\|_token_cache" tests/conftest.py` (expect ≥ 4). The
@@ -582,6 +619,16 @@ python -m pytest tests/test_catalogue_add_boundaries.py tests/test_hardcover_isb
 grep -rn "in found.casefold()" app/ | grep -v services/authors.py
 python -m pytest tests/test_authors.py -q
 ```
+- **And `normalize()` is now an identity key, not only a matcher.** The author
+  index (#117b) keys each author on `" ".join(normalize(name))`, so a fold that
+  drops characters no longer just misses a cover — it merges or loses people.
+  It used to split on `[^a-z0-9]`, which deleted every non-Latin letter
+  (`刘慈欣` → `[]`, and `matches("Лев Толстой", "Лев Толстой")` was `False`);
+  it now splits on non-word runs in any script. Any change to `normalize()`
+  changes stored identities too, so it needs a `PARSER_VERSION` bump in
+  `app/services/authors.py`, which re-indexes on the next boot. Never key
+  identity on `matches()` (it merges "J. Smith" into "John Smith"). Evidence:
+  plan-review codex R1, `3393148` (2026-09-28).
 - **Status:** documented.
 
 ## G23 — When capturing a demo or screenshot right after a photo-intake import
@@ -605,6 +652,14 @@ python -m pytest tests/test_authors.py -q
   - **`display_name` is baked into the JWT** (`app/auth.py:63`), so the nav
     kept saying `E2E Admin` after a `UPDATE users SET display_name` — the
     page reads the token, not the row. Clear cookies and log in again.
+  - **Shoot from `data-dev/demo-seeded`, never from `make seed-dev`.** The
+    name suggests demo data, but `seed-dev` copies **prod's** `shelf.db`
+    (`Makefile:260`), so a public screenshot taken there carries the real
+    library's titles. Copy `data-dev/demo-seeded` (32 curated items, all with
+    covers) into a scratch dir and point a throwaway uvicorn at it with
+    `DATA_DIR`. Its schema is old, so the app migrates it on boot, and the
+    password column is `users.password`. Found when `plan-wrapups` T5 named
+    `seed-dev` as the safe source (`4327e47`, 2026-09-30).
 - **Evidence:** `f618b11` (2026-08-20) — the previous demo GIF was recorded
   this way and shipped for six weeks showing four cover-less books.
 - **Verify:** the import path is still fire-and-forget (expect 1 hit; if it
@@ -769,6 +824,14 @@ assert messages == ["Delete location 'Shelf A'?"]
   Mutation-checked: commenting out the `confirm()` in `browse.js` fails it with
   `expected exactly one confirm(), got []`. **Every dialog handler in the suite
   now records its message**, so the Verify grep below should stay all-green.
+- **Recording is not enough if the dialog is optional.** A handler that
+  asserts "no dialog when nothing is at stake, else the exact text" is
+  vacuous whenever the shared session DB happens to hold nothing at stake,
+  which is every clean run. `tests/e2e/test_feature_sweep.py`'s `lending_off`
+  fixture took the no-dialog arm on every run until the Codex diff review of
+  `plan-feature-profiles-sweep` (2026-09-28). Seed the state that makes the
+  dialog fire, remove it in teardown, and assert the exact text; a no-dialog
+  case, if wanted, is a separate test.
 - **Verify:** every dialog handler in the e2e suite records its message —
   each hit below should sit next to an assertion on the recorded list:
 
@@ -1174,6 +1237,18 @@ python -c "from app.services.openlibrary import USER_AGENT as U; assert 'http' i
     judgement call left to get wrong. In the same session the *committed* case
     (T2's guard file) and the *uncommitted* case (T3's template) sat one task
     apart, which is exactly the discrimination not worth making under pressure.
+    **Third time, `feat/feature-profiles-wizard` T2 (2026-09-29)** — the
+    orchestrator had made the `cp` backup and still reached for `git checkout`
+    to restore, wiping the uncommitted handler; the backup is what saved it.
+    Restore with the same tool you backed up with.
+  - **A scripted mutation that anchors on a non-unique line mutates the wrong
+    function.** The same run's first two attempts moved `apply_profile` "to
+    just before `token = create_token(`" with a first-match (then last-match)
+    string replace — and `auth_routes.py` has that line in the login route and
+    a later route too. The result looked like a real finding (six pins red, the
+    rows missing) and was a mutation of a different handler. Assert the anchor
+    occurs once (`assert s.count(anchor) == 1`) before replacing, and read the
+    mutated diff before reading the test output.
 
   One more, found while orchestrating `feat/issue-50-blank-scan-toast`
   (2026-08-28) — the "fallback branch absorbs it" bullet again, but the
@@ -1295,6 +1370,15 @@ python -c "from app.services.openlibrary import USER_AGENT as U; assert 'http' i
     stayed green. The pin that reddens it posts `owned` alone (`85fec05`).
     When a mutation restores a derived value, ask whether anything later in
     the request writes the same field.
+  - **A fallback key catches what the new key was meant to.** The CSV importer
+    has a title+authors+media fallback for rows with no ISBN. A UPC dedup key
+    added in front of it (`e53ba56`, 2026-09-29) was pinned by "re-import the
+    same file, expect every row skipped" — which stays green with the UPC arm
+    deleted, because the identical titles fall through to the fallback and
+    match anyway. The pins that red are the ones where the title differs: a
+    disc scanned under another name, a trashed twin, an in-file duplicate with
+    an edited title. When you add a key ahead of a fallback, seed a row the
+    fallback cannot match.
 
 - **Evidence:** `ce1003c`, `8ba5853`, `10caf32` (2026-08-21, issue #27). The
   queue's requeue-filter and head-of-line pins were mutation-checked the same
@@ -1735,6 +1819,18 @@ python -m pytest tests/e2e/test_responsive.py -m e2e -q
   entire defence; the numbers were then measured by hand at 320 px and 390 px
   rather than assumed. **When your element only exists after a click, the gate
   is not your gate — measure it yourself and put the numbers in the commit.**
+  Measure **element boxes**, not only `document.documentElement.scrollWidth`:
+  a child of a `position: fixed` bar (the Browse bulk bar) can stick out past
+  the viewport without widening the document at all. On
+  `feat/tags-manage-and-apply` (2026-09-23, `f10de5e`) the document reported
+  no overflow at 320 px while the Series group's Apply button already ended at
+  344 px (a pre-existing overflow, not introduced there). Hit again on
+  `feat/issue-145-csv-roundtrip-fields` (2026-10-09, `1f09957`): the new
+  Language group, copied from the Series group's classes, ended at 349.7 px
+  in a 320 px viewport; `flex-wrap` plus an `sm:`-only divider brought it to
+  302.8. **A new bulk-bar group is born overflowing if it copies a sibling's
+  classes** — wrap it, and assert its boxes in E2E as
+  `test_bulk_language_group_stays_in_viewport` does.
 - **Status:** gated — `tests/e2e/test_responsive.py` (in `make test-e2e` and
   in CI), *for content in a page's default state only* (see above). The gate
   catches the *consequence*; the two rules above are how you fix it once it
@@ -2123,6 +2219,11 @@ $ grep -n 'get_setting(db, "' app/routers/sync.py
   cross-vendor plan review before any code existed
   (`.devdocs/archive/completed/plan-issue-41-abs-sync-guard-review-codex.md`);
   verified by reading `/proc/<pid>/environ` of the booted child.
+- **Also cleared by `server_factory`: `FORWARDED_ALLOW_IPS`** (`cd2735d`,
+  2026-09-26, #124). uvicorn reads it directly, so a host value changes which
+  peers may set the scheme. `tests/e2e/test_transport_scheme.py` must pass
+  under `FORWARDED_ALLOW_IPS=10.0.0.5`; with the variable not cleared, 3 of
+  its 4 tests go red.
 - **Verify:** the configuration-matrix tests must stay green with the pytest
   parent itself configured — if this goes red, the clearing is not reaching the
   child:
@@ -2224,6 +2325,17 @@ grep -rn 'add_init_script' tests/e2e/
   genuinely not markup (`16adb7d`). Same family as **G32**, where
   `check_alpine_csp.py` scans raw template text and flags a server-side Jinja
   subscript as an htmx event filter — same cause, different trigger.
+- **The guard's pattern is wider than its name — read the regex, not the
+  test name.** `tests/test_item_write.py::…::test_deleted_at_is_written_by_exactly_four_functions`
+  says "written by four functions", but it matches `deleted\s*_\s*at\s*=`
+  anywhere in `app/` outside `#` comment lines: **docstrings**, an equality
+  test (`deleted_at ==`), and a **local variable** named `deleted_at`. It
+  tripped twice in one plan (`feat/soft-delete-export`, 2026-09-23): a
+  docstring quoting the new `deleted_at = COALESCE(?, …)` statement (T1,
+  `b859168`, reworded to prose), and `deleted_at = _valid_deleted_at(...)` as
+  a local in `archive.apply_plan` (T5, `f95c2fe`, renamed `trash_stamp`).
+  Neither was a write. Name locals after what they hold (`trash_stamp`), and
+  describe the column's assignment in words.
 - **Verify:** judgement. When a text-scanning guard fires, read the hit before
   the rule: if it is inside a comment, the guard is not wrong about the file.
 - **Status:** documented. Not a lint candidate — a lint for this would need
@@ -2309,21 +2421,21 @@ print('\n'.join(bad) or 'OK: every swap destination is explicit')
   `content = await cover_file.read(covers.MAX_COVER_SIZE + 1)`, with
   `save_uploaded_cover`'s existing `> MAX_COVER_SIZE` branch unchanged
   (`app/services/covers.py:100`).
-- **Seven call sites still carry the unbounded shape, and this entry was
-  written knowing it** — the cover uploads at `app/routers/items.py:532` and
-  `:811`, the **photo-intake upload at `intake.py:91`** (the largest payload of
-  the set, and the one a first pass at this entry missed), the archive imports
-  at `archive.py:102` and `:140`, the DB restore at `settings.py:254`, and the
-  CSV import at `items_csv.py:82`. All were out of
-  `feat/cover-picker`'s scope. **This is G29's lesson repeating in advance:
-  documenting a rule is not the same as enforcing it**, and G29 shipped with
-  two live violations of its own rule still in the tree. If you are editing
-  any of those six paths for another reason, bound the read while you are
-  there; do not leave this entry describing a tree that mostly violates it.
-  (Note the ceiling differs per path — a CSV or archive import has no
-  `MAX_COVER_SIZE` to reuse and needs one chosen deliberately.)
-- **Verify:** the count of unbounded reads must go **down**, never up. Seven
-  as of 2026-08-25:
+- **Three call sites still carry the unbounded shape, and this entry was
+  written knowing it** — the manual-add cover upload at `app/routers/items.py:820`, the **photo-intake upload at `intake.py:101`** (the largest payload
+  of the set, and the one a first pass at this entry missed), and the DB
+  restore at `settings.py:325` (lines as of 2026-10-01; the edit-save cover read
+  was bounded by plan `issue-127-refused-save-cover`, `c19f934`). The archive imports
+  were bounded by plan-soft-delete-export, and the CSV import before it. All were out of `feat/cover-picker`'s scope. **This is
+  G29's lesson repeating in advance: documenting a rule is not the same as
+  enforcing it**, and G29 shipped with two live violations of its own rule
+  still in the tree. If you are editing any of those three paths for another
+  reason, bound the read while you are there; do not leave this entry
+  describing a tree that mostly violates it. (Note the ceiling differs per
+  path — a CSV or archive import has no `MAX_COVER_SIZE` to reuse and needs
+  one chosen deliberately.)
+- **Verify:** the count of unbounded reads must go **down**, never up. Three
+  as of 2026-10-01:
 
 ```bash
 grep -rn 'await [a-z_]*\.read()' app/routers/ | grep -vc 'read([^)]'
@@ -2480,6 +2592,17 @@ print('every non-book hint survives tier 4')"
 
 ```bash
 grep -rn "|safe" app/templates/
+```
+
+- **The same trap with no template at all.** A route that returns
+  `HTMLResponse(f"…{title}…")` skips Jinja entirely, so the Verify grep
+  above never sees it. `/api/inventory/missing` did exactly this until
+  2026-09-23 (review finding D-1): stored XSS, editor → admin, because
+  `scan.js` assigns the fragment with `innerHTML`. It is now
+  `fragments/inventory_missing.html`. Check this form as well:
+
+```bash
+grep -rnE 'HTMLResponse\(f|html_parts' app/
 ```
 
 - **Status:** documented — a lint candidate: "`|safe` applied to a bare
@@ -2974,6 +3097,9 @@ for path, cap in re.findall(r'\"([^\"]+\.(?:py|html))\": \((\d+),', src):
 "
 ```
 
+- **Also `app/routers/items.py`:** 1592/1600 as of `31b40a3` (2026-10-09,
+  plan `issue-148-scan-default-status`, +7 within a stated +12 budget). Eight
+  lines are left, so the next plan that touches it should plan an extraction.
 - **Status:** documented. The cap is already mechanically enforced — what is
   missing is the *warning* before the budget is spent, not the failure after.
   A lint that fails at 95% of a cap would move the signal to the change that
@@ -4080,10 +4206,24 @@ python -m pytest tests/test_archive.py -q -k "no_copies_key or explicit_empty or
 python -m pytest tests/test_item_write.py -q -k "basename or adjacent_string"
 ```
 
+- **A finer bypass than M1's: a split *inside an identifier*.** The shared
+  normaliser joins physical lines with a **space**, which is right for a
+  statement split across adjacent literals (`"INSERT INTO " "item_copies …"` —
+  SQL tokens are space-separated anyway) and wrong for a name split mid-token:
+  Python concatenates `"deleted" "_at = …"` into `deleted_at = …`, but the
+  buffer holds `deleted _at = …` and a `deleted_at` needle misses it. Found on
+  `feat/soft-delete-collisions` (`c5a86db`, 2026-09-21) by the bypass pin the
+  plan required for the new `deleted_at` guard — which is the argument for
+  writing one for every new guard. That guard's pattern tolerates whitespace
+  around the underscore (`DELETED_AT_ASSIGNMENT`); a split at any other
+  character is stated in its comment as undefended rather than pretended away.
 - **Status:** documented. **Sibling defect still open:** the `items` guards at
   `tests/test_item_write.py:156`, `:195` and `:214` use the same basename
   exemption for `item_write.py` and have not been converted — M1 was scoped to
   `item_copies`. Fix them together with the next change that touches either.
+  The **`deleted_at` guard** added by `feat/soft-delete-collisions` is
+  path-exempt from the start, and carries its own basename and
+  adjacent-literal bypass pins; the three old guards still do not.
 
 
 ## G89 — When adding a NOT NULL column to `items`
@@ -4169,6 +4309,16 @@ grep -n "NOT NULL" app/database.py | grep -i "ALTER TABLE items"
 grep -rn 'x-show="[^"]*"' app/templates/ | grep -E 'name="[a-z_]+"' | grep -v ':disabled'
 ```
 
+- **Two ways to miss it, both from one plan.** `plan-feature-profiles-sweep`
+  (2026-09-28) cleared Scan's Lend-only `borrower_id` select because
+  "`scan.js` sends `borrower_id` only in `lend` mode". That read the
+  `formData.set(...)` line and missed the `new FormData(form)` above it, which
+  collects every successful control first; the Codex diff review caught the
+  stale POST. The grep above missed it too: the `x-show` sits on a wrapper
+  `<div>` and the named `<select>` is a child, on another line. Check the
+  submission path the code actually builds, and read the wrapper as well as
+  the control. Fixed with `:disabled="mode !== 'lend'"` and an E2E pin that
+  reads the Add-mode POST body (`tests/e2e/test_scan.py`).
 - **Status:** documented — a lint candidate, and the grep above is most of
   one. What stops it graduating is that "hidden because it does not apply" and
   "hidden but still meant" are indistinguishable from the markup.
@@ -4480,6 +4630,23 @@ python -m pytest tests/test_scan_upc_enrichment.py -k "PromotesTheWishlist" -q
   When adding a guard-side behaviour elsewhere, read the route from input
   normalisation through every `duplicate` return, and test a pre-seeded row
   with the providers mocked to fail if called.
+- **The earliest guard can read a child table with no items join — and then it
+  bounces.** Music (`music_releases`) and periodicals (`periodical_issues`)
+  each check for a duplicate in their own table and redirect to the item,
+  before the insert funnel is ever reached. With a trashed item that redirect
+  lands on a page reading `items_live`, which bounces to Browse: the user
+  re-adds something and is sent somewhere unrelated. So the restore goes at
+  that guard. For periodicals it is the **only** restore — the insert carries
+  no ISBN or UPC, so the funnel cannot see the collision at all. Two instances
+  found on `feat/soft-delete-collisions` (`5cb6d7a`, 2026-09-21); any new
+  media type with its own record table repeats the shape.
+- **An ownership transition cannot be applied to intent a caller never states.**
+  Four add paths inserted owned and then demoted to the wishlist in a *second*
+  transaction. Against a funnel that restores, that is wrong twice — a
+  wishlist-mode re-add of a trashed owned row restores it and then demotes
+  something the user owns. The intent has to ride the insert
+  (`_save_item(..., owned=False)`, `fd856e4`); a two-step writer added later
+  reintroduces the bug with nothing to flag it.
 - **Status:** documented. Not a lint candidate — which guards are related is
   route-specific.
 
@@ -4731,6 +4898,17 @@ EOF
   it safe and also why it proved nothing about the exemptions — `9a85469` added
   `tests/test_copies_live_contract.py` for that.
 - **Verify:** `make check-deleted`
+- **A new statement can ride along inside an OLD entry's text — and the fix is
+  never to bump the count.** On `feat/soft-delete-collisions` (`98d071d`,
+  2026-09-21) the update funnel's two new lookups were textual *supersets* of
+  the insert funnel's (`… deleted_at IS NOT NULL` + `AND id != ?`), so the two
+  existing entries silently began spanning 2 reads each and the lint reported
+  it. Raising their counts to 2 would have been exactly the over-permissiveness
+  the count exists to stop. Make the statements textually distinct instead —
+  the insert lookups gained `LIMIT 1`, with a comment saying the clause is
+  load-bearing for the lint, not only for SQLite. And take counts for any prose
+  from `scripts/check_items_live.py`, never from a plan: this branch moved them
+  from 13/15 to 22/24 on items and 8/8 to 10/10 on copies.
 - **Status:** `linted: make check-deleted` (also inside `make test`, via
   `tests/test_items_live_lint.py`).
 
@@ -4839,10 +5017,28 @@ EOF
   partial unique index `idx_item_copies_one_primary` needs **no** exemption, and
   the three primary-lookup reads that moved to the view
   (`item_copies.py` `sync_primary_location`, `item_merge.py` `_reparent_copies`,
-  `archive.py` `_import_copies`) are correct **only because the Trash plan
-  demotes a copy when it trashes it**. The day a copy can be trashed while still
-  holding `is_primary = 1`, those three reads are wrong and this row joins the
-  table above.
+  `archive.py` `_import_copies`) are correct **only because
+  `item_copies.trash_copy` demotes a copy in the same statement that stamps
+  it** — honoured since `c5a86db`, and pinned by
+  `tests/test_trash_funnel.py::TestTheGeminiN1Contract`, which reds on
+  `UNIQUE constraint failed: item_copies.item_id` with the demote removed. Any
+  other writer of `deleted_at` on a copy must demote too; the source pin in
+  `tests/test_item_write.py` keeps that writer set at four functions.
+- **There is now a second class, and it must say so at its entry.** Four
+  physical reads exist not to predict a constraint but to **find the row the
+  view hides**: `restore_copy` (it has to start from the trashed copy),
+  `_reparent_copies`' row-selection read (through the view a husk's trashed
+  copy stayed parented to it and died in the merge's `ON DELETE CASCADE`), and
+  the sync external-id matchers (a trashed twin has to be *seen* to be left
+  alone). Each entry's comment says it is **not** the UNIQUE-prediction class,
+  because the list reads as uniform and a reader generalising from its
+  neighbours would "fix" one by repointing it at the view.
+  (`feat/soft-delete-collisions`, 2026-09-21.) The class grew with
+  `feat/soft-delete-export` (2026-09-23): the two portable exports that carry
+  Trash (the archive's item and copy reads, the CSV export's editor/admin
+  branch) and the archive import's trashed-twin lookup, whose title/author
+  base is covered by no constraint at all. Take the current count from
+  `scripts/check_items_live.py`, never from prose (G105).
 - **Why:** the failure is a 500 on a path that has a designed, friendly refusal
   a few lines away, and it cannot happen until something starts writing
   `deleted_at` — so it ships green and surfaces in the plan *after* the one that
@@ -4859,6 +5055,13 @@ EOF
 python -m pytest tests/test_copies_live_contract.py -q
 ```
 
+- **A physical read that can match a live row *and* a trashed one must order
+  live first** (`ORDER BY deleted_at IS NOT NULL, id`). A `UNIQUE(isbn,
+  media_type)` slot does not stop one ISBN being held by a live book and a
+  trashed audiobook, so an unordered `fetchone()` picks arbitrarily.
+  `_find_item_by_barcode` had no `ORDER BY` for as long as nothing could be
+  trashed; the soft-delete flip made it answer "in Trash" over a live row
+  (`31ff477`, 2026-09-21, pinned in `tests/test_scan_modes.py::TestScanInTrash`).
 - **Status:** documented; census of violations zero (`make check-deleted`).
   Not a lint candidate — only a human can say whether a given read exists to
   predict a constraint or to answer a question about the collection.
@@ -4907,6 +5110,42 @@ python -m pytest tests/test_copies_live_contract.py -q
   malformed `NULLIF` mutation).
 - **Verify:** judgement. When a mutation comes back green, ask which of the
   three shapes above it is before writing anything down.
+- **A later fix can disarm an earlier pin, so re-run its mutation after.** On
+  `feat/soft-delete-collisions` (`16c0fc7`, 2026-09-21), `claude-R3` made a
+  sync result's `item_id` load-bearing: the loop read it after counting, so a
+  missing key would error every trashed item. A *later* fix in the same task —
+  skip the cover ingest for an `in_trash` result — removed that read, and the
+  loop-level pin went vacuous: dropping the key left it green. The mutation
+  caught it only because it was run after both changes, not when the pin was
+  written. The shape was still held at the persist level; the loop pin's
+  docstring had been claiming a guarantee it no longer gave.
+- **Five more vacuous shapes, all from that branch**, each caught by a mutation
+  that stayed green:
+  - *A seed helper that silently produces nothing.* `insert_item` mints a
+    primary copy only when the item has a location, so an unlocated seed has no
+    copies, `_primary_id` returns `None`, and the most important pin in the
+    file passed while trashing copy `None`. Assert the seed exists.
+  - *An absence check after a cascade.* "No row still references the husk" is
+    true whether the row was **moved** or **destroyed** by `ON DELETE CASCADE`.
+    Pair it with a row-count conservation check.
+  - *A counter added beside existing ones.* Two modes counted a restored row
+    differently (disjoint in one, doubled in the other) and each mode's own
+    pins passed. Pin that the counts **partition** the input, per mode.
+  - *An unordered `LIMIT 1` that happens to be right.* A live-wins pin passes
+    against a missing `ORDER BY` if the live row has the lower rowid. Seed the
+    losing row first.
+  - *A mock whose premise is wrong.* A "provider must not be called" stub on a
+    re-add path failed loudly because the guards correctly miss a trashed row
+    and the lookup does run; stub it with a *different* value instead, so
+    "shows the stored row" is an assertion and not a tautology.
+- **A presence check that the page chrome satisfies.** The render census
+  (`tests/test_feature_sweep.py`, `8e4ec83`, 2026-09-28) first counted every
+  URL attribute on a page. The nav bar links `/series`, `/stats`, `/store`,
+  `/discover` and the rest on **every** page, so the "each swept feature
+  renders with everything on" half was true for every tab feature no matter
+  what the page body did. Exclude the chrome (nav links carry
+  `data-nav-tab` / `data-nav-menu-tab`) from a presence half, and keep it in
+  the absence half, where it is a real check.
 - **Status:** documented. Not a lint candidate — whether a mutation aimed at
   the right line is a judgement about intent.
 
@@ -5043,6 +5282,764 @@ grep -rn "ci_context" scripts/ tests/ .github/workflows/
   task's prose asserting more than it checked); this one is neither a missed
   copy nor an invented fact but a **defensible-looking deletion**, which is why
   it gets its own trigger.
+
+## G112 — When calling a helper that opens its own `get_db()` connection
+
+- **Rule:** before calling it, ask **whose transaction holds the rows it
+  reads**. A helper that opens a second connection sees only what has been
+  *committed*. It is correct after the caller's `with get_db()` block has
+  closed, and silently wrong inside it — it reads the pre-transaction state,
+  answers from that, and nothing raises. If the caller is mid-transaction, read
+  on the caller's connection instead.
+- **Why:** the helper's signature does not say which it needs, and the same
+  helper is right at one call site and wrong at the next.
+  `restore_report.keeps_stored_cover(item_id)` asks "was this row restored,
+  and does it already have a cover?" on its own connection. Every scan, intake
+  and Hardcover caller was safe, because each ran it after the insert funnel's
+  block had committed. `archive.apply_plan` runs a **whole import as one
+  transaction** — so from a second connection the just-restored row still reads
+  as trashed, the helper answers False, and the archive's cover overwrites the
+  user's. A mutation would not catch it: the helper "works". It is also the
+  mirror of **G3**, which is the same second connection *blocking* on a write
+  lock rather than reading around it.
+- **Evidence:** `feat/soft-delete-collisions`, 2026-09-21 (`080db1e`) — caught
+  in orchestrator review before the first run, not by a test; the archive reads
+  `cover_path` on `db` with a comment saying why.
+  `tags_svc.attach_defaults` (`f6e03f1`, 2026-09-22) was briefly a third,
+  writing one; it was removed the same day because a second transaction after
+  the item's commit could fail and leave an untagged item (G118).
+- **Verify:** for a helper under `app/services/` that opens `get_db()`, grep
+  its callers for ones inside a `with get_db() as db:` block —
+
+```bash
+grep -rn "keeps_stored_cover\|restored_card" app/ | grep -v "def "
+```
+
+- **Status:** documented. Lint candidate in principle — a call to a known
+  self-connecting helper lexically inside a `with get_db()` block is
+  mechanically findable — but the helper list would have to be maintained.
+
+## G113 — When a plan, a review or a sweep hands you an enumeration
+
+- **Rule:** treat the list as a **floor, not an inventory**. Before relying on
+  it, read the code around each named site for its siblings, and for a
+  *function* named as a sweep trigger, open that function's callers directly
+  rather than trusting a pattern grep to find them.
+- **Why:** measured on one plan (`feat/soft-delete-collisions`, 2026-09-20/21),
+  every enumeration that was checked turned out short:
+  - T1 named **2** hard-delete absence assertions to re-aim; the sweep found
+    **7**, including a second `_copy` helper in a different file.
+  - Plan-review `claude-R8` named **2** add paths that would overwrite a
+    restored row's cover; there were **5** — two on paths the same review
+    listed as already correct.
+  - The plan's own sweep grep, `FROM items WHERE`, could not match
+    `cleanup_excluded_libraries`' pin at all: its `SELECT` carries no `WHERE`.
+    The function was named as a trigger; the grep was written for SQL shape.
+  - A review said an update path "can carry all three" identifiers; reading
+    `_dedupe_lookup` showed only one of the three could ever reach it.
+  None of these was a careless review. An enumeration is written from the
+  sites someone looked at, and the misses are the ones nobody opened.
+- **Evidence:** the tracker NOTEs on T1 (`0d67f62`), T7 (`e858c8c`), T8
+  (`792f33d`) and T12 (`080db1e`). Again on `feat/soft-delete-trash`
+  (2026-09-21): the plan named **3** `delete_copy` test callers to re-aim and
+  there were **8** (caught by the prep review); the remove-copy confirm lived in
+  a different template from the one named; a hard-delete pin in
+  `tests/test_tags.py` was on no list at all (`1ba6e7f`); and the Komga/RomM
+  docs the plan told T9 to amend describe a cleanup those integrations do not
+  have. Again on `feat/issue-119-square-music-covers` (2026-09-26): the plan
+  named ~20 renderers of `fragments/scan_result.html` and the grep found
+  **69** (19 could reach the cover, 44 could not — classifying them was the
+  work); `cover_search.html` had a fifth context, `cover_review_page`, that a
+  prep review caught (`faa13c1`).
+- **Verify:** judgement. When you tick off a named list, write down how many
+  sites you found beside how many were named.
+- **Status:** documented. Not a lint candidate.
+
+## G114 — When a row can be hidden instead of deleted, and a child keeps its foreign key
+
+- **Rule:** a child column pointing at a soft-deletable row no longer means
+  "that row exists and can be shown". Every consumer that **links, renders or
+  acts on** the child's foreign key must key on a join to the live view
+  (`LEFT JOIN items_live i … i.id AS live_item_id`), not on the child's own
+  column. Walk the consumers — templates included — before the flip, not
+  after.
+- **Why:** the hard delete used to null or cascade the child, so "the FK is
+  set" and "the parent is live" were the same fact and every template could
+  test either. Soft delete splits them silently: the query already joins the
+  live view for its *columns*, so it looks correct, while the template tests
+  the *child's* id and renders a link to a page that bounces to Browse. No
+  test fails, because no test ever had a trashed parent to render.
+- **Evidence:** `feat/soft-delete-trash` T4 (`1ba6e7f`, 2026-09-21).
+  `delete_item` stopped nulling `scan_log.item_id` by design; the recent-scans
+  strip's SELECT joined `items_live`, and the plan read that as "already
+  handled" — but `fragments/recent_scans.html` linked on `scan.item_id`. Found
+  in orchestrator review while re-aiming a pin; fixed with `live_item_id` and
+  pinned in `tests/test_items.py::TestDeleteItem`.
+- **Verify:** for each child table whose FK survives a soft delete, grep its
+  render sites for the raw column:
+
+```bash
+grep -rn "scan\.item_id\|sl\.item_id" app/templates/ app/routers/
+# every hit that builds a link or a cover URL must read the live join instead
+```
+
+- **Status:** documented. Only `scan_log` keeps its link today (every other
+  child is `ON DELETE CASCADE` and simply stays hidden with its parent).
+
+## G115 — When the code under test swallows exceptions, and the pin stubs a callee to raise
+
+- **Rule:** a pin of the form "patch X to raise; the request still succeeds,
+  so X was not called" is **vacuous** when the caller wraps X in `try/except`.
+  The raise is caught, the response is the same either way, and the pin
+  cannot go red. Record calls instead (`calls.append(...)`) and assert the
+  list is empty.
+- **Why:** a caller that degrades gracefully is the right design — a banner
+  that fails to load must never take the page down — and that is exactly the
+  shape that defeats the stub. The mutation test is what catches it: move the
+  guard and the pin stays green.
+- **Evidence:** `feat/soft-delete-trash` T7 (`36f3a2b`, 2026-09-21). The plan
+  asked for "patch `trash.nag_state` to raise, render, 200" to prove a
+  non-admin render reaches no Trash code; the `TemplateResponse` wrapper
+  catches any Trash failure. Rewritten to record calls; the mutation (role
+  check moved from the wrapper into `nag_state`) then went red.
+- **Verify:** for a pin that stubs with `side_effect=`/a raising lambda, check
+  whether any frame between the request and the stub has an `except
+  Exception:`. If one does, the pin must assert on calls, not on the status.
+- **Status:** documented. Lint candidate in part — a raising stub in a test
+  whose target module contains `except Exception` is findable, but whether the
+  frame is on the path is not.
+
+## G116 — When adding a text field to a form that has no submit button
+
+- **Rule:** check whether the form relies on **implicit submission** — Enter in
+  its one text field submitting it. A form with no submit button submits on
+  Enter only while it has **exactly one** field that blocks implicit submission
+  (text, search, email, number, …). Add a second — including one outside the
+  form but associated with `form="…"` — and Enter silently does nothing. Give
+  the form a default button (`<button type="submit" class="sr-only"
+  tabindex="-1" aria-hidden="true">`, not `display:none`), and stop Enter in
+  the new field if Enter there should not submit.
+- **Why:** nothing errors and nothing posts, so the break is invisible to the
+  unit suite (it posts directly) and to any E2E test that clicks rather than
+  presses Enter. The Scan and Shelf Fill barcode forms are exactly this shape:
+  a USB scanner types the code and sends Enter, so the primary intake path
+  depends on it.
+- **Evidence:** `feat/tags-scan-defaults`, 2026-09-22. T5 added
+  `#default-tags` inside the scan form and T6 added it to Shelf Fill via
+  `form="shelf-fill-form"`. 17 E2E tests went red, all timing out after
+  `press("#isbn-input", "Enter")`, and none of them tests tags. The plan's
+  only mid-run E2E pass sat at the Phase 1 boundary, *before* the frontend
+  tasks, so the break surfaced only in T7's run. Fixed in `dc571c4`; pinned
+  by `test_shelf_fill_enter_submits_with_default_tags` and
+  `test_enter_in_default_tags_does_not_submit_a_scan`, both mutation-checked.
+  Shelf Fill had no E2E coverage at all until then.
+- **And for plans:** a task that adds a control to a page an E2E suite drives
+  should run that page's E2E file in its own gate, not wait for a phase
+  boundary placed before it.
+- **Verify:** every `hx-post` form with more than one text-like control has a
+  submit button:
+
+```bash
+grep -n 'type="submit" class="sr-only"' app/templates/scan.html app/templates/shelf_fill.html   # expect 1 each
+```
+
+- **Status:** documented. Lint candidate: "a `<form>` whose text-like
+  controls, counting `form=`-associated ones, number two or more has a submit
+  button" is mechanically checkable per template, except for controls that
+  Alpine adds at runtime.
+
+## G117 — When a plan or test expects an anonymous `/api/` request to get a 401
+
+- **Rule:** it gets a **303 to `/login`**. `AuthMiddleware` (`app/main.py`)
+  redirects any request without a session before the route's
+  `require_role` dependency runs, so `_raise_auth_required`'s `/api/` 401 is
+  reached only when a session exists but no longer resolves to a user. Pin it
+  with `follow_redirects=False` and assert on `location`. Otherwise TestClient
+  follows the redirect and the test reads the login page's **200**.
+- **Why:** `auth.py`'s own branches say 401 for `/api/`, so reading the
+  dependency alone gives the wrong answer. A test that asserts only "not 200"
+  misses it too, while one that asserts 401 fails with a confusing `200 == 401`.
+  Every new role-checked route asks this question, so the risk-floor item of
+  every such plan hits it.
+- **Evidence:** `feat/tags-scan-defaults` T1 (`f6e03f1`, 2026-09-22). The
+  impl plan specified "Unauthenticated gets 401" for `GET /api/tags`; the
+  first run of the test read 200.
+- **With zero users the redirect is to `/setup`, not `/login`.** The same
+  middleware sends every request to the wizard until an account exists, and
+  the bare `client` fixture starts with none. An anonymous pin therefore
+  needs a user in the DB — request `admin_user` beside `client` — or it
+  asserts the setup redirect (`feat/feature-profiles-wizard` T3, 2026-09-29).
+- **Verify:** `grep -n "not user" -A3 app/main.py` still shows the
+  `RedirectResponse(url="/login", status_code=303)` branch ahead of
+  `call_next`.
+- **Status:** documented.
+
+## G118 — When a response-required write runs after the primary row commits
+
+- **Rule:** if the response promises that two writes happened as one user
+  action, commit them on the same connection and in the same transaction. A
+  post-response hook is fine only for optional enrichment whose failure is
+  surfaced, or when the first transaction writes a durable, idempotent
+  recovery record.
+- **Why:** a second transaction can fail after the first is permanent. The
+  request answers 500 over data that exists in a narrower state than promised,
+  and the natural retry rarely replays the second write: duplicate detection
+  returns early, an importer skips rows it already has, and an identifier-less
+  add files a second row.
+- **Evidence:** `feat/tags-scan-defaults` diff review (codex, 2026-09-22).
+  `tags_svc.attach_defaults` opened its own connection after Scan, manual and
+  catalog adds committed, and Photo Intake tagged in one block after every
+  row's commit. A real SQLite writer lock produced `first_status=500
+  item_committed=True tag_rows_after_failure=0`; retrying a title-only manual
+  add made two items. Fixed by `tags_svc.default_tags(raw)`: an add route
+  wraps its insert in the block and `insert_item` attaches the tags on the
+  inserting connection.
+- **Verify:** force the second write to raise, then inspect the database and
+  retry the same action. Neither the row nor the association may have
+  committed, and the retry must file both. Asserting only the response status
+  misses the persistent partial state — see
+  `tests/test_tag_defaults.py::TestTagWriteFailureLeavesNoPartialItem`.
+- **Status:** documented; pinned for Scan, manual add and Photo Intake.
+
+## G119 — When adding a static path beside a dynamic one on a router included later
+
+- **Rule:** check the application's **final** route order, not the decorators
+  in the file you are editing. A path parameter's type annotation
+  (`item_id: int`) is validation that runs *after* Starlette has chosen the
+  route — it does not stop `/items/bulk-tags` from matching
+  `/items/{item_id}`. The first route whose path and method fully match wins,
+  and routers are matched in `app.include_router` order. Register the static
+  route first: move its router's `include_router` ahead of the dynamic
+  route's router, or put the route in the same router above the dynamic one.
+- **Why:** the match is decided before the parameter ever converts, so the
+  wrong handler answers — here with a 422 path-validation error, which reads
+  like a bad request body rather than a routing mistake. A request-level test
+  catches it but does not name the cause.
+- **Evidence:** `feat/tags-manage-and-apply`, 2026-09-23. `POST
+  /api/items/bulk-tags` was planned on `tags.router`, included after
+  `items.router`, whose `POST /items/{item_id}` took the path first (found by
+  the codex plan review, R1). Fixed in `265ae34` by including `tags.router`
+  before `items.router`; `tests/test_bulk_tags.py::test_route_order_reaches_the_bulk_tags_handler`
+  pins it.
+- **Verify:** build an HTTP scope for the method and path, walk
+  `app.router.routes`, and take the first `route.matches(scope)[0] ==
+  Match.FULL`; its endpoint must be the handler you meant.
+  ```bash
+  grep -n 'include_router' app/main.py
+  grep -n '@router\.\(get\|post\|put\|patch\|delete\)("/[a-z_-]*/{' app/routers/*.py
+  # a static sibling of any hit must be matched before it
+  ```
+- **Status:** active. Lint candidate: a test that walks every static route and
+  asserts no earlier route fully matches it.
+
+## G120 — When a test edits a user's row while holding that user's session
+
+- **Rule:** decide what the edit does to the session before writing the
+  assertion. The session resolves from the `users` row on every request, so a
+  direct `UPDATE users` changes the fixture's own client: a new
+  `token_version` or `username` ends the session (a 303 to `/login`, or an
+  HTML page where the test expected JSON), and a new `role` or
+  `display_name` takes effect on the next request. When the edit is only
+  set-up for something else, re-mint the cookie at the new version with
+  `create_token(..., token_version=<new>)` and set it on the client.
+- **Why:** before `bf643eb` the role and display name came from the JWT claims,
+  so an `UPDATE` of them was invisible to a live session, and only a version
+  bump ended one. Tests written against that model now fail with a
+  `JSONDecodeError` on a response that is really the login page.
+- **Evidence:** `d52baec`, 2026-09-24. The restore pins bumped the live
+  admin's `token_version` to set up the scenario, and the restore request
+  itself was bounced to `/login` until the cookie was re-minted at that version.
+- **Verify:** the row is the identity (expect `username, role, display_name,
+  token_version` in the query):
+  ```bash
+  grep -n "SELECT username, role, display_name, token_version FROM users" app/auth.py
+  ```
+- **Status:** documented.
+
+## G121 — When a fixed-width `<img>` sits in a narrow padded box (a table cell above all)
+
+- **Rule:** Tailwind's preflight gives every `img` `max-width: 100%`, so a
+  `w-8` image in a cell whose *content* box is narrower than 32px is squeezed
+  to fit — the width class loses silently, and `object-cover` hides the
+  distortion by cropping. Add `max-w-none` to a thumbnail whose width is the
+  design, and measure it (`getBoundingClientRect()`), not its class.
+- **Why:** a `<div>` placeholder with the same `w-8` is *not* capped and
+  widens the cell instead, so the covered and coverless rows of one table
+  disagree, and nothing in the markup looks wrong.
+- **Evidence:** the Browse list view's cover cell is `w-10 px-3` (16px of
+  content). Its `w-8 h-12` thumbnail rendered **16×48** on `main` for every
+  book — found only when #119's T9 measured a square record at 16×16 instead
+  of 32×32. Fixed in `d8fb89e` (2026-09-26), pinned by
+  `tests/e2e/test_cover_shape.py::test_browse_list_thumbnails`.
+- **Verify:** `grep -n "max-w-none" app/templates/fragments/item_row.html`
+  (expect the cover `<img>`), and the E2E above.
+- **Status:** documented. Other `w-8`/`w-10` thumbnails in padded cells
+  (`stats.html`, `related_media_panel.html`) were not measured.
+
+## G122 — When writing an `hx-disabled-elt` selector list that names the control itself
+
+- **Rule:** Never put `this` inside a comma list. In the vendored htmx 2.0.4,
+  `hx-disabled-elt="this, #other"` disables `#other` only: the list goes to
+  `querySelectorAll` whole, where `this` is a tag name that matches nothing.
+  Bare `this` works, and so does `find a, find b`. To name the control and
+  something else, give the control an id and list both ids. Since #118, a
+  click-triggered htmx button needs no `hx-disabled-elt` of its own: the busy
+  listener in `static/js/app.js` disables it, so use the attribute only for
+  the *other* elements (inputs) that must lock during the request.
+- **Why:** it fails silently. The request succeeds, the input greys out, and
+  the button stays live, so a double click posts twice. Nothing but a
+  held-response E2E test sees it.
+- **Evidence:** `item_edit.html:201` (Use URL) shipped with
+  `"this, #edit-cover-url"` and was never guarded. Found by #118's T2
+  (`tests/e2e/test_busy_controls.py`), probe in
+  `.devdocs/archive/completed/plan-issue-118-busy-controls-probes/`; the busy
+  listener now guards it (`1f95ca4`, 2026-09-26).
+- **Verify:** only the known, now-guarded instance has `this` in a list; must print exactly
+  `app/templates/item_edit.html:201` and nothing else:
+
+```bash
+grep -rnE 'hx-disabled-elt="[^"]*,[^"]*"' app/templates | grep -w this | cut -d: -f1,2
+```
+
+- **Status:** documented. The one live instance is harmless now that the
+  listener guards the button; the Verify line stops a new one.
+
+## G123 — When a unit test's result depends on the request scheme
+
+- **Rule:** The shared `client` fixture (and `admin_client`/`editor_client`/
+  `viewer_client`, which wrap it) is `TestClient(app, base_url="https://testserver")`.
+  A relative URL is therefore an **https** request. Any test whose assertion
+  depends on the scheme — the cookie's `Secure` flag, HSTS, and later OIDC
+  redirect URIs (#89) — names it explicitly on **both** branches:
+  `client.get("http://testserver/...")` and `client.get("https://testserver/...")`.
+  Read `Secure` from `resp.headers.get_list("set-cookie")`; the httpx jar hides it.
+- **Why:** Starlette's `TestClient` defaults to `http://testserver`, so it is
+  natural to assume a relative request is plain HTTP. Here it is not. A test
+  written on that assumption runs the https branch twice and passes, or
+  asserts "absent over http" against an https response and fails for the
+  wrong reason.
+- **Evidence:** #124's implementation plan claimed the unit client "speaks
+  `http://testserver`" in two places. The Codex plan review caught it
+  (R1, `.devdocs/archive/completed/plan-issue-124-optional-tls-review-codex.md`)
+  before any code existed. The tests landed with explicit URLs in `fbf944c` and
+  `179cfa3` (2026-09-26), and a `secure = True` mutation turns every `http` case red.
+- **Verify:** the base URL is still https, and the scheme-dependent tests still
+  name both schemes:
+
+```bash
+grep -n 'TestClient(app, base_url=' tests/conftest.py
+grep -cE '(http|\{scheme\})://testserver/' tests/test_auth_cookie_secure.py tests/test_security_fixes.py
+```
+
+- **Status:** documented.
+
+## G124 — When a process cache is invalidated from inside a write transaction
+
+- **Rule:** Invalidate immediately **and again after commit**
+  (`app.database.after_commit(db, callback)`), and guard the refill with a
+  generation counter: capture it before the read, store the snapshot only if
+  it is unchanged afterwards. `app/services/trash.py` and `app/features.py`
+  are the two implementations to copy.
+- **Why:** an invalidation before commit does not make the new row visible to
+  other connections. A request that refills the cache in that gap stores the
+  pre-commit value, and nothing clears it — so a feature an admin just turned
+  off keeps serving (a public share link, for one) until the next write or a
+  restart. `database._Connection`'s docstring names the race; a new cache that
+  only calls `invalidate_cache()` walks straight into it.
+- **Evidence:** caught by the codex prep review of `plan-feature-profiles-core`
+  (R1) before the code existed; fixed in `3834640` (2026-09-27), whose tests
+  refill from a second connection between the write and its commit, and force
+  an invalidation mid-refill.
+- **Verify:** `python -m pytest tests/test_features.py -q -k "refill or during_refill"`
+  and `grep -n "after_commit" app/features.py app/services/trash.py`.
+- **Status:** documented. Extends G13 (reset the cache per test) to the write
+  side.
+
+## G125 — When a gated or refusing route is opened by `EventSource`
+
+- **Rule:** never answer an `EventSource` request with an ordinary 4xx body.
+  Return **200**, `text/event-stream`, and one `data: {"type":"error",
+  "message":…}` frame — every stream consumer in `static/js/` already renders
+  that. `features._refusal` branches on `Accept: text/event-stream` first for
+  this reason.
+- **Why:** the browser exposes neither the status nor the body of a failed
+  stream to page code; only `onerror` fires, and every consumer's `onerror`
+  says "Connection lost". A refusal with a real reason reads as a network
+  fault.
+- **Evidence:** codex prep review of `plan-feature-profiles-core` (R2), six
+  stream consumers (`components-settings.js`, `komga-settings.js`,
+  `romm-settings.js`); landed in `d3b4d18` (2026-09-27), pinned per stream in
+  `tests/test_features_gate*.py` via `assert_sse_error`.
+- **Verify:** `grep -rn "assert_sse_error" tests/ | wc -l` (expect ≥ 6).
+- **Status:** documented.
+
+## G126 — When new markup reuses a colour class that E2E tests use as a locator
+
+- **Rule:** before giving a new element on a page `text-shelf-success` (or
+  another status colour), grep `tests/e2e/` for a bare class locator on it.
+  `span.text-shelf-success` is treated as *the* success message by at least
+  three tests (`test_settings.py`, `test_lending.py`, `test_item_copies.py`).
+  Style the new element another way, or give the old message a `data-testid`
+  and move those tests onto it.
+- **Why:** Playwright's `expect(locator)` is strict: a second match fails the
+  test, and markup hidden with `x-show` is still in the DOM, so a new tab's
+  badges collide with a message on another tab. The unit suite cannot see it;
+  only the full E2E run does.
+- **Evidence:** Settings → Features' "On" badge (`8d63b15`) put 14 more
+  `span.text-shelf-success` on `/settings`; three unrelated E2E tests went red
+  at the T11 run of `plan-feature-profiles-core` (2026-09-27). Fixed by
+  restyling the badge. The same run found the second route in: a new E2E
+  test seeded a share link into the session-scoped server DB and left it, so
+  the Sharing card's "Copied!" span (also `text-shelf-success`) rendered for
+  every later test. **An E2E test that seeds rows must remove them** — the
+  `one_share_link` fixture in `tests/e2e/test_features.py` is the shape.
+  **Cleaning up through raw `sqlite3.connect` runs with foreign keys OFF**, so
+  deleting an `items` row does not cascade and does not refuse: an item that
+  gained a primary copy (any write carrying `location_id` — a CSV `location`
+  cell, the edit form, a bulk Move) leaves an orphan `item_copies` row
+  pointing at a deleted item and at the location you delete next. Delete
+  `item_copies` for the item first (`tests/e2e/test_csv.py`
+  `test_import_card_lists_created_locations`, `4a4925f`, 2026-10-09).
+- **Verify:** `grep -rn 'locator("span.text-shelf' tests/e2e/`
+- **Status:** documented. **Lint candidate:** refuse bare colour-class
+  locators in `tests/e2e/` in `make check-tests`.
+
+## G127 — When an E2E test drives Browse's filter controls, or relies on a filter being restored
+
+- **Rule:** At mobile width the filter `<select>`s (Type, Location, Sort, …)
+  are folded away and not visible, so `select_option` times out. To make
+  Browse run a swap at both widths, use the grid/list toggle
+  (`[data-testid='view-list']` / `view-grid`), which stays visible. And a
+  filter that arrived **in the URL** — a link from an item page, a bookmark —
+  is not written to `sessionStorage` (`shelf-browse-qs`) until some swap runs:
+  `updateUrl()` is called only from the `htmx:afterSwap` listener (G6), never
+  on page load. A test of "leave and come back via a bare `/browse`" must run
+  a swap after the filtered page loads, or it tests whatever was stored before.
+- **Why:** the #117b restore test passed at desktop and timed out at 390 px on
+  the Type select; and arriving at `/browse?author_filter=N` by clicking an
+  author link left the previous session value in place, so the bare-`/browse`
+  return restored an older filter set, not the author.
+- **Evidence:** `67748d4` (2026-09-28), `tests/e2e/test_author_filter.py`.
+- **Status:** documented. The second half is also a product question — a
+  link-arrived filter is not what a later bare `/browse` restores — left for a
+  decision rather than changed silently.
+
+## G128 — When adding a guard to a template line a test pins by its literal source
+
+- **Rule:** before editing a template condition, grep `tests/` for the exact
+  line (`grep -rn "if item.source == 'romm'" tests/`). Where a test reads the
+  template's **source** and asserts that line, add the new condition as an
+  inner `{% if %}` and leave the pinned line byte-identical, rather than
+  extending it with `and …`.
+- **Why:** such tests exist to fix a structural fact (the RomM action is a
+  sibling of the item link, not inside it; the script tags are one per line).
+  Extending the pinned line changes nothing the test cares about, but it
+  reddens the test. The plan says an existing test must pass unmodified, so
+  the builder is then stuck between breaking acceptance and editing a pin.
+- **Evidence:** `plan-feature-profiles-sweep`, 2026-09-28.
+  `tests/test_romm_browse_action.py` pins `{% if item.source == 'romm' %}` in
+  `item_card.html`, so the RomM guard nests `feature_on('romm')` inside it
+  (`0ba7b93`). `test_romm_full_integration.py:115` and
+  `test_komga_full_integration.py:123` pin the `<script>` tag lines in
+  `item_detail.html`, so each tag was wrapped with its line unchanged
+  (`8c31fef`). The impl plan's guard table had called for the extended form.
+- **Verify:** `grep -rln "read_text()" tests/ | xargs grep -lE "\.html"`
+  lists the tests that read template source.
+- **Status:** documented.
+
+## G129 — When a choice's explanation lives only in a `title` attribute
+
+- **Rule:** if the user must see what an option does before choosing it,
+  render that as visible text. A `title` may supplement it, never be its
+  only surface: a touch screen has no hover, and a `disabled` button may show
+  no tooltip at all.
+- **Why:** a server-rendered test that finds the copy in the HTML passes
+  whether the copy is on the page or in an attribute, and desktop review
+  hovers past the gap. Only a touch context makes it deterministic.
+- **Evidence:** `feat/feature-profiles-wizard` diff review (codex M1,
+  2026-09-29). Setup showed each profile's `Adds:` list; Settings → Features
+  put it only in button titles, so at 390×844 the row read "Minimal
+  Standard Everything". Fixed by rendering the copy as card text; the pins
+  strip tags before asserting and check the block in a touch context.
+- **Verify:** `grep -rn 'title="{{' app/templates/` — each hit should carry
+  copy that is also visible, or copy nobody needs before acting.
+- **Status:** documented. Lint candidate in principle, but "needed before
+  choosing" is a judgement.
+
+## G130 — When a test seeds a `upc` and then scans or looks it up
+
+- **Rule:** seed `upc=upc_svc.normalize_upc(code)` (`app/services/upc.py`),
+  never the raw 12-digit UPC-A, whenever the test then finds the item by
+  barcode — `/api/scan` in any mode, or a dupe check. A raw seed is fine only
+  where nothing matches on it.
+- **Why:** `items.upc` is stored as EAN-13, and the scan path normalizes the
+  scanned code before it looks. A 12-digit seed is a row no scan can reach,
+  so the test sees *not found* instead of the item, and the failure reads as
+  a routing or mode bug rather than a fixture one.
+- **Evidence:** `feat/watched-played` T2 (`0509e1e`, 2026-09-29): the Quick
+  Rate verb case seeded a DVD and a game by raw UPC, and two of three
+  parametrised cases returned `not_owned`. Fixed by normalizing the seed, the
+  pattern `tests/test_scan_upc_enrichment.py` already used.
+- **Verify:** `grep -rn 'upc="[0-9]\{12\}"' tests/` — each hit should be a
+  test that never scans or dedupes on that code.
+- **Status:** documented. Not a lint candidate: a raw seed is legitimate where
+  nothing matches on it.
+
+
+## G131 — When parsing a foreign export's free-text cell into a structured value
+
+- **Rule:** decide by a rule the file's own **content** cannot satisfy by
+  accident, and when normalizing a messy value, **strip an allowlist** of
+  known decorations and refuse whatever is left — never strip everything that
+  is not the target shape. Test the rule against the export's *real* column
+  names and cell text, not tidy fixtures.
+- **Why:** two instances in one importer, both built exactly as specified and
+  both green on the fixtures the spec implied:
+  - **Delimiter from the header.** "Tab when the header has a tab and no comma
+    outside quotes" reads LibraryThing's classic TSV as CSV, because one of its
+    column *names* is `Author (First, Last)`, unquoted. Every row then parses
+    into one garbage column. Now: tab when unquoted tabs outnumber unquoted
+    commas (`dd9eae5`).
+  - **Price from a cell.** `re.sub(r"[^0-9,.\-]", "", value)` turns
+    `£5 (2 for 1)` into `521` and `1e400` into `1400` — a convincing wrong
+    number, written to the user's copy with no error. Now: remove currency
+    symbols (Unicode `Sc`), whitespace and a three-letter code, then require
+    a plain number (`1f210ee`).
+- **Evidence:** `feat/imports-lt-libib`, 2026-09-29. The delimiter case was
+  found by the T2 subagent writing a TSV fixture with the real header; the
+  price case by the T6 pin sweeping values the `CHECK` would refuse.
+- **Verify:** `python -m pytest tests/test_catalogue_imports.py -q -k
+  "delimiter or price"` — both halves have parametrised pins.
+- **Status:** documented. Not a lint candidate — whether a stripped character
+  was decoration is a judgement about the source format.
+
+## G132 — When a plan adds a new page, a cover grid or a vendored file
+
+- **Rule:** put the three structural unit tests in the touch-set of the task
+  that adds the thing, as G80 does for the badge:
+  - a new top-level `GET` page → `tests/test_nav.py`
+    (`test_every_top_level_page_is_reachable_from_the_nav`) needs a `NAV_TABS`
+    entry **or** an `EXEMPT` reason naming the link that reaches it;
+  - any element forced into a box (`aspect-[…]`, `object-cover`,
+    `.cover-card`) → `tests/test_cover_shape_guard.py` needs
+    `data-cover-shape="{{ cover_shape(media_type) }}"` on it, so the query
+    feeding it must select `media_type`;
+  - a vendored asset → `tests/test_vendor_integrity.py` hashes only the
+    **top level** of `static/vendor/` (`iterdir()`), so a file goes flat there
+    with its `HASHES` line. A subfolder, or `static/fonts/`, is not checked.
+- **Why:** each test fails with a clear message, but only when `make test`
+  runs. A plan that leaves the file out of the touch-set leaves the builder a
+  red gate on a file it was not given, as with G80.
+- **Evidence:** `feat/wrapups`, 2026-09-30. The impl plan caught the vendor
+  rule and missed the other two. `1ae8687` added the `EXEMPT` reason for
+  `/stats/wrapup` and `media_type` on the tiles.
+- **Verify:**
+
+```bash
+grep -n "EXEMPT = {" tests/test_nav.py
+grep -n "def test_every_forced_cover_box_declares_its_shape" tests/test_cover_shape_guard.py
+grep -n "iterdir" tests/test_vendor_integrity.py
+```
+
+- **Status:** documented. The tests are the lint. This entry exists so
+  `/impl-plan` names the files.
+
+## G133 — When a test confirms two periodical issues with the same barcode
+
+- **Rule:** give each `POST /api/periodicals/confirm` in one test its own
+  **EAN and supplement pair**. Keeping the EAN and changing the two-digit
+  supplement is enough (`BARCODE[:13] + "07"`). A distinct `issue_number`,
+  `issue_date` or `publication_issn` does **not** make the second POST a new
+  issue.
+- **Why:** `find_duplicate_issue` tries the barcode strategy first
+  (`barcode_ean` + `barcode_supplement`), and that strategy does not filter by
+  `publication_id`. That is deliberate: one printed barcode is one physical
+  issue, even after the user corrects the ISSN. So the second POST returns
+  `303` to the **first** item, writes no publication, and never links a new
+  issue — and a test asserting on the second issue reads state the route
+  never reached.
+- **Evidence:** `feat/issue-138-periodical-issn-identity`, 2026-09-30
+  (`b108bfa`). The impl plan specified distinct issue numbers only, and the
+  builder caught the redirect before writing the assertion. The same path
+  hid a real defect until `b723bea`: the route wrote the publication *before*
+  the duplicate check, so the redirect left an empty publication behind.
+- **Verify:**
+
+```bash
+grep -n "WHERE pi.barcode_ean = ? AND pi.barcode_supplement = ?" app/services/periodical_records.py
+```
+
+- **Status:** documented. Retire it if the barcode strategy becomes scoped
+  to a publication.
+
+## G134 — When a test drives code that reads or writes a file under `DATA_DIR` through a module-level path
+
+- **Rule:** a module-level constant *derived* from `DATA_DIR`
+  (`CACHE_FILE = DATA_DIR / ".isbn_price_cache.json"` in
+  `app/services/isbndb.py`) escapes the test isolation. Patch the module's
+  load/save helpers in the test (`isbndb._load_cache` / `_save_cache`, as
+  `tests/test_valuation_report.py` does), or — in new code — resolve the path
+  at call time from `app.config.DATA_DIR`, as `import_staging._staging_dir()`
+  does.
+- **Why:** `tests/conftest.py::_redirect_stale_path_constants` redirects only
+  attributes *named* `DATA_DIR`, `DATABASE_PATH` or `COVERS_DIR`. A path
+  computed from `DATA_DIR` at import time has another name and keeps the real
+  directory, so an unpatched test writes into the repo's `data/` (or `/data`
+  in the container) and passes. Nothing fails; the pollution is silent.
+- **Evidence:** `3fd1a78` / `0137126` (2026-09-30, price-alerts T3/T4). The
+  price-alert pass loads and saves the ISBNdb cache itself; every `run_pass`
+  and `check_price_alerts` test patches both helpers for this reason.
+- **Verify:** lists every module-level path built from `DATA_DIR` outside
+  `app/config.py` (whose two are redirected by name); each hit is one
+  conftest does not redirect.
+
+```bash
+grep -rnE '^[A-Z_]+ *= *DATA_DIR */' app --include=*.py | grep -v '^app/config.py'
+```
+
+- **Status:** documented. Retire it when `isbndb.CACHE_FILE` resolves at call
+  time and the grep above returns nothing.
+
+## G135 — When a plan adds a feature-registry entry that should not start on for every install
+
+- **Rule:** a new `Feature` reads as **on** on every upgraded install until
+  something writes its `feature.<key>` row — whatever profile that install
+  applied. If the feature should start off for some installs, append a data
+  migration that writes the row (`INSERT OR IGNORE`, so a choice already made
+  stands), keyed on a flag the install already has.
+- **Why:** `features._flags()` is `get_setting(...) != "0"`, so a missing row
+  is on. `apply_profile` writes rows only for the features that existed when
+  the profile was applied. An install that applied Standard before the
+  feature existed therefore gets an Everything-only feature switched on by the
+  upgrade, and a feature that spends a paid key (ISBNdb) starts spending it.
+- **Evidence:** price-alerts test drive, Observation 5 (2026-10-01): the prod
+  copy had no feature rows and the new row read On. Fixed by migration 41
+  (`a2d9b54`), which starts `price_alerts` off where `feature.valuation` is
+  `'0'`.
+- **Verify:**
+
+```bash
+grep -n "get_setting(db, setting_key(k)) != \"0\"" app/features.py
+```
+
+- **Status:** documented. Retire it if an absent flag row ever resolves
+  through the install's profile instead of reading as on.
+
+## G136 — When an Alpine method switches a settings tab and then touches an element on the new tab
+
+- **Rule:** do not scroll to or focus an element on the newly shown panel at
+  `$nextTick`. Wait until the element is actually visible (`offsetParent`
+  non-null), checking frame by frame with a bounded retry, as
+  `settingsTabs.goToField()` does.
+- **Why:** under this Alpine CSP build the panel's `x-show` has not applied by
+  the time `$nextTick` runs — measured: hidden at `$nextTick`, hidden at
+  `setTimeout(0)`, visible one `requestAnimationFrame` after `$nextTick`.
+  `scrollIntoView()` and `focus()` on a hidden element silently do nothing, so
+  the method looks correct, raises nothing, and the page guard stays clean.
+- **Evidence:** price-alerts test drive, Observation 4 (`18be8b3`,
+  2026-10-01). The first fix used `$nextTick` alone; the new E2E test
+  (`test_notify_link_lands_on_the_notify_field`) failed in both modes with
+  "viewport ratio 0" until the frame wait went in.
+- **Verify:**
+
+```bash
+grep -n "offsetParent" static/js/components-settings.js
+```
+
+- **Status:** documented.
+
+## G137 — When a client caches an external service's answer
+
+- **Rule:** cache an **answer**, never a failure. Write the entry only for a
+  response that says something about the thing looked up (a 200, or a 404
+  that means "no such record"). A 401/403, 429, 5xx or timeout must leave any
+  existing entry untouched.
+- **Why:** the ISBNdb price cache is trusted for 365 days. Caching `None` for
+  a refused or rate-limited request overwrote good prices, and the valuation
+  report then showed no price for those books for a year without asking
+  again. The nightly price-alert pass made it recur unattended.
+- **Evidence:** price-alerts test drive, Observation 1 (2026-10-01): a stub
+  429 replaced a cached $20.00 with `None`, and valuation's next read returned
+  `None` with zero requests. Fixed in `a8336de`
+  (`isbndb._CACHEABLE_STATUSES`).
+- **Verify:**
+
+```bash
+grep -n "_CACHEABLE_STATUSES" app/services/isbndb.py
+```
+
+- **Status:** documented. The rule applies to any new cached lookup.
+
+## G138 — When a response header echoes the request's path (`Refresh`, `Location`, a future `next=`)
+
+- **Rule:** build the target from `request.scope["raw_path"]` and
+  `scope["query_string"]`, decoded `latin-1`, never from `request.url.path`.
+  Then collapse any leading run of `/` and `\` to one `/`
+  (`"/" + raw.lstrip("/\\")`). Pin both by equality.
+- **Why:** `request.url.path` is percent-**decoded**, so
+  `/browse%0d%0aX-Injected:1` becomes a path holding CR LF, ready to split a
+  header. And ASGI delivers `GET //evil.example/x` as path `//evil.example/x`,
+  which a browser reads as protocol-relative: an open redirect. `/\host` and
+  `///host` are the same trap; a `[1:]` slice misses them.
+- **Evidence:** issue #149, `5d42f45` (2026-10-08) — `_cross_site_bounce` in
+  `app/main.py`. Starlette's TestClient sends both shapes verbatim, so
+  `tests/test_auth_cross_site_arrival.py` pins them as plain unit tests.
+  Swapping the `lstrip` for the raw path turns 3 of them red.
+- **Verify:**
+
+```bash
+grep -n 'raw_path\|lstrip("/' app/main.py
+```
+
+- **Status:** documented. The design plan names a `next=` redirect after login
+  as the revisit; it is this rule's next caller.
+
+## G139 — When a test needs a request to be cross-site
+
+- **Rule:** use a different **host**, not a different port. Serve the other
+  site from `127.0.0.1` and address Shelf as `localhost` (or the reverse).
+  Prove it was cross-site by asserting on something only the cross-site leg
+  produces — for the auth bounce, a 200 carrying a `refresh` header.
+- **Why:** a site is scheme plus registrable domain; the port does not count.
+  `127.0.0.1:A` linking to `127.0.0.1:B` is same-site, so `SameSite=Strict`
+  cookies are sent and the test passes for the wrong reason. The E2E
+  `upc_stub` is exactly that shape. Chromium reaches the `127.0.0.1`-bound E2E
+  uvicorn as `localhost` with no bind change.
+- **Evidence:** issue #149 probe (`probe_strict_arrival.out`) and
+  `tests/e2e/test_auth_arrival.py` (2026-10-08). With the bounce disabled,
+  the logged-in test lands on `/login`.
+- **Verify:**
+
+```bash
+grep -n '127.0.0.1\|localhost' tests/e2e/test_auth_arrival.py
+```
+
+- **Status:** documented.
+
+## G140 — When a plan, prompt or test names a media type by its stored value
+
+- **Rule:** read `app.config.MEDIA_TYPES` before you write a type value.
+  There is **no `music` type**. The music formats are `vinyl`, `cassette`,
+  `cd` and `digital_music`. For "a type with no reading status", use one of
+  those or `magazine` (`STATUS_MEDIA_TYPES` is the book family plus `dvd` and
+  `video_game`).
+- **Why:** user docs say "music" and so does the item page's prose, so
+  "music" reads like a value. It is not one. `insert_item(media_type="music")`
+  raises `UnknownMediaType`, so a test meant to prove "no status for this
+  type" goes red for an unrelated reason. A `select_option("#media-type",
+  "music")` in E2E times out.
+- **Evidence:** plan `issue-148-scan-default-status` (2026-10-09). The design
+  and the impl plan both named `music` as the non-status type in T1, T2, T4
+  and T5. T1's first test run failed on it, and the later prompts were
+  corrected to `vinyl`.
+- **Verify:**
+
+```bash
+python3 -c "from app.config import MEDIA_TYPES, STATUS_MEDIA_TYPES as S; print([t for t in MEDIA_TYPES if t not in S])"
+```
+
+- **Status:** documented. This is a lint candidate: grep plan docs and tests
+  for `media_type="music"` / `"music"` as a value.
 
 ## Graveyard
 

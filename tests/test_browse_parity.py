@@ -206,6 +206,42 @@ def test_q_truncation(admin_client, db, monkeypatch):
         assert m and m.group(1) == truncated, url
 
 
+def test_tags_lookup_runs_once_per_request(admin_client, seeded_library, monkeypatch):
+    """T6: the Browse list view's Tags column feeds every row's chips from
+    one `tags_svc.tags_for_items` call -- never a per-row `item_tags` query.
+    The wrapper counts calls; `item_row.html` makes none of its own, so one
+    call per request is the whole contract.
+    """
+    from app.routers import pages as pages_module
+    from app.services import tags as tags_svc
+
+    real_tags_for_items = tags_svc.tags_for_items
+    calls = []
+
+    def counting_wrapper(db, ids):
+        calls.append(list(ids))
+        return real_tags_for_items(db, ids)
+
+    monkeypatch.setattr(tags_svc, "tags_for_items", counting_wrapper)
+    # 9 rows seeded by seeded_library. `/browse` reads DEFAULT_PAGE_SIZE from
+    # the module at call time, so patching it here is enough; `search_items`'s
+    # `per_page` is a FastAPI parameter default bound once at def time (the
+    # "Config import trap" in CLAUDE.md), so /api/search gets an explicit
+    # per_page= instead -- either way, non-empty rows land on both pages.
+    monkeypatch.setattr(pages_module, "DEFAULT_PAGE_SIZE", 3)
+
+    for url in (
+        "/browse?view=list",
+        "/api/search?view=list&page=1&per_page=3",
+        "/api/search?view=list&page=2&per_page=3",
+    ):
+        calls.clear()
+        resp = admin_client.get(url)
+        assert resp.status_code == 200, url
+        assert len(calls) == 1, (url, calls)
+        assert calls[0], (url, "expected a non-empty id list")
+
+
 def test_no_duplicate_ids_on_initial_render(admin_client, seeded_library):
     html = admin_client.get("/browse").text
     for sel in SELECT_IDS:
@@ -261,3 +297,94 @@ def test_an_uncastable_location_filter_does_not_500(
     r = admin_client.get(f"{path}?location_filter={value}")
     assert r.status_code == 200
     assert "Book Read" not in r.text
+
+
+# -- the author filter (#117b) ----------------------------------------------
+
+@pytest.fixture
+def authored(db, seeded_library):
+    """Index authors onto three seeded items through the write funnel, plus a
+    trashed item by the same author, and an author whose only item is trashed."""
+    from app.services.item_write import trash_item, update_item_fields
+
+    ids = {r["title"]: r["id"] for r in db.execute("SELECT id, title FROM items")}
+    update_item_fields(db, ids["Book Read"], {"authors": "Ann Author, Bob Other"})
+    update_item_fields(db, ids["DVD One"], {"authors": "Ann Author"})
+    update_item_fields(db, ids["Book Two"], {"authors": "Bob Other"})
+    gone = _insert_item(db, title="Trashed Ann", isbn="9780000070012")
+    update_item_fields(db, gone, {"authors": "Ann Author, Only Trashed"})
+    assert trash_item(db, gone)
+    db.commit()
+    author = {r["name"]: r["id"] for r in db.execute("SELECT id, name FROM authors")}
+    return {"ann": author["Ann Author"], "only_trashed": author["Only Trashed"],
+            "loc_a": seeded_library["loc_a"]}
+
+
+def _titles(html):
+    return {t for t in ("Book Read", "DVD One", "Book Two", "Trashed Ann",
+                        "Book Unlocated", "Signed Copy") if t in html}
+
+
+@pytest.mark.parametrize("path", ["/browse", "/api/search"])
+def test_author_filter_returns_that_authors_live_items(admin_client, authored, path):
+    html = admin_client.get(f"{path}?author_filter={authored['ann']}").text
+    assert _titles(html) == {"Book Read", "DVD One"}
+
+
+@pytest.mark.parametrize("path", ["/browse", "/api/search"])
+def test_author_filter_combines_with_type_and_location(admin_client, authored, path):
+    ann = authored["ann"]
+    assert _titles(admin_client.get(
+        f"{path}?author_filter={ann}&media_type_filter=dvd").text) == {"DVD One"}
+    assert _titles(admin_client.get(
+        f"{path}?author_filter={ann}&location_filter={authored['loc_a']}").text
+    ) == {"Book Read", "DVD One"}
+    assert _titles(admin_client.get(
+        f"{path}?author_filter={ann}&media_type_filter=book&location_filter="
+        f"{authored['loc_a']}").text) == {"Book Read"}
+
+
+@pytest.mark.parametrize("path", ["/browse", "/api/search"])
+@pytest.mark.parametrize("value", ["abc", "9" * 20, "99999", "only_trashed"])
+def test_author_filter_bad_unknown_or_trashed_only_is_an_empty_200(
+    admin_client, authored, path, value
+):
+    if value == "only_trashed":
+        value = authored["only_trashed"]
+    r = admin_client.get(f"{path}?author_filter={value}")
+    assert r.status_code == 200
+    assert _titles(r.text) == set()
+
+
+def test_author_filter_parity(admin_client, authored):
+    qs = f"author_filter={authored['ann']}"
+    b = admin_client.get(f"/browse?{qs}").text
+    s = admin_client.get(f"/api/search?{qs}").text
+    for sel in SELECT_IDS:
+        assert _opts(b, sel) == _opts(s, sel), sel
+    cards = len(re.findall(r"data-item-id=", b))
+    assert cards == len(re.findall(r"data-item-id=", s)) and cards > 0
+
+
+def test_browse_renders_the_author_control_with_its_name(admin_client, authored):
+    html = admin_client.get(f"/browse?author_filter={authored['ann']}").text
+    tag = re.search(r'<input type="hidden" name="author_filter"[^>]*>', html, re.S).group(0)
+    assert f'value="{authored["ann"]}"' in tag
+    assert 'data-label="Ann Author"' in tag
+    # Unfiltered: an empty control, still wired to its own request (G54).
+    bare = admin_client.get("/browse").text
+    tag = re.search(r'<input type="hidden" name="author_filter"[^>]*>', bare, re.S).group(0)
+    assert 'value=""' in tag and 'data-label=""' in tag
+    assert 'hx-get="/api/search"' in tag and 'hx-target="#item-grid"' in tag
+
+
+def test_author_label_is_escaped(admin_client, db, seeded_library):
+    from app.services.item_write import update_item_fields
+
+    item = db.execute("SELECT id FROM items WHERE title = 'Book Two'").fetchone()[0]
+    update_item_fields(db, item, {"authors": '<b>"Evil"</b>'})
+    db.commit()
+    author = db.execute("SELECT id FROM authors").fetchone()[0]
+    html = admin_client.get(f"/browse?author_filter={author}").text
+    assert "<b>\"Evil\"</b>" not in html
+    assert "&lt;b&gt;" in html

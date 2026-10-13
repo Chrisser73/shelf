@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.auth import require_role
 from app.database import get_db, get_setting
+from app.features import require_feature
 
 router = APIRouter(prefix="/api")
 
@@ -50,14 +51,22 @@ def get_overdue_loans(db) -> list[dict]:
 # --- Borrowers ---
 
 @router.post("/borrowers")
-async def create_borrower(name: str = Form(...), _=Depends(require_role("admin"))):
+async def create_borrower(
+    name: str = Form(...),
+    _=Depends(require_role("admin")),
+    __=Depends(require_feature("lending")),
+):
     with get_db() as db:
         db.execute("INSERT OR IGNORE INTO borrowers (name) VALUES (?)", (name.strip(),))
     return RedirectResponse(url="/settings", status_code=303)
 
 
 @router.post("/borrowers/{borrower_id}/delete")
-async def delete_borrower(borrower_id: int, _=Depends(require_role("admin"))):
+async def delete_borrower(
+    borrower_id: int,
+    _=Depends(require_role("admin")),
+    __=Depends(require_feature("lending")),
+):
     """Remove a borrower and, with them, their completed loan history.
 
     `checkouts.borrower_id` has no ON DELETE action and foreign keys are
@@ -95,6 +104,7 @@ async def checkout_item(
     due_days: int = Form(14),
     notes: str = Form(""),
     _=Depends(require_role("editor")),
+    __=Depends(require_feature("lending")),
 ):
     """Check out an item to a borrower."""
     templates = request.app.state.templates
@@ -109,6 +119,12 @@ async def checkout_item(
         due = None
 
     with get_db() as db:
+        # Lock first: an item trashed or lent between these reads and the
+        # INSERT would otherwise get a loan anyway (G18).
+        db.execute("BEGIN IMMEDIATE")
+        # A stale item page can still post here after the item went to Trash.
+        if db.execute("SELECT 1 FROM items_live WHERE id = ?", (item_id,)).fetchone() is None:
+            return JSONResponse({"ok": False, "message": "Item not found"}, status_code=404)
         # Check not already checked out
         active = db.execute(
             "SELECT id FROM checkouts WHERE item_id = ? AND checked_in IS NULL", (item_id,)
@@ -125,7 +141,11 @@ async def checkout_item(
 
 
 @router.post("/checkouts/{checkout_id}/checkin")
-async def checkin_item(checkout_id: int, _=Depends(require_role("editor"))):
+async def checkin_item(
+    checkout_id: int,
+    _=Depends(require_role("editor")),
+    __=Depends(require_feature("lending")),
+):
     """Check in an active item loan exactly once."""
     with get_db() as db:
         checkout = db.execute(
@@ -152,7 +172,11 @@ async def checkin_item(checkout_id: int, _=Depends(require_role("editor"))):
 
 
 @router.get("/checkouts/overdue")
-async def overdue_items(request: Request, _=Depends(require_role("viewer"))):
+async def overdue_items(
+    request: Request,
+    _=Depends(require_role("viewer")),
+    __=Depends(require_feature("lending")),
+):
     """List all overdue checkouts (explicit due date or fallback window)."""
     with get_db() as db:
         return get_overdue_loans(db)

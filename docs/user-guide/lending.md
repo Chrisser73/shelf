@@ -2,6 +2,13 @@
 
 Shelf tracks who has what, nags you when it's late, and keeps the history.
 
+Lending can be turned off in Settings → **Features**. While it is off, your
+loans and borrowers are kept and overdue reminders pause. The item page's
+Lending panel, the **Loaned** and **Overdue** badges, Home's **Lent out** tile
+and Browse's **Lent Out** filter disappear, and Scan offers no **Lend** or
+**Return** mode. The **Borrowers** card in Settings still lists names, but
+cannot add or remove them. Turning it back on picks up where you left off.
+
 ## Borrowers
 
 Settings → Library → **Borrowers**: add the people you lend to (name, optional

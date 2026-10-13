@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import httpx
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_role
+from app.features import require_feature
 from app.config import HTTP_TIMEOUT
-from app.database import get_db
-from app.services import periodical_records, periodical_scan, periodicals
+from app.database import get_db, get_setting
+from app.services import cover_queue, item_write, periodical_google, periodical_records, periodical_scan, periodicals
 from app.services.item_write import ItemValueError, insert_item
 
 router = APIRouter()
@@ -35,6 +36,34 @@ def _issue_title(
 def _issue_year(issue_date: str | None) -> int | None:
     value = (issue_date or "").strip()
     return int(value[:4]) if len(value) >= 4 and value[:4].isdigit() else None
+
+
+def _scan_context(raw_barcode: str):
+    serial = periodicals.parse_barcode(raw_barcode)
+    if serial is None:
+        raise ValueError("A valid periodical barcode is required")
+    return serial
+
+
+def _assist_message(message: str, *, raw_barcode: str | None = None) -> HTMLResponse:
+    """Return an HTMX-visible assisted-search message without a silent 4xx.
+
+    A selected result targets the whole scan card. For a valid scan we retarget
+    refusals back into the assisted-results slot so the confirmation form stays
+    intact and the user can try another result.
+    """
+    headers = None
+    serial = periodicals.parse_barcode(raw_barcode or "")
+    if serial is not None:
+        headers = {
+            "HX-Retarget": f"#periodical-assisted-{serial.full_code}",
+            "HX-Reswap": "innerHTML",
+        }
+    return HTMLResponse(
+        '<p class="text-xs text-shelf-warning">' + message + "</p>",
+        status_code=200,
+        headers=headers,
+    )
 
 
 def find_periodical_item(raw: str) -> dict | None:
@@ -115,16 +144,108 @@ async def render_scan_candidate(
     )
 
 
+@router.get("/api/periodicals/assist/search")
+async def assisted_periodical_search(
+    request: Request,
+    q: str = Query("", max_length=120),
+    raw_barcode: str = Query(..., max_length=32),
+    location_id: int | None = Query(None),
+    mode: str = Query("add"),
+    _=Depends(require_role("editor")),
+):
+    try:
+        _scan_context(raw_barcode)
+    except ValueError:
+        return _assist_message("A valid periodical barcode is required")
+
+    with get_db() as db:
+        api_key = get_setting(db, "google_books_api_key") or None
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        result = await periodical_google.search_issues(q, client, api_key=api_key)
+    candidates = result.payload if result.found and isinstance(result.payload, list) else []
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "fragments/periodical_assisted_results.html",
+        {
+            "candidates": candidates,
+            "raw_barcode": raw_barcode,
+            "location_id": location_id,
+            "mode": mode if mode in {"add", "wishlist"} else "add",
+            "query": q.strip(),
+            "search_outcome": result.outcome,
+        },
+    )
+
+
+@router.get("/api/periodicals/assist/select")
+async def assisted_periodical_select(
+    request: Request,
+    volume_id: str = Query(..., max_length=80),
+    raw_barcode: str = Query(..., max_length=32),
+    location_id: int | None = Query(None),
+    mode: str = Query("add"),
+    _=Depends(require_role("editor")),
+):
+    try:
+        serial = _scan_context(raw_barcode)
+    except ValueError:
+        return _assist_message("A valid periodical barcode is required")
+
+    with get_db() as db:
+        api_key = get_setting(db, "google_books_api_key") or None
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        result = await periodical_google.lookup_issue(volume_id, client, api_key=api_key)
+    if not result.found or not isinstance(result.payload, dict):
+        return _assist_message(
+            "That magazine result is no longer available. Try another result.",
+            raw_barcode=serial.full_code,
+        )
+
+    issue = result.payload
+    confirmed_issn = serial.issn
+    try:
+        confirmed_issn = periodicals.normalise_issn(issue.get("issn")) or serial.issn
+    except ValueError:
+        # Provider metadata must never make a valid scan unconfirmable. Keep
+        # the checksum-valid ISSN derived from the printed 977 carrier instead.
+        pass
+
+    candidate = {
+        "publication_title": issue.get("title"),
+        "publisher": issue.get("publisher"),
+        "language": issue.get("language"),
+        "issn": confirmed_issn,
+        "barcode_ean": serial.ean13,
+        "barcode_supplement": serial.supplement,
+        "issue_date": issue.get("issue_date"),
+        "cover_url": issue.get("cover_url"),
+    }
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "fragments/periodical_scan_result.html",
+        {
+            "candidate": candidate,
+            "raw_barcode": serial.full_code,
+            "location_id": location_id,
+            "mode": mode if mode in {"add", "wishlist"} else "add",
+            "notice": "Google Books result selected. Confirm the concrete issue details before adding it.",
+            "csrf_token": request.cookies.get("csrf_token", ""),
+        },
+    )
+
+
 @router.post("/api/periodicals/confirm")
 async def confirm_periodical_issue(
     raw_barcode: str = Form(...),
     publication_title: str = Form(...),
+    publication_issn: str = Form(""),
     publisher: str = Form(""),
     language: str = Form(""),
     volume: str = Form(""),
     issue_number: str = Form(""),
     issue_date: str = Form(""),
     cover_date_label: str = Form(""),
+    cover_url: str = Form(""),
     location_id: int | None = Form(None),
     mode: str = Form("add"),
     _=Depends(require_role("editor")),
@@ -138,17 +259,21 @@ async def confirm_periodical_issue(
         mode = "add"
 
     try:
+        # The scanned carrier remains the issue-barcode identity. An explicit,
+        # checksum-valid ISSN can correct only the publication identity when
+        # stronger evidence (provider result or printed masthead) proves the
+        # 977-derived hint is misleading.
+        confirmed_issn = periodicals.normalise_issn(publication_issn) or serial.issn
         with get_db() as db:
-            publication_id = periodical_records.upsert_publication(
-                db,
-                title=publication_title,
-                issn=serial.issn,
-                publisher=publisher.strip() or None,
-                language=language.strip() or None,
+            # Look up before writing: a re-confirmed issue redirects without
+            # touching any publication, so an overridden ISSN cannot leave an
+            # empty publication behind.
+            known_publication_id = periodical_records.find_publication(
+                db, title=publication_title, issn=confirmed_issn
             )
             existing_id = periodical_records.find_duplicate_issue(
                 db,
-                publication_id,
+                known_publication_id,
                 volume=volume,
                 issue_number=issue_number,
                 issue_date=issue_date,
@@ -156,7 +281,19 @@ async def confirm_periodical_issue(
                 barcode_supplement=serial.supplement,
             )
             if existing_id:
+                # 0.45.1 makes this earliest guard the periodical restore path:
+                # `find_duplicate_issue` can see the trashed issue while normal
+                # Browse cannot, so restore it before redirecting to its item page.
+                item_write.restore_item(db, existing_id)
                 return RedirectResponse(f"/item/{existing_id}", status_code=303)
+
+            publication_id = periodical_records.upsert_publication(
+                db,
+                title=publication_title,
+                issn=confirmed_issn,
+                publisher=publisher.strip() or None,
+                language=language.strip() or None,
+            )
 
             item_id = insert_item(
                 db,
@@ -190,16 +327,31 @@ async def confirm_periodical_issue(
     except ValueError as exc:
         return HTMLResponse(str(exc), status_code=400)
 
+    selected_cover_url = cover_url.strip()
+    if selected_cover_url:
+        # A magazine must never fall through to the generic book title/author
+        # recovery path if this provider image fails. The exact URL is still
+        # checked by covers.download_cover's trusted-domain allowlist.
+        cover_queue.enqueue(
+            item_id,
+            hints={
+                "cover_url": selected_cover_url,
+                "skip_title_search": True,
+            },
+        )
+
     return RedirectResponse(f"/periodicals/{publication_id}", status_code=303)
 
 
 @router.get("/periodicals")
-async def periodicals_page(request: Request, _=Depends(require_role("viewer"))):
+async def periodicals_page(request: Request, _=Depends(require_role("viewer")),
+                           __=Depends(require_feature("periodicals"))):
     with get_db() as db:
         publications = db.execute(
-            """SELECT p.*, COUNT(pi.item_id) AS issue_count
+            """SELECT p.*, COUNT(il.id) AS issue_count
                FROM periodical_publications p
                LEFT JOIN periodical_issues pi ON pi.publication_id = p.id
+               LEFT JOIN items_live il ON il.id = pi.item_id
                GROUP BY p.id
                ORDER BY p.title COLLATE NOCASE"""
         ).fetchall()
@@ -213,6 +365,7 @@ async def publication_page(
     request: Request,
     publication_id: int,
     _=Depends(require_role("viewer")),
+    __=Depends(require_feature("periodicals")),
 ):
     with get_db() as db:
         publication = db.execute(

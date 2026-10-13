@@ -29,12 +29,15 @@ today), or a genuine miss. See
 [Troubleshooting](troubleshooting.md#a-scan-comes-back-empty-and-the-log-says-a-provider-asked-for-a-long-wait).
 
 **Why HTTPS with a self-signed certificate?**
-Phone cameras and offline mode both require a secure origin, so Shelf must
-be HTTPS; without a domain, self-signed is the only way to do that out of
-the box. (The one exception is Photo Intake's **Take photo** button on a
+Phone cameras and offline mode both require a secure origin, so Shelf
+serves HTTPS by default; without a domain, self-signed is the only way to do
+that out of the box. Behind a reverse proxy that terminates TLS you can set
+`SHELF_TLS=off` and let the proxy supply HTTPS instead. (The one exception is Photo Intake's **Take photo** button on a
 phone, which opens the native camera app rather than using `getUserMedia`
-and works over plain `http://` — but trust the cert for everything else.)
-You can trust the cert on your devices or front it with a real one —
+and works over plain `http://`; everything else needs the secure origin,
+from either Shelf's built-in certificate or your HTTPS proxy.)
+With the built-in certificate you can trust it on your devices or front it
+with a real one —
 see [HTTPS & reverse proxy](https-and-reverse-proxy.md).
 
 **Can I use a USB barcode scanner?**
@@ -58,9 +61,10 @@ Yes: admin / editor / viewer roles on one shared library. Per-user reading
 tracking and per-household libraries are planned.
 
 **Can I import from Goodreads / StoryGraph / LibraryThing / Libib?**
-Goodreads and StoryGraph today (upload the export as-is). LibraryThing and
-Libib are on the [roadmap](roadmap.md). Anything else: CSV with at least a
-`title` column.
+Yes — all four: upload the export as-is and the format is detected. The
+LibraryThing and Libib importers are labelled beta. See
+[Import & export](user-guide/import-and-export.md#reading-trackers-and-catalogue-apps).
+Anything else: CSV with at least a `title` column.
 
 **How do I move Shelf to another machine?**
 Copy the `data/` directory — or export a portable archive and import it on

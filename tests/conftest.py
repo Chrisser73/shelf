@@ -87,6 +87,12 @@ def _isolated_db(tmp_path, monkeypatch):
     import app.nav as nav_mod
     monkeypatch.setattr(nav_mod, "_cached_settings", None)
 
+    # Reset the feature-flag cache (G13) — one test's disabled feature would
+    # otherwise stay disabled in the next test's routes, nav and jobs.
+    import app.features as features_mod
+    monkeypatch.setattr(features_mod, "_cached_flags", None)
+    monkeypatch.setattr(features_mod, "_generation", 0)
+
     # Reset the currency cache — otherwise one test's display currency
     # leaks into the next test's money formatting.
     import app.currency as currency_mod
@@ -98,6 +104,11 @@ def _isolated_db(tmp_path, monkeypatch):
     # a schema-by-hand test would otherwise inherit the previous shape.
     import app.services.item_copies as item_copies_mod
     item_copies_mod.reset_column_cache()
+
+    # Reset the Trash expired-count cache — one test's trashed rows and
+    # retention setting would otherwise answer the next test's count (G13).
+    import app.services.trash as trash_mod
+    monkeypatch.setattr(trash_mod, "_cache", None)
 
     # Reset the IGDB token cache — otherwise one test's cached OAuth token
     # leaks into the next test's credential pair.
@@ -142,6 +153,7 @@ def client(monkeypatch):
     """FastAPI TestClient with rate limiting disabled and CSRF pre-seeded."""
     monkeypatch.setenv("SHELF_DISABLE_RATE_LIMIT", "1")
     monkeypatch.setenv("SHELF_DISABLE_COVER_ENRICH", "1")  # no network from import tests
+    monkeypatch.setenv("SHELF_DISABLE_PRICE_ALERTS", "1")  # no ISBNdb pass from the lifespan loop
     from app.main import app
     c = TestClient(app, base_url="https://testserver")
     c.cookies.set("csrf_token", _TEST_CSRF_TOKEN)

@@ -24,9 +24,9 @@ def _item(db, title="Copy Test", *, owned=1, location_id=None, media_type="book"
 
 
 def _copy(db, copy_id):
-    """One copy row, or None once it is gone."""
+    """One copy row, or None once it is gone from the live view."""
     return db.execute(
-        "SELECT * FROM item_copies WHERE id = ?", (copy_id,)
+        "SELECT * FROM copies_live WHERE id = ?", (copy_id,)
     ).fetchone()
 
 
@@ -232,6 +232,22 @@ class TestCopyWriteFunnel:
             item_copies.update_copy(db, copy_id, {"id": 99})
         with pytest.raises(ValueError, match="created_at"):
             item_copies.update_copy(db, copy_id, {"created_at": "2020-01-01"})
+
+    def test_both_functions_refuse_deleted_at(self, db):
+        """`trash_copy` / `restore_copy` own the column. Both funnels build
+        their column list from caller-supplied names, so refusing the name
+        here is what stops `update_copy(db, id, {"deleted_at": ...})` from
+        putting a copy in Trash without the demote that `add_copy`'s primary
+        census depends on."""
+        item_id = _item(db)
+        with pytest.raises(ValueError, match="deleted_at"):
+            item_copies.insert_copy(
+                db,
+                {"item_id": item_id, "copy_number": 1, "deleted_at": "2020-01-01"},
+            )
+        copy_id = item_copies.insert_copy(db, {"item_id": item_id, "copy_number": 1})
+        with pytest.raises(ValueError, match="deleted_at"):
+            item_copies.update_copy(db, copy_id, {"deleted_at": "2020-01-01"})
 
     def test_insert_requires_item_id_and_copy_number(self, db):
         item_id = _item(db)
@@ -444,8 +460,12 @@ class TestAddCopy:
             item_copies.add_copy(db, item_id, {"conditon": "Good"})
 
 
-class TestDeleteCopy:
-    """`delete_copy` — the funnel's per-row delete arm, and the promotion.
+class TestRemoveCopy:
+    """`trash_copy` — how a copy is removed, and the promotion.
+
+    Re-aimed from the retired hard-delete function (soft-delete-trash T4): the
+    assertions are unchanged, because the settle is the same; `_copy` reads
+    `copies_live`, so "gone" means gone from the view.
 
     Removing the primary must leave every reader of "where is this item?"
     with a real answer, so the lowest-numbered survivor inherits both the
@@ -465,7 +485,7 @@ class TestDeleteCopy:
             "item_id": item_id, "copy_number": 2, "location_id": loft,
         })
 
-        result = item_copies.delete_copy(db, second)
+        result = item_copies.trash_copy(db, second)
 
         assert result["was_primary"] is False
         assert result["promoted_copy_id"] is None
@@ -492,7 +512,7 @@ class TestDeleteCopy:
             "item_id": item_id, "copy_number": 2, "location_id": loft,
         })
 
-        result = item_copies.delete_copy(db, primary)
+        result = item_copies.trash_copy(db, primary)
 
         assert result["promoted_copy_id"] == lower
         assert _copy(db, lower)["is_primary"] == 1
@@ -511,7 +531,7 @@ class TestDeleteCopy:
             "position_order": 4,
         })
 
-        item_copies.delete_copy(db, primary)
+        item_copies.trash_copy(db, primary)
 
         assert _copy(db, survivor)["position_order"] == 4
 
@@ -526,7 +546,7 @@ class TestDeleteCopy:
             "item_id": item_id, "copy_number": 2,
         })
 
-        item_copies.delete_copy(db, primary)
+        item_copies.trash_copy(db, primary)
 
         assert _copy(db, survivor)["is_primary"] == 1
         assert _item_row(db, item_id)["location_id"] is None
@@ -539,7 +559,7 @@ class TestDeleteCopy:
             "is_primary": 1,
         })
 
-        result = item_copies.delete_copy(db, only)
+        result = item_copies.trash_copy(db, only)
 
         assert result["remaining"] == 0
         assert result["was_primary"] is True
@@ -560,14 +580,14 @@ class TestDeleteCopy:
             "is_primary": 1,
         })
 
-        item_copies.delete_copy(db, only)
+        item_copies.trash_copy(db, only)
 
         assert db.execute(
-            "SELECT COUNT(*) AS n FROM item_copies WHERE item_id = ?", (item_id,)
+            "SELECT COUNT(*) AS n FROM copies_live WHERE item_id = ?", (item_id,)
         ).fetchone()["n"] == 0
 
     def test_an_unknown_copy_id_returns_none(self, db):
-        assert item_copies.delete_copy(db, 9999) is None
+        assert item_copies.trash_copy(db, 9999) is None
 
     def test_removal_is_scoped_to_one_item(self, db):
         living = _location(db)
@@ -578,7 +598,7 @@ class TestDeleteCopy:
         other = item_copies.insert_copy(db, {"item_id": theirs, "copy_number": 1,
                                              "location_id": living, "is_primary": 1})
 
-        item_copies.delete_copy(db, other)
+        item_copies.trash_copy(db, other)
 
         assert len(item_copies.copies_for_item(db, mine)) == 1
         assert _item_row(db, mine)["location_id"] == living

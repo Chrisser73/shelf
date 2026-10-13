@@ -89,5 +89,5 @@ def test_settings_shell_only_includes_tabs():
     """settings.html is a tab bar plus includes; panel markup goes in the
     fragment for its tab."""
     src = (REPO_ROOT / "app" / "templates" / "settings.html").read_text()
-    for tab in ("library", "integrations", "data", "users"):
+    for tab in ("library", "integrations", "data", "users", "features"):
         assert f'fragments/settings/{tab}.html' in src, f"{tab} tab is not included"

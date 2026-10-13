@@ -4,6 +4,11 @@ The **Series** page groups your library by series name, sorted by size, with
 each volume's position and a cover strip. It is the fastest way to answer
 "which Discworld am I missing?"
 
+Series can be turned off in Settings → **Features**. While it is off, an item
+page still shows its series name and position as plain text, but the name is
+no longer a link and the "you own N of …" read-out goes. Home's **Series**
+shortcut goes too.
+
 ## What it shows
 
 - **Series name**, count, and the covers you own in position order.

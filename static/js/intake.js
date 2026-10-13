@@ -10,11 +10,20 @@ function intakePage() {
         preview: false,
         analyzing: false,
         confirming: false,
+        analysisPhase: '',
+        analysisProgress: 0,
+        confirmationPhase: '',
+        confirmationProgress: 0,
         error: false,
         books: [],
         result: false,
         locationId: '',
+        // A user-supplied clue for the vision prompt.  It never overwrites
+        // the model's per-item classification, so mixed-media photos remain
+        // valid.
+        mediaTypeHint: '',
         owned: true,
+        collectorCondition: '',
         // High-res tiling: filled from POST /api/intake/plan when the photo
         // would be significantly downscaled by the provider.
         plan: emptyPlan(),
@@ -40,25 +49,47 @@ function intakePage() {
         // on photo B and analyze() crops and sends A's pixels under B's name,
         // or A's rows land under B's preview.
         photoGeneration: 0,
+        activeAnalysisJob: '',
+
+        // media_type -> creator-noun map ("Artist", "Developer", …), read once
+        // from the root's dataset below. Falls back to {} so creatorLabelFor()
+        // still has a default to fall back to.
+        creatorLabels: {},
 
         init() {
+            // Found by id, like the video element below — this file avoids
+            // the Alpine root/element magics entirely (G2; enforced by
+            // test_intake_js_has_no_el_or_root_magics), and intakePage has
+            // exactly one root per page (intake.html), so the lookup needs
+            // no host gate. The parse still tolerates the attribute being
+            // absent.
+            var pageEl = document.getElementById('intake-page');
+            try {
+                this.creatorLabels = JSON.parse((pageEl && pageEl.dataset.creatorLabels) || '{}');
+            } catch (e) {
+                this.creatorLabels = {};
+            }
             // Capability, not user-agent: an Android tablet in desktop mode and
             // a touchscreen Chromebook both get the right path this way.
             this.supportsCapture = 'capture' in document.createElement('input');
             this.cameraAvailable = this.supportsCapture ||
                 !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
             var saved = localStorage.getItem('shelf.intake.locationId');
-            if (saved) {
+            var defaultLocationId = (pageEl && pageEl.dataset.defaultLocationId) || '';
+            if (defaultLocationId || saved) {
                 // Only restore if the location still exists — the select's
                 // options are the source of truth for valid ids.
                 this.$nextTick(() => {
                     var sel = this.$refs.locationSelect;
-                    if (sel && Array.from(sel.options).some(o => o.value === saved)) {
-                        this.locationId = saved;
+                    var wanted = defaultLocationId || saved;
+                    if (sel && Array.from(sel.options).some(o => o.value === wanted)) {
+                        this.locationId = wanted;
                     }
                 });
             }
             this.$watch('locationId', v => localStorage.setItem('shelf.intake.locationId', v || ''));
+            var self = this;
+            window.addEventListener('pagehide', function() { self.cancelAnalysis(); });
         },
 
         onFileChosen(e) {
@@ -70,6 +101,7 @@ function intakePage() {
         // The one funnel every photo enters by, whether it came from the
         // library input, the camera-app input, or a viewfinder grab.
         async setPhoto(file) {
+            this.cancelAnalysis();
             this.file = file;
             this.error = false;
             this.books = [];
@@ -79,6 +111,8 @@ function intakePage() {
             this.imageEl = null;
             this.lowRes = false;
             this.analyzing = false;
+            this.analysisPhase = '';
+            this.analysisProgress = 0;
             this.photoW = 0;
             this.photoH = 0;
             if (this.preview) URL.revokeObjectURL(this.preview);
@@ -296,6 +330,8 @@ function intakePage() {
             // returns without clearing `analyzing` — the replacer clears it.
             var gen = this.photoGeneration;
             this.analyzing = true;
+            this.analysisPhase = 'Preparing your photo…';
+            this.analysisProgress = 12;
             this.error = false;
             this.books = [];
             this.result = false;
@@ -304,11 +340,20 @@ function intakePage() {
             if (gen !== this.photoGeneration) return;
             try {
                 var form = new FormData();
+                this.activeAnalysisJob = (window.crypto && window.crypto.randomUUID)
+                    ? window.crypto.randomUUID()
+                    : '00000000-0000-4000-8000-' + Date.now().toString(16).padStart(12, '0').slice(-12);
+                form.append('job_id', this.activeAnalysisJob);
+                if (this.mediaTypeHint) form.append('media_type_hint', this.mediaTypeHint);
                 if (tiled && this.plan.tiles.length && this.imageEl) {
+                    this.analysisPhase = 'Preparing detailed image sections…';
+                    this.analysisProgress = 28;
                     var blobs = await this.makeTileBlobs();
                     if (gen !== this.photoGeneration) return;
                     blobs.forEach((b, i) => form.append('photos', b, 'tile-' + i + '.jpg'));
                 } else {
+                    this.analysisPhase = 'Preparing the image for analysis…';
+                    this.analysisProgress = 28;
                     // Never upload more pixels than the provider will ingest:
                     // /plan's preview dims are exactly what it resizes to.
                     // factor is rounded (a 2586px photo reports 1.0), preview
@@ -327,6 +372,8 @@ function intakePage() {
                         form.append('photos', this.file);
                     }
                 }
+                this.analysisPhase = 'Reading titles, packaging and platform clues with AI…';
+                this.analysisProgress = 55;
                 var resp = await fetch('/api/intake/analyze', {
                     method: 'POST',
                     headers: { 'X-CSRF-Token': window.csrfToken() },
@@ -335,20 +382,44 @@ function intakePage() {
                 if (gen !== this.photoGeneration) return;
                 var data = await resp.json();
                 if (gen !== this.photoGeneration) return;
+                this.analysisPhase = 'Reviewing identified items…';
+                this.analysisProgress = 88;
                 if (data.ok) {
                     this.needsChoice = false;
                     this.books = data.books.map(b => ({
-                        title: b.title, authors: b.authors || '', isbn: b.isbn || '',
-                        source: b.source || 'read', media_type: 'book', include: true,
+                        title: b.title, authors: b.authors || '', publisher: b.publisher || '', isbn: b.isbn || '',
+                        source: b.source || 'read', media_type: b.media_type || 'book',
+                        platform: b.platform || '', publish_year: b.publish_year || '',
+                        collector_condition: b.collector_condition || '', language: b.language || '', region: b.region || '', alternate_title: b.alternate_title || '', existing: b.existing || null,
+                        include: !b.existing,
                     }));
+                    this.analysisPhase = 'Ready to review';
+                    this.analysisProgress = 100;
+                } else if (data.cancelled) {
+                    this.error = false;
+                    showToast(data.message || 'Analysis cancelled — the AI request was stopped.', 'info');
                 } else {
                     this.error = data.message || 'Analysis failed';
+                    showToast(this.error, 'error');
                 }
             } catch (e) {
                 if (gen !== this.photoGeneration) return;
-                this.error = 'Analysis failed: ' + e.message;
+                this.cancelAnalysis();
+                this.error = 'Analysis connection was interrupted. The AI request is being cancelled.';
+                showToast(this.error, 'warning');
             }
+            this.activeAnalysisJob = '';
             this.analyzing = false;
+        },
+
+        cancelAnalysis() {
+            var jobId = this.activeAnalysisJob;
+            if (!jobId) return;
+            this.activeAnalysisJob = '';
+            fetch('/api/intake/analyze/cancel?job_id=' + encodeURIComponent(jobId), {
+                method: 'POST', keepalive: true,
+                headers: { 'X-CSRF-Token': window.csrfToken() }
+            });
         },
 
         selectedCount() {
@@ -369,12 +440,44 @@ function intakePage() {
             this.books[i].authors = value;
         },
 
+        setBookPublisher(i, value) {
+            this.books[i].publisher = value;
+        },
+
+        setBookYear(i, value) {
+            this.books[i].publish_year = value;
+        },
+
+        setBookCollectorCondition(i, value) {
+            this.books[i].collector_condition = value;
+        },
+        setBookLanguage(i, value) {
+            this.books[i].language = value;
+        },
+        setBookRegion(i, value) {
+            this.books[i].region = value;
+        },
+        setBookAlternateTitle(i, value) {
+            this.books[i].alternate_title = value;
+        },
+
         setBookIsbn(i, value) {
             this.books[i].isbn = value;
         },
 
         setBookMediaType(i, value) {
             this.books[i].media_type = value;
+            if (value !== 'video_game') this.books[i].platform = '';
+        },
+
+        setBookPlatform(i, value) {
+            this.books[i].platform = value;
+        },
+
+        // Mirrors components-item.js's manualAddForm.creatorLabel getter, but
+        // as a method since this needs a per-row argument.
+        creatorLabelFor(mediaType) {
+            return this.creatorLabels[mediaType] || 'Author(s)';
         },
 
         selectAll() {
@@ -385,9 +488,16 @@ function intakePage() {
             this.books.forEach(b => b.include = false);
         },
 
-        async confirm() {
+        async confirm(skipMetadata) {
             this.confirming = true;
+            this.confirmationPhase = skipMetadata
+                ? 'Adding the selected items…'
+                : 'Looking up game metadata and matching covers…';
+            this.confirmationProgress = 18;
             this.error = false;
+            // Read synchronously, before the await, so a re-render mid-request
+            // cannot leave this stale (G2).
+            var tags = ((document.getElementById('default-tags') || {}).value || '').split(';');
             try {
                 var resp = await fetch('/api/intake/confirm', {
                     method: 'POST',
@@ -399,28 +509,40 @@ function intakePage() {
                         // `source` is deliberately not sent: it drives the
                         // review-row hint only, and the server has no use for it.
                         books: this.books.filter(b => b.include).map(b => ({
-                            title: b.title, authors: b.authors || null,
-                            isbn: b.isbn || null, media_type: b.media_type,
+                            title: b.title, authors: b.authors || null, publisher: b.publisher || null,
+                            publish_year: b.publish_year || null, isbn: b.isbn || null, media_type: b.media_type,
+                            language: b.language || null, region: b.region || null, alternate_title: b.alternate_title || null,
+                            platform: b.media_type === 'video_game' ? b.platform || null : null,
+                            collector_condition: b.media_type !== 'book' ? b.collector_condition || this.collectorCondition || null : null,
+                            existing_id: b.existing ? b.existing.id : null, replace_existing: !!b.existing,
                         })),
                         location_id: this.locationId ? parseInt(this.locationId) : null,
                         owned: this.owned,
+                        tags: tags,
+                        skip_metadata: !!skipMetadata,
                     }),
                 });
                 var data = await resp.json();
+                this.confirmationPhase = 'Saving the collection entries…';
+                this.confirmationProgress = 88;
                 if (data.ok) {
                     this.result = data;
                     this.books = [];
+                    this.confirmationProgress = 100;
                     showToast('Added ' + data.added.length + ' items');
                 } else {
                     this.error = data.message || 'Add failed';
+                    showToast(this.error, 'error');
                 }
             } catch (e) {
                 this.error = 'Add failed: ' + e.message;
+                showToast(this.error, 'error');
             }
             this.confirming = false;
         },
 
         async reset() {
+            this.cancelAnalysis();
             this.file = false;
             if (this.preview) URL.revokeObjectURL(this.preview);
             this.preview = false;

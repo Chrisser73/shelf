@@ -22,11 +22,13 @@
     // ---- Part 1: the closed declaration -----------------------------------
     // Every registrable component name -> the script under static/js/ that
     // registers it. This is what lets the message name a *file* rather than a
-    // list of bindings. Keep it in step with the Alpine.data() calls; the
-    // reconciler below ignores a name it does not know.
+    // list of bindings. The reconciler below ignores a name it does not
+    // know, so `make check-alpine` fails on any Alpine.data() call missing
+    // from this map or mapped to the wrong file.
     var SCRIPTS = {
         setupForm: 'components.js',
         navMenu: 'components.js',
+        accountMenu: 'components.js',
         accountModal: 'components.js',
 
         logsPage: 'components-library.js',
@@ -57,14 +59,20 @@
         browsePage: 'browse.js',
         scanPage: 'scan.js',
         intakePage: 'intake.js',
-        coverDrop: 'item_edit.js'
+        coverDrop: 'item_edit.js',
+        isbnCamera: 'item_edit.js',
+        upcCamera: 'item_edit.js',
+        ownershipBoxes: 'item_edit.js',
+        shelfFillPage: 'shelf-fill.js'
     };
 
     // The four page-scoped scripts each declare a named top-level function
     // matching their component, so `typeof window[name]` separates "the script
-    // never executed" from "it executed but registered late". The 25 names in
+    // never executed" from "it executed but registered late". The 26 names in
     // the components*.js files are anonymous Alpine.data factories and are
-    // never globals on any page — probing them says nothing.
+    // never globals on any page — probing them says nothing. isbnCamera,
+    // upcCamera, ownershipBoxes and shelfFillPage are named globals too but
+    // are not probed; tests/e2e/conftest.py keeps its own copy of this set.
     var PAGE_SCOPED = {
         browsePage: true, scanPage: true, intakePage: true, coverDrop: true
     };

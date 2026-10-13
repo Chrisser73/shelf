@@ -27,19 +27,127 @@ async function postJSON(url, opts) {
     }
 }
 
+// Settings cards keep their detailed inline result for longer-running work,
+// while this gives every completed action the same immediate feedback.
+function notifySettingsResult(result, successMessage) {
+    var failed = !result || result.ok === false || !!result.error;
+    var message = result && (result.message || result.error);
+    showToast(failed ? (message || 'Action failed') : successMessage, failed ? 'error' : 'success');
+}
+
 document.addEventListener('alpine:init', function () {
+
+    Alpine.data('visionSettings', function () {
+        return {
+            visionProvider: '', ollamaModel: '', ollamaModels: [],
+            ollamaModelsLoading: false, ollamaModelsMessage: '', visionTesting: false, visionTestResult: false, visionConnectionStatus: '',
+            init() {
+                this.visionProvider = this.$el.dataset.visionProvider || '';
+                this.ollamaModel = this.$el.dataset.ollamaModel || '';
+                this.visionConnectionStatus = this.$el.dataset.visionConnectionStatus || '';
+                if (this.visionProvider === 'ollama') this.loadOllamaModels();
+            },
+            providerChanged() {
+                // Connection state belongs to the previous provider, not the
+                // currently selected unsaved form values.
+                this.visionConnectionStatus = '';
+                this.visionTestResult = false;
+            },
+            async loadOllamaModels() {
+                var url = (this.$refs.ollamaUrl.value || '').trim();
+                if (!url) { this.ollamaModelsMessage = 'Enter an Ollama URL first.'; return; }
+                this.ollamaModelsLoading = true; this.ollamaModelsMessage = '';
+                var result = await postJSON('/api/settings/vision/ollama-models?url=' + encodeURIComponent(url), {
+                    headers: { 'X-CSRF-Token': window.csrfToken() }
+                });
+                this.ollamaModelsLoading = false;
+                if (!result.ok) {
+                    this.ollamaModelsMessage = result.message || 'Could not load models.';
+                    showToast(this.ollamaModelsMessage, 'error');
+                    return;
+                }
+                this.ollamaModels = result.models || [];
+                if (!this.ollamaModels.some(model => model.name === this.ollamaModel)) {
+                    this.ollamaModel = this.ollamaModels.length ? this.ollamaModels[0].name : '';
+                }
+                this.ollamaModelsMessage = this.ollamaModels.length
+                    ? this.ollamaModels.length + ' installed model' + (this.ollamaModels.length === 1 ? '' : 's') + ' found.'
+                    : 'No models found on this Ollama server.';
+            },
+            async testVisionConnection() {
+                this.visionTesting = true; this.visionTestResult = false;
+                var result = await postJSON('/api/settings/vision/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
+                    body: JSON.stringify({
+                        provider: this.visionProvider,
+                        anthropic_api_key: this.$refs.anthropicApiKey.value,
+                        openai_base_url: this.$refs.openaiBaseUrl.value,
+                        openai_api_key: this.$refs.openaiApiKey.value,
+                        ollama_url: this.$refs.ollamaUrl.value
+                    })
+                });
+                this.visionTesting = false; this.visionTestResult = result;
+                this.visionConnectionStatus = result.ok ? 'ok' : 'error';
+                showToast(result.message || (result.ok ? 'Connected' : 'Connection failed'), result.ok ? 'success' : 'error');
+            }
+        };
+    });
 
     // settings.html — tab bar (persists active tab in localStorage)
     Alpine.data('settingsTabs', function () {
         return {
             tab: 'library',
             init() {
-                this.tab = localStorage.getItem('shelf_settings_tab') || 'library';
+                var requested = new URLSearchParams(window.location.search).get('tab');
+                this.tab = requested || localStorage.getItem('shelf_settings_tab') || 'library';
+                var hashTargets = {
+                    '#photo-intake-vision': 'integrations',
+                    '#missing-game-metadata': 'library'
+                };
+                var hashTab = hashTargets[window.location.hash];
+                if (hashTab) {
+                    this.tab = hashTab;
+                    this.$nextTick(function() {
+                        var target = document.getElementById(window.location.hash.slice(1));
+                        if (target) target.scrollIntoView({ block: 'start' });
+                    });
+                }
             },
             setTab(name) {
                 this.tab = name;
                 localStorage.setItem('shelf_settings_tab', name);
+            },
+            // Switch tab, then bring one field on it into view and focus it —
+            // setTab alone keeps the old tab's scroll offset, which can leave
+            // the field far below the fold. The panel's x-show has not applied
+            // by $nextTick (measured: visible only a frame later), and a hidden
+            // field neither scrolls nor focuses, so wait a few frames for it.
+            goToField(name, id) {
+                this.setTab(name);
+                const reveal = (tries) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    if (!el.offsetParent && tries > 0) {
+                        requestAnimationFrame(() => reveal(tries - 1));
+                        return;
+                    }
+                    el.scrollIntoView({ block: 'center' });
+                    el.focus({ preventScroll: true });
+                };
+                this.$nextTick(() => reveal(10));
             }
+        };
+    });
+
+    // Native selects do not expose an "opened" event. Track the interaction
+    // state solely for the decorative chevron; selection and focus loss reset
+    // it immediately, without a transition animation.
+    Alpine.data('logoSelect', function () {
+        return {
+            isOpen: false,
+            toggle() { this.isOpen = !this.isOpen; },
+            close() { this.isOpen = false; }
         };
     });
 
@@ -59,8 +167,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ url: this.$refs.notifyUrl.value, format: this.$refs.notifyFormat.value })
                 }).then(r => r.json())
-                  .then(d => { this.ntStatus = d; this.ntTesting = false; })
-                  .catch(() => { this.ntStatus = { ok: false, message: 'Request failed' }; this.ntTesting = false; });
+                  .then(d => { this.ntStatus = d; this.ntTesting = false; notifySettingsResult(d, 'Notification sent'); })
+                  .catch(() => { this.ntStatus = { ok: false, message: 'Request failed' }; this.ntTesting = false; notifySettingsResult(this.ntStatus, ''); });
             }
         };
     });
@@ -107,8 +215,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ url: this.absUrl, token: this.absToken })
                 }).then(r => r.json())
-                  .then(d => { this.absStatus = d; this.absTesting = false; })
-                  .catch(() => { this.absStatus = { ok: false, message: 'Connection failed' }; this.absTesting = false; });
+                  .then(d => { this.absStatus = d; this.absTesting = false; notifySettingsResult(d, 'Audiobookshelf connection verified'); })
+                  .catch(() => { this.absStatus = { ok: false, message: 'Connection failed' }; this.absTesting = false; notifySettingsResult(this.absStatus, ''); });
             },
             startSync() {
                 if (!this.absSyncReady) return;
@@ -124,12 +232,12 @@ document.addEventListener('alpine:init', function () {
                         self.syncLastTitle = d.title;
                         self.syncLog.push({i: d.current, t: d.title, s: d.status});
                     } else if (d.type === 'done') {
-                        self.result = d; self.syncing = false; es.close();
+                        self.result = d; self.syncing = false; es.close(); notifySettingsResult(d, 'Audiobookshelf sync finished');
                     } else if (d.type === 'error') {
-                        self.result = {error: d.message}; self.syncing = false; es.close();
+                        self.result = {error: d.message}; self.syncing = false; es.close(); notifySettingsResult(self.result, '');
                     }
                 };
-                es.onerror = function () { self.result = {error: 'Connection lost'}; self.syncing = false; es.close(); };
+                es.onerror = function () { self.result = {error: 'Connection lost'}; self.syncing = false; es.close(); notifySettingsResult(self.result, ''); };
             }
         };
     });
@@ -160,13 +268,13 @@ document.addEventListener('alpine:init', function () {
                     .catch(() => { this.libsSaving = false; showToast('Save failed', 'error') });
             },
             cleanup() {
-                if (!confirm('Remove all Shelf items that came from unchecked libraries? Audiobookshelf itself is not touched, and re-checking a library re-imports them on the next sync.')) return;
+                if (!confirm('Move all Shelf items that came from unchecked libraries to Trash? Audiobookshelf itself is not touched, and you can restore them from Trash. A later sync does not re-import an item that is in Trash: restore it first.')) return;
                 this.cleaning = true; this.cleanResult = false;
                 // Persist the current selection first so the cleanup matches what's on screen
                 fetch('/api/sync/audiobookshelf/libraries', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken()}, body: JSON.stringify({excluded: this.excludedIds()})})
                     .then(() => fetch('/api/sync/audiobookshelf/libraries/cleanup', {method: 'POST', headers: {'X-CSRF-Token': window.csrfToken()}}))
                     .then(r => r.json())
-                    .then(d => { this.cleaning = false; this.cleanResult = d; if (d.ok) showToast('Removed ' + d.deleted + ' items') })
+                    .then(d => { this.cleaning = false; this.cleanResult = d; notifySettingsResult(d, d.ok ? 'Removed ' + d.deleted + ' items' : ''); })
                     .catch(() => { this.cleaning = false; showToast('Cleanup failed', 'error') });
             }
         };
@@ -201,8 +309,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ token: this.hcToken })
                 }).then(r => r.json())
-                  .then(d => { this.hcStatus = d; this.hcTesting = false; })
-                  .catch(() => { this.hcStatus = { ok: false, message: 'Connection failed' }; this.hcTesting = false; });
+                  .then(d => { this.hcStatus = d; this.hcTesting = false; notifySettingsResult(d, 'Hardcover connection verified'); })
+                  .catch(() => { this.hcStatus = { ok: false, message: 'Connection failed' }; this.hcTesting = false; notifySettingsResult(this.hcStatus, ''); });
             },
             startExport() {
                 this.exporting = true; this.exportResult = false;
@@ -219,12 +327,12 @@ document.addEventListener('alpine:init', function () {
                         self.exportLastTitle = d.title;
                         self.exportLog.push({i: d.current, t: d.title, s: d.status});
                     } else if (d.type === 'done') {
-                        self.exportResult = d; self.exporting = false; es.close();
+                        self.exportResult = d; self.exporting = false; es.close(); notifySettingsResult(d, 'Hardcover export finished');
                     } else if (d.type === 'error') {
-                        self.exportResult = {error: d.message}; self.exporting = false; es.close();
+                        self.exportResult = {error: d.message}; self.exporting = false; es.close(); notifySettingsResult(self.exportResult, '');
                     }
                 };
-                es.onerror = function () { self.exportResult = {error: 'Connection lost'}; self.exporting = false; es.close(); };
+                es.onerror = function () { self.exportResult = {error: 'Connection lost'}; self.exporting = false; es.close(); notifySettingsResult(self.exportResult, ''); };
             },
             startImport() {
                 this.importing = true; this.importResult = false;
@@ -245,12 +353,12 @@ document.addEventListener('alpine:init', function () {
                             self.importLog.push({i: d.current, t: d.title, s: d.status});
                         }
                     } else if (d.type === 'done') {
-                        self.importResult = d; self.importing = false; es.close();
+                        self.importResult = d; self.importing = false; es.close(); notifySettingsResult(d, 'Hardcover import finished');
                     } else if (d.type === 'error') {
-                        self.importResult = {error: d.message}; self.importing = false; es.close();
+                        self.importResult = {error: d.message}; self.importing = false; es.close(); notifySettingsResult(self.importResult, '');
                     }
                 };
-                es.onerror = function () { self.importResult = {error: 'Connection lost'}; self.importing = false; es.close(); };
+                es.onerror = function () { self.importResult = {error: 'Connection lost'}; self.importing = false; es.close(); notifySettingsResult(self.importResult, ''); };
             }
         };
     });
@@ -273,8 +381,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ key: this.apiKey })
                 }).then(r => r.json())
-                  .then(d => { this.keyStatus = d; this.testing = false; })
-                  .catch(() => { this.keyStatus = { ok: false, message: 'Connection failed' }; this.testing = false; });
+                  .then(d => { this.keyStatus = d; this.testing = false; notifySettingsResult(d, 'ISBNdb key verified'); })
+                  .catch(() => { this.keyStatus = { ok: false, message: 'Connection failed' }; this.testing = false; notifySettingsResult(this.keyStatus, ''); });
             },
             startValuation() {
                 this.valuating = true; this.valResult = false; this.valCurrent = 0; this.valTotal = 0;
@@ -288,12 +396,12 @@ document.addEventListener('alpine:init', function () {
                         self.valLastTitle = d.title;
                         self.valLog.push({i: d.current, t: d.title, s: d.status, p: !!d.priced});
                     } else if (d.type === 'done') {
-                        self.valResult = d; self.valuating = false; es.close();
+                        self.valResult = d; self.valuating = false; es.close(); notifySettingsResult(d, 'Collection valuation finished');
                     } else if (d.type === 'error') {
-                        self.valResult = {message: d.message}; self.valuating = false; es.close();
+                        self.valResult = {error: d.message}; self.valuating = false; es.close(); notifySettingsResult(self.valResult, '');
                     }
                 };
-                es.onerror = function () { self.valResult = {message: 'Connection lost'}; self.valuating = false; es.close(); };
+                es.onerror = function () { self.valResult = {error: 'Connection lost'}; self.valuating = false; es.close(); notifySettingsResult(self.valResult, ''); };
             }
         };
     });
@@ -315,8 +423,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ api_key: this.googleBooksKey })
                 }).then(r => r.json())
-                  .then(d => { this.googleBooksStatus = d; this.googleBooksTesting = false; })
-                  .catch(() => { this.googleBooksStatus = { ok: false, message: 'Connection failed' }; this.googleBooksTesting = false; });
+                  .then(d => { this.googleBooksStatus = d; this.googleBooksTesting = false; notifySettingsResult(d, 'Google Books key verified'); })
+                  .catch(() => { this.googleBooksStatus = { ok: false, message: 'Connection failed' }; this.googleBooksTesting = false; notifySettingsResult(this.googleBooksStatus, ''); });
             }
         };
     });
@@ -337,8 +445,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ key: this.tmdbKey })
                 }).then(r => r.json())
-                  .then(d => { this.tmdbStatus = d; this.tmdbTesting = false; })
-                  .catch(() => { this.tmdbStatus = { ok: false, message: 'Connection failed' }; this.tmdbTesting = false; });
+                  .then(d => { this.tmdbStatus = d; this.tmdbTesting = false; notifySettingsResult(d, 'TMDb key verified'); })
+                  .catch(() => { this.tmdbStatus = { ok: false, message: 'Connection failed' }; this.tmdbTesting = false; notifySettingsResult(this.tmdbStatus, ''); });
             }
         };
     });
@@ -359,8 +467,8 @@ document.addEventListener('alpine:init', function () {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken() },
                     body: JSON.stringify({ client_id: this.igdbId, client_secret: this.igdbSecret })
                 }).then(r => r.json())
-                  .then(d => { this.igdbStatus = d; this.igdbTesting = false; })
-                  .catch(() => { this.igdbStatus = { ok: false, message: 'Connection failed' }; this.igdbTesting = false; });
+                  .then(d => { this.igdbStatus = d; this.igdbTesting = false; notifySettingsResult(d, 'IGDB credentials verified'); })
+                  .catch(() => { this.igdbStatus = { ok: false, message: 'Connection failed' }; this.igdbTesting = false; notifySettingsResult(this.igdbStatus, ''); });
             }
         };
     });
@@ -372,6 +480,23 @@ document.addEventListener('alpine:init', function () {
             retryCurrent: 0, retryTotal: 0, retryLastTitle: '', retryLog: [], showRetryLog: false,
             synFetching: false, synResult: false,
             synCurrent: 0, synTotal: 0, synLastTitle: '', synLog: [], showSynLog: false,
+            metaPlanning: false, metaApplying: false, metaConfirming: false, metaSyncIds: null,
+            metaEstimate: '', metaError: '', metaPlan: [], metaResult: [],
+            metaFields: [
+                {key: 'title', label: 'Title'}, {key: 'alternate_title', label: 'Alternate name'},
+                {key: 'authors', label: 'Developer'}, {key: 'publisher', label: 'Publisher'},
+                {key: 'platform', label: 'Platform'}, {key: 'region', label: 'Region'},
+                {key: 'language', label: 'Language'}, {key: 'publish_year', label: 'Year'}
+            ],
+            init() {
+                var self = this;
+                fetch('/api/game-metadata/estimate')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.ok) self.metaEstimate = data.count + ' game' + (data.count === 1 ? '' : 's') + ' need metadata · ' + data.cost_hint;
+                    })
+                    .catch(function() {});
+            },
             get retryPct() { return Math.round(this.retryCurrent / this.retryTotal * 100) + '%'; },
             get synPct() { return Math.round(this.synCurrent / this.synTotal * 100) + '%'; },
             startRetry() {
@@ -386,12 +511,12 @@ document.addEventListener('alpine:init', function () {
                         self.retryLastTitle = d.title;
                         self.retryLog.push({i: d.current, t: d.title, s: d.status});
                     } else if (d.type === 'done') {
-                        self.retryResult = d; self.retrying = false; es.close();
+                        self.retryResult = d; self.retrying = false; es.close(); notifySettingsResult(d, 'Cover retry finished');
                     } else if (d.type === 'error') {
-                        self.retryResult = {error: d.message}; self.retrying = false; es.close();
+                        self.retryResult = {error: d.message}; self.retrying = false; es.close(); notifySettingsResult(self.retryResult, '');
                     }
                 };
-                es.onerror = function () { self.retryResult = {error: 'Connection lost'}; self.retrying = false; es.close(); };
+                es.onerror = function () { self.retryResult = {error: 'Connection lost'}; self.retrying = false; es.close(); notifySettingsResult(self.retryResult, ''); };
             },
             startSynopses() {
                 this.synFetching = true; this.synResult = false; this.synCurrent = 0; this.synTotal = 0;
@@ -405,12 +530,66 @@ document.addEventListener('alpine:init', function () {
                         self.synLastTitle = d.title;
                         self.synLog.push({i: d.current, t: d.title, s: d.status});
                     } else if (d.type === 'done') {
-                        self.synResult = d; self.synFetching = false; es.close();
+                        self.synResult = d; self.synFetching = false; es.close(); notifySettingsResult(d, 'Synopsis backfill finished');
                     } else if (d.type === 'error') {
-                        self.synResult = {error: d.message}; self.synFetching = false; es.close();
+                        self.synResult = {error: d.message}; self.synFetching = false; es.close(); notifySettingsResult(self.synResult, '');
                     }
                 };
-                es.onerror = function () { self.synResult = {error: 'Connection lost'}; self.synFetching = false; es.close(); };
+                es.onerror = function () { self.synResult = {error: 'Connection lost'}; self.synFetching = false; es.close(); notifySettingsResult(self.synResult, ''); };
+            },
+            displayMeta(value) { return value === null || value === undefined || value === '' ? '—' : value; },
+            currentMeta(row, field) { return row.current[field]; },
+            toggleMeta(i) { this.metaPlan[i].include = !this.metaPlan[i].include; },
+            setMeta(i, field, value) { this.metaPlan[i].proposed[field] = value; },
+            metaSelectedCount() { return this.metaPlan.filter(function(row) { return row.include; }).length; },
+            metaSyncCount() { return this.metaSyncIds ? this.metaSyncIds.length : this.metaSelectedCount(); },
+            isSingleConfirming(id) { return this.metaConfirming && this.metaSyncIds && this.metaSyncIds.indexOf(id) !== -1; },
+            isSingleSyncing(id) { return this.metaApplying && this.metaSyncIds && this.metaSyncIds.indexOf(id) !== -1; },
+            isBatchConfirming() { return this.metaConfirming && !this.metaSyncIds; },
+            isBatchSyncing() { return this.metaApplying && !this.metaSyncIds; },
+            cancelMetaSync() { this.metaConfirming = false; this.metaSyncIds = null; },
+            metaChanged(row, field) {
+                var current = row.current[field]; var proposed = row.proposed[field];
+                return String(current === null || current === undefined ? '' : current).trim() !== String(proposed === null || proposed === undefined ? '' : proposed).trim();
+            },
+            metaInputClass(row, field) {
+                return 'w-full bg-shelf-bg border rounded-lg px-3 py-1.5 ' + (this.metaChanged(row, field) ? 'border-shelf-warning' : 'border-shelf-border');
+            },
+            planGameMetadata() {
+                this.metaPlanning = true; this.metaError = ''; this.metaPlan = []; this.metaResult = []; this.metaConfirming = false; this.metaSyncIds = null;
+                var self = this;
+                fetch('/api/game-metadata/plan', {method: 'POST', headers: {'X-CSRF-Token': window.csrfToken()}})
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        self.metaPlanning = false;
+                        if (!data.ok) { self.metaError = data.message || 'Metadata planning failed'; showToast(self.metaError, 'error'); return; }
+                        self.metaEstimate = data.cost_hint || '';
+                        self.metaPlan = (data.items || []).map(function(row) { return Object.assign({include: true}, row); });
+                        if (!self.metaPlan.length) showToast('No missing game metadata could be matched.', 'info');
+                    })
+                    .catch(function() { self.metaPlanning = false; self.metaError = 'Metadata planning failed'; showToast(self.metaError, 'error'); });
+            },
+            requestMetaSync() { if (this.metaSelectedCount()) { this.metaSyncIds = null; this.metaConfirming = true; } },
+            requestSingleMetaSync(i) { if (this.metaPlan[i].include) { this.metaSyncIds = [this.metaPlan[i].id]; this.metaConfirming = true; } },
+            applyGameMetadata() {
+                this.metaApplying = true; this.metaConfirming = false; this.metaError = '';
+                var self = this;
+                fetch('/api/game-metadata/apply', {
+                    method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken()},
+                    body: JSON.stringify({items: this.metaPlan.map(function(row) {
+                        var chosen = row.include && (!self.metaSyncIds || self.metaSyncIds.indexOf(row.id) !== -1);
+                        return Object.assign({id: row.id, include: chosen}, row.proposed);
+                    })})
+                }).then(function(r) { return r.json(); }).then(function(data) {
+                    self.metaApplying = false;
+                    if (!data.ok) { self.metaError = data.message || 'Metadata sync failed'; showToast(self.metaError, 'error'); return; }
+                    var updated = data.updated || [];
+                    var updatedIds = updated.map(function(item) { return item.id; });
+                    self.metaResult = self.metaResult.concat(updated);
+                    self.metaPlan = self.metaPlan.filter(function(row) { return updatedIds.indexOf(row.id) === -1; });
+                    self.metaSyncIds = null;
+                    showToast('Metadata updated for ' + updated.length + ' items', 'success');
+                }).catch(function() { self.metaApplying = false; self.metaError = 'Metadata sync failed'; showToast(self.metaError, 'error'); });
             }
         };
     });
@@ -423,8 +602,8 @@ document.addEventListener('alpine:init', function () {
                 this.importing = true; this.importResult = false;
                 fetch('/api/import/csv', { method: 'POST', body: new FormData(e.target), headers: { 'X-CSRF-Token': window.csrfToken() } })
                     .then(r => r.json())
-                    .then(d => { this.importResult = d; this.importing = false; })
-                    .catch(() => { this.importResult = { error: 'Import failed' }; this.importing = false; });
+                    .then(d => { this.importResult = d; this.importing = false; notifySettingsResult(d, 'CSV import finished'); })
+                    .catch(() => { this.importResult = { error: 'Import failed' }; this.importing = false; notifySettingsResult(this.importResult, ''); });
             }
         };
     });
@@ -478,16 +657,18 @@ document.addEventListener('alpine:init', function () {
                     .then(function (r) { return r.json(); })
                     .then(function (d) {
                         self.planning = false;
-                        if (d.error) { self.errorMessage = d.error; return; }
+                        if (d.error) { self.errorMessage = d.error; notifySettingsResult(d, ''); return; }
                         self.plan = d.plan;
                         self.planMode = d.plan.mode;
                         self.uploadId = d.upload_id;
                         self.resetSelection();
                         self.step = 2;
+                        showToast('Archive preview is ready');
                     })
                     .catch(function () {
                         self.planning = false;
                         self.errorMessage = 'Preview failed';
+                        showToast(self.errorMessage, 'error');
                     });
             },
 
@@ -516,12 +697,14 @@ document.addEventListener('alpine:init', function () {
                         self.importResult = d;
                         self.deselectedLines = self.buildDeselectedLines(d);
                         self.step = 3;
+                        notifySettingsResult(d, 'Archive import finished');
                     })
                     .catch(function () {
                         self.importing = false;
                         self.importResult = { error: 'Import failed' };
                         self.deselectedLines = [];
                         self.step = 3;
+                        showToast('Import failed', 'error');
                     });
             },
 
@@ -544,7 +727,13 @@ document.addEventListener('alpine:init', function () {
             importCount() {
                 if (!this.plan) { return 0; }
                 var n = 0;
-                if (this.selCreates) { n += this.plan.summary.create; }
+                if (this.selCreates) {
+                    n += this.plan.summary.create;
+                    // A restore is gated by the same "new items" toggle as a
+                    // create — || 0 so a response from before `restore`
+                    // existed still counts correctly.
+                    n += this.plan.summary.restore || 0;
+                }
                 if (this.selUpdates && this.planMode === 'update') { n += this.plan.summary.update; }
                 return n;
             },
@@ -553,13 +742,36 @@ document.addEventListener('alpine:init', function () {
                 return 'Import ' + this.plural(this.importCount(), 'item');
             },
 
+            // Whether the "Include" section's new-items checkbox shows at
+            // all — a restore-only archive (nothing to create) still needs
+            // it, since a restore is gated by the same selCreates toggle.
+            showCreatesCheckbox() {
+                if (!this.plan) { return false; }
+                var s = this.plan.summary;
+                return s.create > 0 || (s.restore || 0) > 0;
+            },
+
+            // "3 new items", "3 new items, 1 restored from Trash", or
+            // "1 restored from Trash" — the label for showCreatesCheckbox().
+            createsLabel() {
+                if (!this.plan) { return ''; }
+                var s = this.plan.summary;
+                var parts = [];
+                if (s.create > 0) { parts.push(this.plural(s.create, 'new item')); }
+                if (s.restore) { parts.push(s.restore + ' restored from Trash'); }
+                return parts.join(', ');
+            },
+
             // "494 new, 168 already in your library (skipped), 3 to update"
             verdictSentence() {
                 if (!this.plan) { return ''; }
                 var s = this.plan.summary;
-                var parts = [s.create + ' new'];
+                var newPart = s.create + ' new';
+                if (s.create_in_trash) { newPart += ' (' + s.create_in_trash + ' into Trash)'; }
+                var parts = [newPart];
                 if (s.skip) { parts.push(s.skip + ' already in your library (skipped)'); }
                 if (s.update) { parts.push(s.update + ' to update'); }
+                if (s.restore) { parts.push(s.restore + ' to restore from Trash'); }
                 return parts.join(', ');
             },
 
@@ -647,8 +859,8 @@ document.addEventListener('alpine:init', function () {
                 this.restoring = true; this.restoreResult = false;
                 fetch('/api/settings/restore', { method: 'POST', headers: { 'X-CSRF-Token': window.csrfToken() }, body: new FormData(e.target) })
                     .then(r => r.json())
-                    .then(d => { this.restoreResult = d; this.restoring = false; })
-                    .catch(() => { this.restoreResult = { error: 'Restore failed' }; this.restoring = false; });
+                    .then(d => { this.restoreResult = d; this.restoring = false; notifySettingsResult(d, 'Backup restored'); })
+                    .catch(() => { this.restoreResult = { error: 'Restore failed' }; this.restoring = false; notifySettingsResult(this.restoreResult, ''); });
             }
         };
     });
@@ -726,4 +938,97 @@ document.addEventListener('submit', function (e) {
     if (!form || !form.getAttribute) return;
     const msg = form.getAttribute('data-confirm');
     if (msg && !confirm(msg)) e.preventDefault();
+
+    // Plain Settings forms intentionally keep their normal POST/redirect flow.
+    // Carry a success toast across that redirect; Alpine's fetch forms opt out.
+    if (e.defaultPrevented || !form.closest('[data-settings-page]') ||
+        form.hasAttribute('@submit.prevent') || form.action.endsWith('/api/settings/backup')) return;
+    try {
+        sessionStorage.setItem('shelf_settings_toast', JSON.stringify({
+            message: 'Changes saved', type: 'success'
+        }));
+    } catch (_) { /* private browsing may disable session storage */ }
+});
+
+// Keep the native colour pickers in Settings → Users and their editable hex
+// fields in sync. The picker always has a valid fallback colour, while an
+// empty text field remains meaningful: it restores Shelf's standard colour.
+document.addEventListener('input', function (e) {
+    const picker = e.target.closest('[data-color-picker-for]');
+    if (picker) {
+        const textField = document.getElementById(picker.dataset.colorPickerFor);
+        if (textField) textField.value = picker.value;
+        return;
+    }
+    const textField = e.target.closest('[data-color-text]');
+    if (!textField || !/^#[0-9a-fA-F]{6}$/.test(textField.value)) return;
+    const pickerForField = document.querySelector('[data-color-picker-for="' + textField.id + '"]');
+    if (pickerForField) pickerForField.value = textField.value;
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    if (!document.querySelector('[data-settings-page]')) return;
+    try {
+        var stored = sessionStorage.getItem('shelf_settings_toast');
+        if (!stored) return;
+        sessionStorage.removeItem('shelf_settings_toast');
+        var toast = JSON.parse(stored);
+        showToast(toast.message, toast.type);
+    } catch (_) { /* a malformed or unavailable entry should never break Settings */ }
+});
+
+// Feature changes keep the user on the current page. Let the server handle
+// the same form POST and redirect, then refresh only the Features panel from
+// the redirected Settings response so its status and profile controls reflect
+// the saved state without a document navigation.
+document.addEventListener('submit', async function (e) {
+    if (e.defaultPrevented) return;
+    const form = e.target;
+    if (!form || !form.matches) return;
+    if (!form.matches('form[action^="/api/settings/features/"]:not([action$="/enable"]), form[action="/api/settings/profile"]')) return;
+
+    e.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    const originalLabel = button ? button.textContent : '';
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Saving…';
+    }
+
+    try {
+        const body = new URLSearchParams();
+        new FormData(form).forEach((value, name) => {
+            if (typeof value === 'string') body.append(name, value);
+        });
+        const response = await fetch(form.action, {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': window.csrfToken() },
+            body
+        });
+        if (!response.ok || !new URL(response.url).pathname.endsWith('/settings')) {
+            throw new Error(`Request failed (${response.status})`);
+        }
+
+        const html = await response.text();
+        const refreshed = new DOMParser().parseFromString(html, 'text/html');
+        const currentPanel = document.querySelector('[data-testid="settings-section-content"] [x-show="tab === \'features\'"]');
+        const updatedPanel = refreshed.querySelector('[data-testid="settings-section-content"] [x-show="tab === \'features\'"]');
+        if (!currentPanel || !updatedPanel) throw new Error('Could not refresh feature settings');
+
+        // Feature flags also decide which tabs the server renders in the
+        // desktop and mobile navigation. Keep those in sync with the saved
+        // state while preserving the existing Alpine menu component.
+        for (const selector of ['nav .hidden.lg\\:flex', 'nav [data-testid="nav-menu-panel"]']) {
+            const currentNav = document.querySelector(selector);
+            const updatedNav = refreshed.querySelector(selector);
+            if (currentNav && updatedNav) currentNav.innerHTML = updatedNav.innerHTML;
+        }
+        currentPanel.innerHTML = updatedPanel.innerHTML;
+    } catch (error) {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalLabel;
+        }
+        alert(error.message || 'Could not save feature settings');
+    }
 });

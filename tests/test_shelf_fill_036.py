@@ -8,6 +8,7 @@ from app.services import provider_result
 from app.services import upcitemdb
 from app.services import lists
 from app.services import locations as location_svc
+from app.services import tags as tags_svc
 from tests.conftest import _assert_ownership_partition
 from tests.test_legacy_book import KRISTY_SUPPLEMENT, KRISTY_UPC
 from tests.test_legacy_book_scan import KRISTY_ISBN13, KRISTY_UPC5
@@ -208,6 +209,20 @@ def test_viewer_cannot_open_shelf_fill(viewer_client):
     response = viewer_client.get("/shelf-fill", follow_redirects=False)
     assert response.status_code in (302, 303, 403)
 
+
+def test_shelf_fill_page_renders_default_tags_control(admin_client):
+    page = admin_client.get("/shelf-fill").text
+    tag = re.search(r'<input[^>]*id="default-tags"[^>]*>', page, re.S).group(0)
+    assert 'name="tags"' in tag
+    assert 'list="tag-suggestions"' in tag
+    assert 'form="shelf-fill-form"' in tag
+    assert 'data-storage-key="shelf_fill_tags"' in tag
+    assert 'data-type-source="#shelf-fill-media-type"' in tag
+    # Shelf Fill only adds — no :disabled binding, unlike Scan's.
+    assert ":disabled=" not in tag
+    assert '<datalist id="tag-suggestions">' in page
+    assert '/static/js/tag-suggest.js' in page
+
 # --- The shelf position, made visible (0.37.2) -------------------------------
 
 def test_two_bookcases_number_their_shelves_independently(db):
@@ -389,6 +404,55 @@ class TestBareLegacyUpcInsideShelfFill:
         ).fetchone()
         assert copy["position_order"] == 2
 
+    def test_the_continuation_carries_tags_through_to_a_tagged_placed_item(
+        self, editor_client, db, shelf_with_a_copy
+    ):
+        """G103 pin, tags flavor: the bare-UPC continuation's hidden `tags`
+        input (T2) must survive to the item this route finally places — not
+        only the position, which the sibling test above already covers."""
+        async def lookup(isbn, hc_token, client, *, google_api_key=None):
+            if isbn == KRISTY_ISBN13:
+                metadata = {"title": "Kristy", "authors": "Ann M. Martin"}
+                return metadata, "openlibrary", {}, provider_result.found(
+                    "openlibrary", metadata
+                )
+            return None, "manual", {}, provider_result.no_match("openlibrary")
+
+        card = editor_client.post(
+            "/api/shelf-fill/scan",
+            data={
+                "isbn": KRISTY_UPC, "location_id": shelf_with_a_copy,
+                "media_type": "book", "tags": "Cookbook",
+            },
+        )
+
+        assert card.status_code == 200
+        assert 'data-scan-status="legacy_incomplete"' in card.text
+        assert self._action(card.text) == "/api/shelf-fill/scan"
+
+        payload = self._hidden(card.text)
+        assert payload.get("tags") == "Cookbook"
+        payload["legacy_supplement"] = KRISTY_SUPPLEMENT
+        with patch(
+            "app.routers.items_common._lookup_metadata",
+            new=AsyncMock(side_effect=lookup),
+        ), patch("app.routers.items.cover_queue.enqueue"):
+            filed = editor_client.post(self._action(card.text), data=payload)
+
+        assert filed.status_code == 200
+        assert 'data-testid="shelf-fill-position"' in filed.text
+        item = db.execute(
+            "SELECT id FROM items WHERE isbn = ?", (KRISTY_ISBN13,)
+        ).fetchone()
+        assert item is not None
+        copy = db.execute(
+            "SELECT position_order FROM item_copies "
+            "WHERE item_id = ? AND is_primary = 1",
+            (item["id"],),
+        ).fetchone()
+        assert copy["position_order"] == 2
+        assert [t["name"] for t in tags_svc.get_item_tags(db, item["id"])] == ["Cookbook"]
+
     def test_the_ambiguous_hop_also_stays_on_shelf_fill_and_places(
         self, editor_client, db, shelf_with_a_copy
     ):
@@ -485,3 +549,66 @@ class TestBareLegacyUpcInsideShelfFill:
             (item["id"],),
         ).fetchone()
         assert copy["position_order"] == 2
+
+
+class TestShelfFillScanPassesDefaultTags:
+    """T2 — `shelf_fill_scan`'s direct call to `items.scan_isbn` must pass
+    `tags=tags` by keyword (drift 2/G77): unforwarded, a direct call hands a
+    `Form` object to `parse_tag_list` instead of a string."""
+
+    def test_a_tagged_scan_lands_tagged_and_placed(self, editor_client, db):
+        shelf = location_svc.create_location(db, "Shelf")
+        db.commit()
+
+        async def lookup(isbn, hc_token, client, *, google_api_key=None):
+            metadata = {"title": "Tagged Book", "authors": "Someone"}
+            return metadata, "openlibrary", {}, provider_result.found(
+                "openlibrary", metadata
+            )
+
+        with patch(
+            "app.routers.items_common._lookup_metadata",
+            new=AsyncMock(side_effect=lookup),
+        ), patch("app.routers.items.cover_queue.enqueue"):
+            filed = editor_client.post(
+                "/api/shelf-fill/scan",
+                data={
+                    "isbn": "9780439136365",
+                    "location_id": shelf,
+                    "media_type": "book",
+                    "tags": "Cookbook",
+                },
+            )
+
+        assert filed.status_code == 200
+        assert 'data-testid="shelf-fill-position"' in filed.text
+        item = db.execute(
+            "SELECT id FROM items WHERE title = 'Tagged Book'"
+        ).fetchone()
+        assert [t["name"] for t in tags_svc.get_item_tags(db, item["id"])] == ["Cookbook"]
+
+    def test_no_tags_field_creates_no_tag_rows(self, editor_client, db):
+        shelf = location_svc.create_location(db, "Shelf")
+        db.commit()
+
+        async def lookup(isbn, hc_token, client, *, google_api_key=None):
+            metadata = {"title": "Untagged Book", "authors": "Someone"}
+            return metadata, "openlibrary", {}, provider_result.found(
+                "openlibrary", metadata
+            )
+
+        with patch(
+            "app.routers.items_common._lookup_metadata",
+            new=AsyncMock(side_effect=lookup),
+        ), patch("app.routers.items.cover_queue.enqueue"):
+            filed = editor_client.post(
+                "/api/shelf-fill/scan",
+                data={
+                    "isbn": "9780439136365",
+                    "location_id": shelf,
+                    "media_type": "book",
+                },
+            )
+
+        assert filed.status_code == 200
+        assert db.execute("SELECT COUNT(*) FROM tags").fetchone()[0] == 0

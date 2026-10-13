@@ -433,12 +433,50 @@ def check_magics_after_await(js_dir: Path = None) -> list:
     return violations
 
 
+
+# ---------------------------------------------------------------------------
+# The component-load guard's SCRIPTS map must name every registration, under
+# the file that makes it. The guard's reconciler skips a name it does not
+# know, so an unmapped component fails silently when its script is lost —
+# five had drifted out of the map before this check existed (review
+# 2026-09-23, H-4).
+# ---------------------------------------------------------------------------
+
+_GUARD_MAP = re.compile(r"var SCRIPTS = \{(.*?)\};", re.S)
+_GUARD_ENTRY = re.compile(r"^\s*([A-Za-z_$][\w$]*)\s*:\s*'([\w.-]+\.js)'", re.M)
+
+
+def check_guard_map(js_dir: Path = None) -> list:
+    js_dir = js_dir or JS_DIR
+    block = _GUARD_MAP.search((js_dir / GUARD_SCRIPT).read_text())
+    declared = dict(_GUARD_ENTRY.findall(block.group(1))) if block else {}
+    registered = {}
+    for path in sorted(js_dir.glob("**/*.js")):
+        for name in _ALPINE_DATA_REG.findall(path.read_text()):
+            registered[name] = path.name
+    violations = []
+    for name, script in sorted(registered.items()):
+        if declared.get(name) != script:
+            violations.append(
+                f"static/js/{script}: Alpine.data('{name}') is "
+                + (f"mapped to {declared[name]}" if name in declared else "missing")
+                + f" in {GUARD_SCRIPT}'s SCRIPTS — add `{name}: '{script}'` so a "
+                "lost script is reported instead of failing silently. (GOTCHAS G4)"
+            )
+    for name in sorted(set(declared) - set(registered)):
+        violations.append(
+            f"static/js/{GUARD_SCRIPT}: SCRIPTS names '{name}', which no script "
+            "registers — remove the stale entry. (GOTCHAS G4)"
+        )
+    return violations
+
 def main() -> int:
     violations = (
         find_violations()
         + check_xdata_registrations()
         + check_script_load_order()
         + check_magics_after_await()
+        + check_guard_map()
     )
     if violations:
         print(f"Alpine CSP lint: {len(violations)} problem(s)\n")
@@ -446,7 +484,8 @@ def main() -> int:
             print(f"  {v}")
         return 1
     print("Alpine CSP lint: expressions CSP-safe, every x-data registered "
-          "(G4), script load order intact, no $el/$root after an await (G2).")
+          "and in the load guard's map (G4), script load order intact, "
+          "no $el/$root after an await (G2).")
     return 0
 
 

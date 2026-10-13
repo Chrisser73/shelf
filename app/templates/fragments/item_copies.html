@@ -56,25 +56,33 @@
   which is a regression rather than a missing feature. Falling back to the
   seam keeps every reader of "where is this item?" answering alike.
 #}
-{% set placed = copies|length == 1 and copies[0].location_id %}
+{#- One copy's condition, acquisition and notes as " · a · b" — the same
+    string for a lone copy and for each row of the list. A lone copy's details
+    are shown too: an import can create one with a condition and a price but
+    no location (LibraryThing), and without this line nothing on the page
+    showed them or offered its Edit (test-drive imports-lt-libib, Obs 2). #}
+{%- macro detail_suffix(copy) -%}
+{%- set details = [] %}
+{%- for value in [copy.condition, copy.acquired_date, copy.acquisition_source] %}{% if value %}{{ details.append(value) or '' }}{% endif %}{% endfor %}
+{%- if copy.acquisition_price is not none %}{{ details.append(copy.acquisition_price|money) or '' }}{% endif %}
+{%- for value in [copy.provenance, copy.notes] %}{% if value %}{{ details.append(value) or '' }}{% endif %}{% endfor %}
+{%- for detail in details %} · {{ detail }}{% endfor %}
+{%- endmacro %}
+{% set single_copy = copies[0] if copies|length == 1 else none %}
+{% set single_details = detail_suffix(single_copy) if single_copy else '' %}
 {% set listed = copies|length > 1 %}
-{% set legacy = not copies and item.location_name %}
 {% set may_edit = user and user.role in ('admin', 'editor') %}
-<div id="item-copies"{% if listed %} class="col-span-2"{% elif not placed and not legacy and not may_edit %} class="hidden"{% endif %}>
-    {%- if legacy %}
-    <span class="text-shelf-muted">Location:</span> <a href="/browse?location_filter={{ item.location_id }}" class="hover:text-shelf-accent transition-colors">{{ item.location_name }}</a>
-    {%- elif placed %}
-    {%- set copy = copies[0] %}
-    <span class="text-shelf-muted">Location:</span> <a href="/browse?location_filter={{ copy.location_id }}" class="hover:text-shelf-accent transition-colors">{{ copy.location_name }}</a>{% if copy.position_order is not none %} · position {{ copy.position_order }}{% endif %}{% if may_edit %} <button type="button" data-testid="edit-copy-{{ copy.id }}" hx-get="/api/items/{{ item_id }}/copies/{{ copy.id }}/edit" hx-target="#item-copies" hx-swap="outerHTML" class="text-xs text-shelf-accent hover:text-shelf-accent2 transition-colors">Edit</button>{% endif %}
+<div id="item-copies"{% if listed %} class="col-span-2"{% endif %}>
+    {%- if not listed %}
+    <div x-data='{ "editing": false }'>
+        <span x-show="!editing"><span class="text-shelf-muted">Location:</span> <span data-inline-display="{{ item_id }}-location_id">{% if item.location_id %}{{ item.location_name }}{% if default_location_id == item.location_id|string %} (default){% endif %}{% else %}No location{% endif %}</span>{% if single_copy and single_copy.position_order is not none %} · position {{ single_copy.position_order }}{% endif %}{{ single_details }}{% if may_edit %} <button type="button" @click="editing = true" class="ml-1 text-xs text-shelf-accent2 hover:text-shelf-accent">Edit</button>{% endif %}</span>
+        {% if may_edit %}<form x-show="editing" x-cloak hx-post="/api/items/{{ item_id }}/quick-metadata" hx-swap="none" data-inline-field-form="{{ item_id }}-location_id" class="flex items-center gap-2"><input type="hidden" name="field" value="location_id"><span class="text-shelf-muted">Location:</span><select name="value" class="min-w-0 flex-1 bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-sm text-shelf-text"><option value="">No location</option>{% for loc in locations %}<option value="{{ loc.id }}" {% if item.location_id == loc.id %}selected{% endif %}>{{ loc.name }}{% if default_location_id == loc.id|string %} (default){% endif %}</option>{% endfor %}</select><button type="submit" class="inline-flex items-center justify-center w-8 h-8 rounded bg-shelf-accent text-white hover:bg-shelf-accent2 transition-colors" title="Save location" aria-label="Save location"><i data-lucide="save" class="w-4 h-4"></i></button><button type="button" @click="editing = false" data-inline-field-cancel="{{ item_id }}-location_id" class="text-xs text-shelf-muted">Cancel</button></form>{% endif %}
+    </div>
     {%- elif listed %}
     <p class="text-xs font-semibold uppercase tracking-wider text-shelf-muted mb-2">Copies</p>
     <div class="space-y-1">
         {%- for copy in copies %}
-        {%- set details = [] %}
-        {%- for value in [copy.condition, copy.acquired_date, copy.acquisition_source] %}{% if value %}{{ details.append(value) or '' }}{% endif %}{% endfor %}
-        {%- if copy.acquisition_price is not none %}{{ details.append(copy.acquisition_price|money) or '' }}{% endif %}
-        {%- for value in [copy.provenance, copy.notes] %}{% if value %}{{ details.append(value) or '' }}{% endif %}{% endfor %}
-        <div><span class="text-shelf-muted">#{{ copy.copy_number }}</span> {% if copy.location_id %}<a href="/browse?location_filter={{ copy.location_id }}" class="hover:text-shelf-accent transition-colors">{{ copy.location_name }}</a>{% else %}<span class="text-shelf-muted">No location</span>{% endif %}{% if copy.position_order is not none %} · position {{ copy.position_order }}{% endif %}{% for detail in details %} · {{ detail }}{% endfor %}{% if may_edit %} <button type="button" data-testid="edit-copy-{{ copy.id }}" hx-get="/api/items/{{ item_id }}/copies/{{ copy.id }}/edit" hx-target="#item-copies" hx-swap="outerHTML" class="text-xs text-shelf-accent hover:text-shelf-accent2 transition-colors">Edit</button>{% endif %}</div>
+        <div><span class="text-shelf-muted">#{{ copy.copy_number }}</span> {% if copy.location_id %}<a href="/browse?location_filter={{ copy.location_id }}" class="hover:text-shelf-accent transition-colors">{{ copy.location_name }}</a>{% else %}<span class="text-shelf-muted">No location</span>{% endif %}{% if copy.position_order is not none %} · position {{ copy.position_order }}{% endif %}{{ detail_suffix(copy) }}{% if may_edit %} <button type="button" data-testid="edit-copy-{{ copy.id }}" hx-get="/api/items/{{ item_id }}/copies/{{ copy.id }}/edit" hx-target="#item-copies" hx-swap="outerHTML" class="text-xs text-shelf-accent hover:text-shelf-accent2 transition-colors">Edit</button>{% endif %}</div>
         {%- endfor %}
     </div>
     {%- endif %}
@@ -86,11 +94,11 @@
                 class="bg-shelf-bg border border-shelf-border rounded-lg px-2 py-1 text-xs text-shelf-text focus:ring-1 focus:ring-shelf-accent outline-none">
             <option value="">No location</option>
             {% for loc in locations %}
-            <option value="{{ loc.id }}">{{ loc.name }}</option>
+            <option value="{{ loc.id }}">{{ loc.name }}{% if default_location_id == loc.id|string %} (default){% endif %}</option>
             {% endfor %}
         </select>
         <button type="submit" data-testid="add-copy"
-                class="text-xs text-shelf-accent hover:text-shelf-accent2 transition-colors">+ Add copy</button>
+                class="text-xs text-shelf-accent hover:text-shelf-accent2 transition-colors">+ Add another copy</button>
     </form>
     {%- endif %}
 </div>
