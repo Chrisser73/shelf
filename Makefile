@@ -69,7 +69,7 @@ lucide:
 # precache digest here is what makes that automatic (scripts/stamp_sw_version.py).
 css:
 	npx @tailwindcss/cli -i static/css/input.css -o static/css/app.css --minify
-	.venv/bin/python scripts/stamp_sw_version.py
+	python scripts/stamp_sw_version.py
 
 # ---------------------------------------------------------------------------
 # Tests
