@@ -6,6 +6,7 @@
         <span class="block text-sm font-semibold">Library</span>
         <span class="hidden lg:flex text-xs mt-1">Display, navigation, locations and lending.</span>
     </button>
+    {% if is_admin %}
     <button type="button" @click="setTab('integrations')" data-testid="tab-integrations"
             :class="tab === 'integrations' ? 'bg-shelf-hover text-white border-shelf-accent/40' : 'bg-shelf-card text-shelf-muted border-shelf-border hover:text-white hover:bg-shelf-hover'"
             class="w-32 lg:w-64 min-h-24 shrink-0 text-left border rounded-xl p-4 transition-colors">
@@ -30,4 +31,5 @@
         <span class="block text-sm font-semibold">Features</span>
         <span class="hidden lg:flex text-xs mt-1">Turn optional parts of Shelf on or off.</span>
     </button>
+    {% endif %}
 </aside>

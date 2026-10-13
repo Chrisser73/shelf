@@ -34,8 +34,10 @@ def _overlaps(tiles):
 
 
 class TestIngestCap:
-    def test_anthropic_default_model_is_highres(self):
-        assert tiling.ingest_cap(ANTHROPIC) == ANTHROPIC_HIGHRES_CAP
+    def test_anthropic_default_model_uses_the_standard_cap(self):
+        # The fork's default is Haiku; high-resolution caps are opt-in for
+        # the explicitly supported large models.
+        assert tiling.ingest_cap(ANTHROPIC) == ANTHROPIC_STANDARD_CAP
 
     def test_anthropic_older_model_is_standard(self):
         cap = tiling.ingest_cap({**ANTHROPIC, "anthropic_vision_model": "claude-sonnet-4-6"})

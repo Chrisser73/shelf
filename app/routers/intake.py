@@ -27,7 +27,7 @@ from app.services import national
 from app.services import item_write
 from app.services import tags as tags_svc
 from app.services.title_match import titles_agree, titles_match_exactly
-from app.services.item_write import ItemValueError, insert_item
+from app.services.item_write import ItemValueError, insert_item, update_item_fields
 from app.services.write_targets import UnknownLocationError, validated_location_id
 
 logger = logging.getLogger(__name__)

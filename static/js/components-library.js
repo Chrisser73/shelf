@@ -6,6 +6,18 @@
 
 document.addEventListener('alpine:init', function () {
 
+    // home.html — mirror Browse's saved cover-grid density for Recently added.
+    // localStorage must be read here rather than in the template: Alpine's CSP
+    // build only permits simple component names and property expressions there.
+    Alpine.data('homeRecentGrid', function () {
+        return {
+            gridSize: 'default',
+            init() {
+                this.gridSize = localStorage.getItem('shelf-grid-size') || 'default';
+            },
+        };
+    });
+
     // logs.html — auto-refresh toggle (resubmits the filter form every 10s)
     Alpine.data('logsPage', function () {
         return {

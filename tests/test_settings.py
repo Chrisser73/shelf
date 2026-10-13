@@ -95,11 +95,13 @@ class TestMetadataSearchLangSetting:
         html = admin_client.get("/settings").text
         assert '<option value="de" selected>German</option>' in html
 
-    def test_editor_cannot_post_display_settings(self, editor_client):
+    def test_editor_can_post_display_settings(self, editor_client, db):
         r = editor_client.post(
             "/api/settings/display", data={"metadata_search_lang": "de"}, follow_redirects=False
         )
-        assert r.status_code == 403
+        assert r.status_code == 303
+        row = db.execute("SELECT value FROM settings WHERE key = 'metadata_search_lang'").fetchone()
+        assert row["value"] == "de"
 
     def test_viewer_cannot_post_display_settings(self, viewer_client):
         r = viewer_client.post(

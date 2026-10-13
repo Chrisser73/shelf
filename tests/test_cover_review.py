@@ -695,27 +695,12 @@ class TestRemoveCoverIsTheEscapeHatch:
         assert "Second Chance" in page.text
 
 
-class TestRetryMissingCoversStaysDismissalBlind:
-    def test_the_bulk_sweep_still_picks_up_a_dismissed_item(
+class TestRetryMissingCoversRespectsDismissal:
+    def test_the_bulk_sweep_skips_a_dismissed_item(
         self, admin_client, db, monkeypatch
     ):
-        """A DECISION, pinned so a later "fix" has to argue with an assertion.
-
-        Retry Missing Covers deliberately does NOT filter on
-        `cover_review_dismissed`. Both sweep routes are admin-only and
-        media-type-gated, so G29's Dune defect cannot fire and no wrong data is
-        written — the worst case is that an admin who explicitly asked for a
-        sweep gets one on a row they earlier dismissed.
-
-        The deciding factor is the other direction: there is **no un-dismiss
-        path in the UI**. The Remove cover control renders only inside
-        `{% if cover_path %}`, and a dismissed item is by definition
-        cover-less, so this sweep is currently the only way an accidentally
-        dismissed item can come back on its own. Making it dismissal-aware
-        would make "Not available" permanent short of a database edit.
-
-        Revisit if and when un-dismissing from the UI ships.
-        """
+        """A reviewed ``Not available`` verdict is durable: an automatic
+        retry must not silently revive a row the curator dismissed."""
         from unittest.mock import AsyncMock
         from app.routers import items_common
 
@@ -734,9 +719,7 @@ class TestRetryMissingCoversStaysDismissalBlind:
         monkeypatch.setattr(items_common, "resolve_missing_cover", fake_resolve)
         r = admin_client.post("/api/covers/bulk-retry")
         assert r.status_code == 200
-        assert dismissed in seen, (
-            "the bulk sweep is deliberately dismissal-blind — see the docstring"
-        )
+        assert dismissed not in seen
 
 
 class TestTheCounterSurvivesAPick:

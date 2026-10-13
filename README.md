@@ -3,7 +3,7 @@
 [![CI](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml/badge.svg)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
 [![GHCR container image](https://img.shields.io/badge/GHCR-container%20image-2496ED?logo=docker&logoColor=white)](https://github.com/Chrisser73/shelf-modification/pkgs/container/shelf)
 [![Release](https://img.shields.io/github/v/release/Chrisser73/shelf-modification)](https://github.com/Chrisser73/shelf-modification/releases)
-[![Unit tests](https://img.shields.io/badge/unit%20tests-5177%20passing-brightgreen)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-5180%20passing-brightgreen)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
 [![E2E tests](https://img.shields.io/badge/e2e%20tests-331%20passing-brightgreen)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/Chrisser73/shelf-modification)](https://github.com/Chrisser73/shelf-modification/blob/main/LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/Chrisser73/shelf-modification)](https://github.com/Chrisser73/shelf-modification/commits/main)
@@ -30,6 +30,24 @@
   automatically serves the right image to PCs, servers and Raspberry Pis.
 - **Self-hosting ready:** Windows/WSL developer tooling, Docker local development and multi-architecture GitHub
   Container Registry images.
+
+## Roles and Settings access
+
+This fork keeps role boundaries deliberately narrow. Visibility in the menu is
+only a convenience; every write route enforces the same minimum role.
+
+| Role | Access |
+| --- | --- |
+| **Viewer** | Read the catalogue. No Settings entry or Settings page access. |
+| **Editor** | Collection work plus **Settings → Library**: Collection display, personal Appearance, Missing game data, Navigation and Locations. |
+| **Admin** | Everything an Editor can use, plus integrations, data tools, user management, feature switches and the administration-only Library controls. |
+
+When changing roles or Settings in future, keep these rules intact:
+
+- Add or change the menu entry in `app/nav.py`, but treat it as presentation only.
+- Protect the page and every related API endpoint with `require_role`; hiding a control never grants or removes an API permission.
+- Keep editor-only Library controls separate from admin-only configuration in the Settings templates.
+- Update the role, menu and Settings-layout tests with every permission change.
 
 This file is the central record of customizations in this fork. The upstream
 [`README.md`](README.md) continues to document Shelf itself; this file covers

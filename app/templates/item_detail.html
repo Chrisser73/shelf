@@ -72,6 +72,9 @@
                         </form>
                         {% endif %}
                     </div>
+                    {% if item.wishlisted %}
+                    <span data-testid="wishlist-badge" class="inline-flex items-center rounded-full border border-shelf-accent/40 bg-shelf-accent/10 px-2 py-1 text-xs font-medium text-shelf-accent2">Wishlist</span>
+                    {% endif %}
                     {% if user and user.role in ('admin', 'editor') %}
                     <button type="button"{% if item.wishlisted %} data-wishlist-remove="{{ item.id }}"{% else %} hx-post="/api/items/{{ item.id }}/wishlist" hx-swap="none" data-after-request="reload"{% endif %}
                             data-wishlist-toggle="{{ item.id }}" data-wishlisted="{{ '1' if item.wishlisted else '0' }}"

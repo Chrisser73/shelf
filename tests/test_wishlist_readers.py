@@ -187,7 +187,7 @@ class TestItemPage:
 class TestSearchCard:
     """T9: `/api/search`'s card ribbon (item_card.html:4)."""
 
-    _CARD_RIBBON = 'text-black shadow">Wishlist</div>'
+    _CARD_RIBBON = 'aria-label="Wishlisted"'
 
     def test_card_badge_present_for_member(self, admin_client, rows):
         html = admin_client.get("/api/search?q=Member+Wishlist+Book").text
@@ -203,7 +203,7 @@ class TestSearchCard:
 class TestListViewRows:
     """T9: `?view=list` rows (item_row.html:49)."""
 
-    _ROW_RIBBON = 'text-black shrink-0">Wishlist</span>'
+    _ROW_RIBBON = 'aria-label="Wishlisted"'
 
     def test_row_badge_present_for_member(self, admin_client, rows):
         html = admin_client.get("/api/search?q=Member+Wishlist+Book&view=list").text

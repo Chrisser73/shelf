@@ -183,12 +183,12 @@ class TestIsoToMarc:
     def test_none_returns_none(self):
         assert iso_to_marc(None) is None
 
-    def test_all_16_search_langs_have_marc_forms(self):
-        # Every SEARCH_LANGS code corresponds to a MARC code used in the
-        # forward mapping table, so the reverse lookup should resolve for
-        # all 16 (no dead entries in the dropdown).
+    def test_all_iso_search_langs_have_marc_forms(self):
+        # ``unknown`` and ``multi`` are intentional UI choices rather than
+        # ISO-639 languages. Every real ISO entry still maps to MARC.
         for code in SEARCH_LANGS:
-            assert iso_to_marc(code) is not None, f"{code} has no MARC form"
+            if code not in {"unknown", "multi"}:
+                assert iso_to_marc(code) is not None, f"{code} has no MARC form"
 
 
 # --- SEARCH_LANGS ---
@@ -197,7 +197,7 @@ class TestIsoToMarc:
 class TestSearchLangs:
     def test_expected_codes_and_count(self):
         expected = [
-            "en", "de", "fr", "es", "it", "nl", "pt", "sv",
+            "unknown", "multi", "en", "de", "fr", "es", "it", "nl", "pt", "sv",
             "da", "no", "pl", "cs", "ja", "ru", "zh", "ko",
         ]
         assert list(SEARCH_LANGS.keys()) == expected
@@ -211,5 +211,7 @@ class TestSearchLangs:
 
     def test_every_code_is_valid_iso639_1_form(self):
         for code in SEARCH_LANGS:
+            if code in {"unknown", "multi"}:
+                continue
             assert len(code) == 2
             assert code == code.lower()

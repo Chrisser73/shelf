@@ -131,7 +131,7 @@ class TestBrowseLentOutBadge:
     def _badge_count(html: str) -> int:
         import re
 
-        match = re.search(r"Lent Out \((\d+)\)", html)
+        match = re.search(r"Lent out \((\d+)\)", html)
         assert match, "Lent Out badge with a count did not render"
         return int(match.group(1))
 

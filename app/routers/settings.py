@@ -18,7 +18,8 @@ from app.services import audiobookshelf
 from app.services.national import SEARCH_LANGS
 
 router = APIRouter(prefix="/api/settings", dependencies=[Depends(require_role("admin"))])
-personal_router = APIRouter(prefix="/api/settings", dependencies=[Depends(require_role("viewer"))])
+editor_router = APIRouter(prefix="/api/settings", dependencies=[Depends(require_role("editor"))])
+personal_router = APIRouter(prefix="/api/settings", dependencies=[Depends(require_role("editor"))])
 
 _INTEGRATION_KEYS = (
     "abs_url",
@@ -338,7 +339,7 @@ async def update_price_alert_settings(
     return RedirectResponse(url="/settings", status_code=303)
 
 
-@router.post("/nav")
+@editor_router.post("/nav")
 async def update_nav_settings(request: Request):
     """Save which nav tabs are visible.
 
@@ -400,7 +401,7 @@ async def enable_feature(key: str):
     return RedirectResponse(url=features.FEATURES[key].entry_path, status_code=303)
 
 
-@router.post("/display")
+@editor_router.post("/display")
 async def update_display_settings(request: Request):
     """Save the display currency and metadata search language.
 
@@ -482,9 +483,9 @@ async def update_user_symbol_settings(request: Request):
     )
 
 
-@router.post("/missing-game-metadata")
+@editor_router.post("/missing-game-metadata")
 async def update_missing_game_metadata_settings(request: Request):
-    """Save the admin-selected fields behind the maintenance tile/filter."""
+    """Save the editor-selected fields behind the maintenance tile/filter."""
     form = await request.form()
     from app.services.game_metadata import MISSING_FIELD_LABELS
     fields = [field for field in form.getlist("fields") if field in MISSING_FIELD_LABELS]

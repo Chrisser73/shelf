@@ -80,10 +80,10 @@ def test_viewer_sees_no_scan_intake_settings_or_logs(db):
         assert gated not in keys
 
 
-def test_editor_sees_scan_but_no_settings_or_logs(db):
+def test_editor_sees_scan_and_settings_but_no_logs(db):
     keys = _keys(EDITOR)
     assert "scan" in keys
-    assert "settings" not in keys and "logs" not in keys
+    assert "settings" in keys and "logs" not in keys
 
 
 def test_admin_sees_settings_and_logs(db):
@@ -396,9 +396,10 @@ def test_unknown_keys_in_the_form_are_not_stored(admin_client, db):
     assert set(stored) == HIDEABLE_KEYS
 
 
-def test_editor_cannot_post_nav_settings(editor_client, db):
+def test_editor_can_post_nav_settings(editor_client, db):
     r = _post_nav(editor_client, HIDEABLE_KEYS)
-    assert r.status_code == 403
+    assert r.status_code == 303
+    assert "stats" in _keys(EDITOR)
 
 
 def test_viewer_cannot_post_nav_settings(viewer_client, db):

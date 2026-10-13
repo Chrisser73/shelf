@@ -60,7 +60,7 @@ class TestLendingCard:
         html = admin_client.get("/settings").text
 
         assert _note("lending") in html
-        assert 'name="lending_overdue_days"' in html
+        assert 'name="lending_overdue_days"' not in html
 
     def test_lending_on_has_no_note(self, admin_client, db):
         html = admin_client.get("/settings").text

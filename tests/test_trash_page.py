@@ -284,10 +284,12 @@ def _panel(html: str) -> str:
     return html.split('data-testid="account-menu-panel"', 1)[1].split("<!-- Account Modal -->", 1)[0]
 
 
-def test_editor_account_menu_shows_library_trash_and_no_administration(editor_client):
+def test_editor_account_menu_shows_library_trash_and_settings_without_administration(editor_client):
     panel = _panel(editor_client.get("/browse").text)
     assert "Library" in panel
     assert 'data-testid="account-menu-trash"' in panel
+    assert "Settings" in panel
+    assert 'data-testid="account-menu-settings"' in panel
     assert "Administration" not in panel
 
 

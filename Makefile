@@ -5,7 +5,9 @@ DOCS  := reports
 MODEL ?= claude-sonnet-4-6
 MIN_TESTS ?= 880
 VENV ?= .venv
-PYTHON ?= $(VENV)/bin/python
+# Prefer the project's virtual environment after `make setup`; fall back to
+# python3 so a fresh WSL checkout can still create that environment.
+PYTHON ?= $(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
 PIP ?= $(VENV)/bin/pip
 # WSL commonly exposes a Windows Node installation as node.exe while native
 # Linux/macOS setups expose it as node. Resolve either form for local helpers.
@@ -26,7 +28,7 @@ PYTEST_PAR   ?= -n auto --dist loadfile
         badges check-badges check-roadmap \
         checks checks-fast \
         report-review report-security report-test reports \
-        qa fix verify release-check status \
+        qa fix verify release-check preflight status \
         install-playwright install-hooks \
         dev dev-down dev-logs seed-dev release
 
@@ -43,7 +45,11 @@ setup:
 	npm install
 	$(MAKE) lucide
 	$(MAKE) platform-logos
-	$(PYTHON) -m playwright install chromium
+	@if grep -q 'VERSION_ID="26.04"' /etc/os-release 2>/dev/null; then \
+		echo "Skipping Playwright Chromium: this Playwright release has no Ubuntu 26.04 build. Unit tests remain available via make test."; \
+	else \
+		$(PYTHON) -m playwright install chromium; \
+	fi
 	@echo "=== Setup complete ==="
 
 # The logos are a pinned, generated development dependency rather than files
@@ -69,34 +75,34 @@ lucide:
 # precache digest here is what makes that automatic (scripts/stamp_sw_version.py).
 css:
 	npx @tailwindcss/cli -i static/css/input.css -o static/css/app.css --minify
-	python scripts/stamp_sw_version.py
+	$(PYTHON) scripts/stamp_sw_version.py
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
 test:
-	python -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract -m "not live" $(PYTEST_FLAGS) $(PYTEST_PAR)
+	$(PYTHON) -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract -m "not live" $(PYTEST_FLAGS) $(PYTEST_PAR)
 
 # Per-test roll-call, for when a human is reading the output.
 test-verbose:
-	python -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract -v --tb=short
+	$(PYTHON) -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract -v --tb=short
 
 # Inner fix loop: re-run only what failed last time. Stays parallel because
 # --lf falls back to the *whole* suite when nothing failed last run, and a
 # serial fallback there costs 97s instead of 17s. (--lf is a collection-time
 # filter, so it composes fine with xdist — don't add -x, which does not.)
 test-fast:
-	python -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract $(PYTEST_FLAGS) $(PYTEST_PAR) --lf
+	$(PYTHON) -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract $(PYTEST_FLAGS) $(PYTEST_PAR) --lf
 
 test-e2e:
-	python -m pytest tests/e2e/ $(PYTEST_FLAGS) -m "e2e and not live"
+	$(PYTHON) -m pytest tests/e2e/ $(PYTEST_FLAGS) -m "e2e and not live"
 
 # The live contract check for the UPC Item DB stub's recording. Spends one
 # trial-tier lookup per run (100/day); run at release, never on a gate
 # (#123). A skip means the quota was already spent — read the reason.
 test-contract:
-	python -m pytest tests/contract/ $(PYTEST_FLAGS) -m live -rs
+	$(PYTHON) -m pytest tests/contract/ $(PYTEST_FLAGS) -m live -rs
 
 test-all: test test-e2e
 
@@ -106,11 +112,11 @@ test-all: test test-e2e
 
 check-deps:
 	@mkdir -p $(DOCS)
-	set -o pipefail && pip-audit -r requirements.txt --desc 2>&1 | tee $(DOCS)/dep-audit-$(DATE).txt
+	set -o pipefail && $(PYTHON) -m pip_audit -r requirements.txt --desc 2>&1 | tee $(DOCS)/dep-audit-$(DATE).txt
 
 check-licenses:
 	@mkdir -p $(DOCS)
-	pip-licenses --format=markdown --with-urls --order=license 2>&1 | tee $(DOCS)/licenses-$(DATE).md
+	$(PYTHON) -m piplicenses --format=markdown --with-urls --order=license 2>&1 | tee $(DOCS)/licenses-$(DATE).md
 
 # A real gate, not a print statement: `git grep` exits 0 when it *finds*
 # something, so the previous `git grep ... || echo` recipe passed whether or not
@@ -134,7 +140,7 @@ check-secrets:
 	fi
 
 check-csrf:
-	python scripts/check_csrf_fetch.py
+	$(PYTHON) scripts/check_csrf_fetch.py
 
 # Every read of items or item_copies in app/ must go through its TEMP view
 # (app/database.py::get_db() creates items_live and copies_live on every
@@ -144,30 +150,30 @@ check-csrf:
 # has no FROM items anywhere in some files (app/routers/checkouts.py), so a
 # lint that only looked for FROM would miss it silently.
 check-deleted:
-	python scripts/check_items_live.py
+	$(PYTHON) scripts/check_items_live.py
 
 check-alpine:
-	python scripts/check_alpine_csp.py
+	$(PYTHON) scripts/check_alpine_csp.py
 
 check-sw-version:
-	python scripts/stamp_sw_version.py --check
+	$(PYTHON) scripts/stamp_sw_version.py --check
 
 check-tests:
-	python scripts/check_test_conventions.py
+	$(PYTHON) scripts/check_test_conventions.py
 
 # README's two test-count badges are generated from `pytest --co`, never
 # hand-edited — the same rule as sw.js's SW_VERSION. Add a test, run this.
 badges:
-	python scripts/stamp_test_badges.py
+	$(PYTHON) scripts/stamp_test_badges.py
 
 check-badges:
-	python scripts/stamp_test_badges.py --check
+	$(PYTHON) scripts/stamp_test_badges.py --check
 
 # docs/roadmap.md is a projection of the private .devdocs/ROADMAP.md; the map in
 # .devdocs ties them together. Skips itself in a public clone, where .devdocs
 # (a symlink into the private repo) does not exist.
 check-roadmap:
-	python scripts/check_roadmap_map.py
+	$(PYTHON) scripts/check_roadmap_map.py
 
 # Instant, offline lints — the inner-loop target.
 checks-fast: check-secrets check-csrf check-deleted check-alpine check-sw-version check-tests check-badges check-roadmap
@@ -175,6 +181,15 @@ checks-fast: check-secrets check-csrf check-deleted check-alpine check-sw-versio
 # Everything, including the network-bound pip-audit and the dated report files.
 # Keep this the full set: the release procedure in ../CLAUDE.md step 1 calls it.
 checks: checks-fast check-deps check-licenses
+
+# Local release preparation. Unlike qa/release-check this deliberately skips
+# browser E2E and live-contract tests: they need a supported Playwright build
+# and external credentials. CI remains responsible for those environments.
+preflight:
+	$(MAKE) css
+	$(MAKE) badges
+	$(MAKE) test
+	$(MAKE) checks
 
 # ---------------------------------------------------------------------------
 # Claude agent reports
@@ -250,7 +265,7 @@ fix:
 # that makes the comparison die with "integer expected" — which bash treats
 # as false, silently passing the guard no matter how many tests were deleted.
 verify: test-all
-	@count=$$(python -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract --co -q 2>/dev/null \
+	@count=$$($(PYTHON) -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract --co -q 2>/dev/null \
 		| grep -oP '^\d+(?= tests? collected)' | tail -1); \
 	if [ -z "$$count" ]; then \
 		echo "ERROR: could not determine unit test count"; exit 1; \
@@ -318,7 +333,7 @@ status:
 	done
 	@echo ""
 	@echo "Last test run:"
-	@python -m pytest tests/ --ignore=tests/e2e --tb=no -q 2>/dev/null | tail -1 || echo "  (no test results)"
+	@$(PYTHON) -m pytest tests/ --ignore=tests/e2e --tb=no -q 2>/dev/null | tail -1 || echo "  (no test results)"
 
 # ---------------------------------------------------------------------------
 # Aliases

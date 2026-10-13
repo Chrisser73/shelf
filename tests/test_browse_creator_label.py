@@ -19,14 +19,14 @@ from tests.conftest import _insert_item
 def _author_th(html: str) -> str:
     m = re.search(r'<th\b[^>]*data-col="author"[^>]*>(.*?)</th>', html, re.S)
     assert m, "no author column header rendered"
-    return m.group(1).strip()
+    return re.sub(r"<[^>]+>", "", m.group(1)).strip()
 
 
 def _author_option(html: str) -> tuple[str, str]:
     """(opening tag, text) of the `sort-option-author` option."""
     m = re.search(r'(<option\b[^>]*id="sort-option-author"[^>]*>)(.*?)</option>', html, re.S)
     assert m, "no sort-option-author rendered"
-    return m.group(1), m.group(2).strip()
+    return m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
 
 
 class TestBrowseCreatorLabel:

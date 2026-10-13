@@ -111,9 +111,10 @@ class TestPromptAndSchema:
         items = vision.BOOKS_SCHEMA["properties"]["books"]["items"]
         assert items["required"] == ["title", "authors", "isbn", "media_type", "source"]
         assert items["properties"]["isbn"]["type"] == ["string", "null"]
-        assert items["properties"]["collector_condition"] == {
-            "type": "string", "enum": ["cib", "boxed", "loose"]
-        }
+        collector_condition = items["properties"]["collector_condition"]
+        assert collector_condition["type"] == "string"
+        assert collector_condition["enum"] == ["cib", "boxed", "loose"]
+        assert "Physical state" in collector_condition["description"]
         assert "collector_condition" not in items["required"]
         assert "video_game" in items["properties"]["media_type"]["enum"]
         assert items["properties"]["source"]["enum"] == ["read", "recognized"]
@@ -144,6 +145,11 @@ class TestPromptAndSchema:
         assert "media_type video_game" in vision.OLLAMA_RECOGNITION_SUFFIX
         assert "empty books array" in vision.OLLAMA_RECOGNITION_SUFFIX
 
+    def test_prompt_separates_a_game_edition_from_its_marketing_slogan(self):
+        assert "Schnapp sie dir alle" in vision.PROMPT
+        assert "Pokémon Rote Edition" in vision.PROMPT
+        assert "advertising slogan" in vision.PROMPT
+
 
 ONE_IMAGE = [(FAKE_JPEG, "image/jpeg")]
 
@@ -162,7 +168,7 @@ class TestDetectSpines:
         books = await vision.detect_spines(ONE_IMAGE, {
             "vision_provider": "anthropic", "anthropic_api_key": "sk-ant-test",
         })
-        assert books == [{"title": "Dune", "authors": "Frank Herbert", "isbn": None, "source": "read"}]
+        assert books == [{"title": "Dune", "authors": "Frank Herbert", "isbn": None, "media_type": "book", "source": "read"}]
 
     @pytest.mark.asyncio
     async def test_anthropic_without_key(self):
@@ -177,7 +183,7 @@ class TestDetectSpines:
         books = await vision.detect_spines(ONE_IMAGE, {
             "vision_provider": "openai", "openai_api_key": "sk-test",
         })
-        assert books == [{"title": "Dune", "authors": "Frank Herbert", "isbn": None, "source": "read"}]
+        assert books == [{"title": "Dune", "authors": "Frank Herbert", "isbn": None, "media_type": "book", "source": "read"}]
         # Bearer auth + data-URI image + json_object mode
         req = route.calls[0].request
         assert req.headers["authorization"] == "Bearer sk-test"
@@ -197,7 +203,7 @@ class TestDetectSpines:
             "openai_base_url": "http://localhost:1234/v1",
         })
         assert route.called
-        assert books == [{"title": "Dune", "authors": None, "isbn": None, "source": "read"}]
+        assert books == [{"title": "Dune", "authors": None, "isbn": None, "media_type": "book", "source": "read"}]
 
     @pytest.mark.asyncio
     async def test_openai_without_key(self):
@@ -221,7 +227,7 @@ class TestDetectSpines:
                         "content": '{"books": [{"title": "Dune", "authors": null}]}'},
         }))
         books = await vision.detect_spines(ONE_IMAGE, {"vision_provider": "ollama"})
-        assert books == [{"title": "Dune", "authors": None, "isbn": None, "source": "read"}]
+        assert books == [{"title": "Dune", "authors": None, "isbn": None, "media_type": "book", "source": "read"}]
 
     @respx.mock
     @pytest.mark.asyncio
@@ -356,7 +362,7 @@ class TestOutboundContract:
         body = json.loads(route.calls[0].request.content)
         schema = body["output_config"]["format"]["schema"]
         assert schema["properties"]["books"]["items"]["required"] == [
-            "title", "authors", "isbn", "source",
+            "title", "authors", "isbn", "media_type", "source",
         ]
 
     @respx.mock
@@ -430,8 +436,8 @@ class TestDetectSpinesTiled:
         assert route.call_count == 3
         # Overlap duplicate merged; the copy with authors wins
         assert books == [
-            {"title": "Dune", "authors": "Frank Herbert", "isbn": None, "source": "read"},
-            {"title": "Solaris", "authors": "Stanislaw Lem", "isbn": None, "source": "read"},
+            {"title": "Dune", "authors": "Frank Herbert", "isbn": None, "media_type": "book", "source": "read"},
+            {"title": "Solaris", "authors": "Stanislaw Lem", "isbn": None, "media_type": "book", "source": "read"},
         ]
 
     @respx.mock
@@ -462,8 +468,8 @@ class TestDetectSpinesTiled:
         })
         assert route.call_count == 3
         assert books == [
-            {"title": "Dune", "authors": "Frank Herbert", "isbn": None, "source": "read"},
-            {"title": "Solaris", "authors": "Stanislaw Lem", "isbn": None, "source": "read"},
+            {"title": "Dune", "authors": "Frank Herbert", "isbn": None, "media_type": "book", "source": "read"},
+            {"title": "Solaris", "authors": "Stanislaw Lem", "isbn": None, "media_type": "book", "source": "read"},
         ]
 
     @respx.mock
@@ -474,7 +480,7 @@ class TestDetectSpinesTiled:
         }))
         books = await vision.detect_spines(ONE_IMAGE * 2, {"vision_provider": "ollama"})
         assert route.call_count == 2
-        assert books == [{"title": "Dune", "authors": None, "isbn": None, "source": "read"}]
+        assert books == [{"title": "Dune", "authors": None, "isbn": None, "media_type": "book", "source": "read"}]
 
 
 class TestMergeTileBooks:
@@ -574,7 +580,7 @@ class TestAnalyzeEndpoint:
         assert "No vision provider" in resp.json()["message"]
 
     def test_returns_books(self, admin_client, monkeypatch):
-        async def fake_detect(images, settings):
+        async def fake_detect(images, settings, *, media_type_hint=None):
             return [{"title": "Dune", "authors": "Frank Herbert"}]
         monkeypatch.setattr(vision, "detect_spines", fake_detect)
         resp = self._upload(admin_client)
@@ -604,7 +610,7 @@ class TestAnalyzeEndpoint:
         )
         db.commit()
 
-        async def fake_detect(images, settings):
+        async def fake_detect(images, settings, *, media_type_hint=None):
             return [{
                 "title": "Metroid Prime 4: Beyond",
                 "media_type": "video_game",
@@ -617,7 +623,7 @@ class TestAnalyzeEndpoint:
         assert book["platform"] == "switch"
         assert "existing" not in book
 
-        async def fake_same_platform(images, settings):
+        async def fake_same_platform(images, settings, *, media_type_hint=None):
             return [{
                 "title": "Metroid Prime 4: Beyond",
                 "media_type": "video_game",
@@ -631,7 +637,7 @@ class TestAnalyzeEndpoint:
     def test_multiple_tiles_reach_provider_in_order(self, admin_client, monkeypatch):
         seen = {}
 
-        async def fake_detect(images, settings):
+        async def fake_detect(images, settings, *, media_type_hint=None):
             seen["images"] = images
             return [{"title": "Dune", "authors": None}]
         monkeypatch.setattr(vision, "detect_spines", fake_detect)
@@ -656,7 +662,7 @@ class TestAnalyzeEndpoint:
         never reach vision.detect_spines."""
         monkeypatch.setattr(vision, "MAX_TOTAL_INTAKE_BYTES", 250)  # two tiles fit, a third does not
         seen = []
-        async def fake_detect(images, settings):
+        async def fake_detect(images, settings, *, media_type_hint=None):
             seen.extend(images)
             return []
         monkeypatch.setattr(vision, "detect_spines", fake_detect)
@@ -737,14 +743,14 @@ class TestAnalyzeEndpoint:
         assert resp.status_code in (401, 403)
 
     def test_analyze_empty_message_drops_spines(self, admin_client, monkeypatch):
-        async def fake_detect(images, settings):
+        async def fake_detect(images, settings, *, media_type_hint=None):
             return []
         monkeypatch.setattr(vision, "detect_spines", fake_detect)
         resp = self._upload(admin_client)
         assert resp.json() == {"ok": False, "message": "No catalog items were recognized in this photo"}
 
     def test_provider_message_reaches_the_response(self, admin_client, monkeypatch):
-        async def fake_detect(images, settings):
+        async def fake_detect(images, settings, *, media_type_hint=None):
             raise vision.VisionError(
                 "Anthropic rejected the request (HTTP 400): image exceeds 8000x8000 pixels")
         monkeypatch.setattr(vision, "detect_spines", fake_detect)
@@ -753,7 +759,7 @@ class TestAnalyzeEndpoint:
             "Anthropic rejected the request (HTTP 400): image exceeds 8000x8000 pixels")
 
     def test_analyze_logs_each_uploaded_part(self, admin_client, monkeypatch, caplog):
-        async def fake_detect(images, settings):
+        async def fake_detect(images, settings, *, media_type_hint=None):
             return []
         monkeypatch.setattr(vision, "detect_spines", fake_detect)
         png = b"\x89PNG\r\n\x1a\n" + b"1" * 20
@@ -1441,12 +1447,21 @@ class TestIntakePage:
         html = admin_client.get("/intake").text
         assert "Read Photo" in html
         assert "Ollama (local)" in html
-        assert "front cover is fine" in html
+        assert "covers are fine" in html
         # The intro no longer promises spines only. intake.html:54 keeps its
         # "read the spines" wording deliberately — the tiling card is about
         # dense shelf photos, which is the one case face-up covers never hit.
         assert "let the vision model read the spines" not in html
         assert "Reading spines" not in html
+
+    def test_correcting_an_existing_title_turns_it_back_into_a_new_row(self):
+        from pathlib import Path
+        js = Path(__file__).resolve().parent.parent.joinpath("static/js/intake.js").read_text()
+        start = js.index("setBookTitle(i, value)")
+        end = js.index("setBookAuthors(i, value)", start)
+        body = js[start:end]
+        assert "book.existing = null" in body
+        assert "book.include = true" in body
 
     def test_review_row_renders_new_controls(self, admin_client, db):
         from app.config import MEDIA_TYPES
@@ -2094,9 +2109,11 @@ class TestConfirmGuardsReadUnderTheWriteLock:
                 return_value=httpx.Response(200, json={"docs": []}))
             payload = {"title": "Lockable Zine", "authors": "A Person"}
         elif case == "resolved_title":
-            # The 4a query: title + media_type, no authors scope.
+            # The resolved-title guard uses the shared title tuple helper,
+            # which also scopes authors.  The final probe is still the
+            # deciding query under the write lock.
             def predicate(sql):
-                return "title = ?" in sql and "IFNULL" not in sql
+                return "title = ?" in sql
 
             from app.services import provider_result
 

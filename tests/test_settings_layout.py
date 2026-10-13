@@ -96,20 +96,33 @@ def test_admin_settings_entry_lives_in_account_menu(admin_client):
     assert 'data-nav-tab="settings"' in html
 
 
-def test_non_admin_users_can_open_personal_settings(editor_client, viewer_client):
-    for client in (editor_client, viewer_client):
-        html = client.get("/browse").text
-        assert 'data-testid="account-menu-button"' in html
-        assert 'data-testid="account-menu-settings"' in html
-        response = client.get("/settings", follow_redirects=False)
-        assert response.status_code == 200
-        assert 'data-testid="settings-appearance"' in response.text
-        assert 'action="/api/settings/platform-logo"' in response.text
+def test_editor_sees_only_the_curated_library_settings(editor_client):
+    html = editor_client.get("/browse").text
+    assert 'data-testid="account-menu-button"' in html
+    assert 'data-testid="account-menu-settings"' in html
+
+    response = editor_client.get("/settings", follow_redirects=False)
+    assert response.status_code == 200
+    assert 'data-testid="tab-library"' in response.text
+    for key in ("integrations", "data", "users", "features"):
+        assert f'data-testid="tab-{key}"' not in response.text
+    for label in ("Appearance", "Missing game data", "Navigation", "Locations"):
+        assert label in response.text
+    assert "Audiobookshelf" not in response.text
+
+
+def test_viewer_cannot_open_settings_or_see_the_menu_entry(viewer_client):
+    html = viewer_client.get("/browse").text
+    assert 'data-testid="account-menu-button"' in html
+    assert 'data-testid="account-menu-settings"' not in html
+    response = viewer_client.get("/settings", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/browse"
 
 
 def test_settings_is_not_rendered_in_primary_nav(admin_client):
     html = admin_client.get("/browse").text
-    desktop_start = html.index('<div class="hidden lg:flex items-center gap-1">')
+    desktop_start = html.index('<div class="hidden min-w-0 overflow-hidden lg:flex items-center gap-1">')
     desktop_end = html.index("</div>", desktop_start)
     desktop_nav = html[desktop_start:desktop_end]
     assert 'data-nav-tab="settings"' not in desktop_nav

@@ -165,7 +165,8 @@
         </div>
 
         {% if recent_items %}
-        <div class="cover-grid" data-testid="home-recent-items">
+        <div x-data="homeRecentGrid"
+             class="cover-grid" :data-grid-size="gridSize" data-testid="home-recent-items">
             {% for item in recent_items %}
             <a href="/item/{{ item.id }}" class="group relative block">
                 {% if collection_appearance.show_platform_logo and item.platform_logo_path %}

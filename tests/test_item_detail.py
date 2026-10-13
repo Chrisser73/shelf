@@ -718,7 +718,11 @@ class TestCopiesBlock:
 
         html = viewer_client.get(f"/item/{item_id}").text
 
-        assert "Office</a> · Very good" in html
+        # The location is a link now, wrapped by the inline-edit display span;
+        # keep the checks semantic rather than depending on that wrapper.
+        assert f'href="/browse?location_filter={office}"' in html
+        assert "Office</a>" in html
+        assert "· Very good" in html
 
     def test_a_viewer_sees_the_block_and_it_carries_no_controls(
         self, viewer_client, db

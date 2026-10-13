@@ -111,11 +111,13 @@ def test_unknown_code_writes_nothing(admin_client, db):
     assert row is None
 
 
-def test_editor_cannot_post_display_settings(editor_client):
+def test_editor_can_post_display_settings(editor_client, db):
     r = editor_client.post(
         "/api/settings/display", data={"currency": "GBP"}, follow_redirects=False
     )
-    assert r.status_code == 403
+    assert r.status_code == 303
+    row = db.execute("SELECT value FROM settings WHERE key = 'currency'").fetchone()
+    assert row["value"] == "GBP"
 
 
 def test_viewer_cannot_post_display_settings(viewer_client):

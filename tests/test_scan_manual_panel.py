@@ -128,7 +128,7 @@ class TestPanelFields:
                 data={"isbn": "9780000999931", "media_type": "book", "mode": "add"},
             )
         form = re.search(r'<form hx-post="/api/items/manual"[^>]*>', resp.text, re.S).group(0)
-        assert 'hx-include="#default-tags, #default-reading-status"' in form
+        assert 'hx-include="#scan-mode, #default-tags, #default-reading-status"' in form
         assert 'name="tags"' not in resp.text
 
     def test_panel_has_no_skip_button(self, admin_client):

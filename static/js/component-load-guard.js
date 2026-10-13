@@ -32,6 +32,7 @@
         accountModal: 'components.js',
 
         logsPage: 'components-library.js',
+        homeRecentGrid: 'components-library.js',
 
         seriesCard: 'components-item.js',
         seriesFilter: 'components-item.js',
@@ -40,7 +41,9 @@
         hcResultCard: 'components-item.js',
         manualAddForm: 'components-item.js',
 
+        visionSettings: 'components-settings.js',
         settingsTabs: 'components-settings.js',
+        logoSelect: 'components-settings.js',
         lendingPanel: 'components-settings.js',
         absSync: 'components-settings.js',
         absLibraries: 'components-settings.js',

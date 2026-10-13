@@ -791,7 +791,7 @@ BORROWER_ERROR_MESSAGES = {
 
 
 @router.get("/settings")
-async def settings(request: Request, _=Depends(require_role("viewer"))):
+async def settings(request: Request, _=Depends(require_role("editor"))):
     from app.config import SECRET_ENV_VARS, is_env_override
     from app.database import get_all_settings
     from app.nav import hideable_tab_states

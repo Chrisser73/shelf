@@ -6,7 +6,7 @@ from app.database import get_db
 from app.services import item_copies
 from app.services import locations as location_svc
 
-router = APIRouter(prefix="/api/locations", dependencies=[Depends(require_role("admin"))])
+router = APIRouter(prefix="/api/locations", dependencies=[Depends(require_role("editor"))])
 
 
 def _settings_error(code: str) -> RedirectResponse:

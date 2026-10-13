@@ -101,6 +101,9 @@ RAW_UPDATE_ALLOWLIST: dict[str, set[str]] = {
         "upc = '0' || upc",
         "upc = isbn, isbn = NULL, isbn10 = NULL",
         "language = CASE",
+        # One-time migrations repair malformed JSON escapes that older vision
+        # output persisted; no request-path user value reaches this SQL.
+        "alternate_title = REPLACE",
         # _retire_kids_book's row rewrite: a one-time vocabulary repair at
         # boot, not a request-path write of a user-supplied value. The
         # NULLIFs collapse a blank identifier so the row stops occupying

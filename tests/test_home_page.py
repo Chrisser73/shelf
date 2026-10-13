@@ -35,6 +35,8 @@ def test_home_renders_summary_and_recent_items(admin_client, db):
     assert "Newest Item" in html
     assert "Older Item" in html
     assert 'data-testid="home-recent-items"' in html
+    assert 'x-data="homeRecentGrid"' in html
+    assert ':data-grid-size="gridSize"' in html
     assert 'data-testid="home-media-types"' in html
     assert "Wishlist" in html
 

@@ -9,9 +9,10 @@ from pydantic import BaseModel
 from app.auth import require_role
 from app.database import get_all_settings, get_db, get_game_platforms
 from app.services import game_metadata
+from app.services.item_write import update_item_fields
 from app.services.national import SEARCH_LANGS
 
-router = APIRouter(prefix="/api/game-metadata", dependencies=[Depends(require_role("admin"))])
+router = APIRouter(prefix="/api/game-metadata", dependencies=[Depends(require_role("editor"))])
 
 
 class MetadataUpdate(BaseModel):
@@ -93,11 +94,6 @@ async def apply(payload: ApplyRequest):
             if not found:
                 continue
             values = {field: getattr(row, field) for field in game_metadata.EDITABLE_FIELDS}
-            db.execute(
-                "UPDATE items SET title = :title, alternate_title = :alternate_title, authors = :authors, "
-                "publisher = :publisher, platform = :platform, region = :region, language = :language, "
-                "publish_year = :publish_year, location_id = :location_id, updated_at = datetime('now') WHERE id = :id",
-                {**values, "id": row.id},
-            )
+            update_item_fields(db, row.id, values)
             updated.append({"id": row.id, "title": row.title})
     return {"ok": True, "updated": updated}

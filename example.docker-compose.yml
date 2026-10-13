@@ -1,0 +1,25 @@
+services:
+  shelf:
+    image: ghcr.io/chrisser73/shelf:latest
+    container_name: ${SHELF_CONTAINER:-shelf}
+    # Optional: automatic updates via Watchtower
+    # labels:
+    #   com.centurylinklabs.watchtower.enable: "true"
+    # modify ports in .env
+    ports:
+      - "${SHELF_PORT:-18888}:${SHELF_PORT:-18888}"
+    environment:
+      CERT_SAN: ${CERT_SAN:-DNS:shelf,DNS:localhost}
+      SHELF_PORT: ${SHELF_PORT:-18888}
+      SHELF_TLS: ${SHELF_TLS:-}
+      SHELF_TRUST_PROXY: ${SHELF_TRUST_PROXY:-}
+      SHELF_SESSION_DAYS: ${SHELF_SESSION_DAYS:-}
+      SECRET_KEY: ${SECRET_KEY:-}
+      SHELF_ENCRYPTION_KEY: ${SHELF_ENCRYPTION_KEY:-}
+      # expose ip if you want to use local AI like ollama which is running on a different machine
+      # maybe you have to route it through dns (pihole or adguard + nginx with dns challenge - and set higher timeouts for low-powered setups)
+      #extra_hosts:
+      #- "ollama.lan:<IP WHRE OLLAMA IS RUNNING>"
+    volumes:
+      - ${SHELF_DATA:-./data}:/data
+    restart: unless-stopped

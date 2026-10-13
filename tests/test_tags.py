@@ -126,10 +126,10 @@ class TestTagFiltering:
         assert "Signed Book" in html
         assert "Plain Book" not in html
 
-    def test_browse_shows_tag_dropdown_only_when_tags_exist(self, admin_client, db):
+    def test_browse_keeps_the_tag_dropdown_available_before_the_first_tag(self, admin_client, db):
         _insert_item(db, title="Untagged", isbn="9789000004638")
         db.execute("COMMIT")
-        assert 'id="tag-filter"' not in admin_client.get("/browse").text
+        assert 'id="tag-filter"' in admin_client.get("/browse").text
         item = db.execute("SELECT id FROM items").fetchone()
         _add_tag(admin_client, item["id"], "signed")
         assert 'id="tag-filter"' in admin_client.get("/browse").text

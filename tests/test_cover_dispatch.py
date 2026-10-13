@@ -377,7 +377,10 @@ class TestVideoGameReachesIgdb:
             _item(media_type="video_game", platform="snes"), "Q", object(), creds=IGDB_CREDS
         )
 
-        assert igdb.search_game_art.await_args.kwargs["platform"] == "snes"
+        # An empty platform-specific response deliberately retries without a
+        # platform. The first call is the one that proves the stored value
+        # reached IGDB.
+        assert igdb.search_game_art.await_args_list[0].kwargs["platform"] == "snes"
 
     async def test_the_igdb_gallery_caps_at_twelve_across_all_games(self, no_providers):
         _, igdb = no_providers

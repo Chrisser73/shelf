@@ -433,7 +433,16 @@ function intakePage() {
         },
 
         setBookTitle(i, value) {
-            this.books[i].title = value;
+            var book = this.books[i];
+            book.title = value;
+            // The server's existing_id means "replace this exact row". Once
+            // a reviewer corrects a false positive (e.g. Metroid -> Metroid
+            // II), that identity is no longer valid: submit it as a fresh
+            // item and let the server perform its normal duplicate check.
+            if (book.existing) {
+                book.existing = null;
+                book.include = true;
+            }
         },
 
         setBookAuthors(i, value) {

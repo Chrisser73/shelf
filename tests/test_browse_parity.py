@@ -368,14 +368,15 @@ def test_author_filter_parity(admin_client, authored):
 
 def test_browse_renders_the_author_control_with_its_name(admin_client, authored):
     html = admin_client.get(f"/browse?author_filter={authored['ann']}").text
-    tag = re.search(r'<input type="hidden" name="author_filter"[^>]*>', html, re.S).group(0)
-    assert f'value="{authored["ann"]}"' in tag
-    assert 'data-label="Ann Author"' in tag
+    tag = re.search(r'<select id="author-filter" name="author_filter"[^>]*>(.*?)</select>', html, re.S)
+    assert tag
+    assert f'<option value="{authored["ann"]}" selected>Ann Author</option>' in tag.group(1)
     # Unfiltered: an empty control, still wired to its own request (G54).
     bare = admin_client.get("/browse").text
-    tag = re.search(r'<input type="hidden" name="author_filter"[^>]*>', bare, re.S).group(0)
-    assert 'value=""' in tag and 'data-label=""' in tag
-    assert 'hx-get="/api/search"' in tag and 'hx-target="#item-grid"' in tag
+    tag = re.search(r'<select id="author-filter" name="author_filter"[^>]*>(.*?)</select>', bare, re.S)
+    assert tag
+    assert '<option value="" selected>All Authors</option>' in tag.group(1)
+    assert 'hx-get="/api/search"' in tag.group(0) and 'hx-target="#item-grid"' in tag.group(0)
 
 
 def test_author_label_is_escaped(admin_client, db, seeded_library):
