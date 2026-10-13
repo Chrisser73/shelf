@@ -1,4 +1,4 @@
-# Shelf – Changes in This Fork
+# Shelf (by [dgahagan](https://github.com/dgahagan/shelf)) AI and QoL Improvements Mod – Changes in This Fork
 
 [![CI](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml/badge.svg)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
 [![GHCR container image](https://img.shields.io/badge/GHCR-container%20image-2496ED?logo=docker&logoColor=white)](https://github.com/Chrisser73/shelf-modification/pkgs/container/shelf)
@@ -11,16 +11,25 @@
 
 ## Highlights
 
-- **Collector-ready game catalogue:** platform logos, regions, alternate names, languages, release years and CIB, Boxed or Loose condition.
-- **AI Photo Intake:** recognizes books, games and physical media; identifies platforms, editions and condition, with review, progress and cancellation.
-- **Stronger metadata and covers:** IGDB-based game data, configurable missing-data checks, provider health checks and cover recovery.
-- **Faster collection work:** inline editing, bulk updates, custom columns, sorting, filters, adjustable grids and persistent Browse views.
-- **A better wishlist:** dedicated wishlist adds, clear heart indicators and simple transitions between owned and wishlisted items.
-- **Personalised appearance:** per-user themes, account icons or initials, and selectable Home tiles, card details and filters.
-- **Smarter Home and Browse:** platform and missing-data summaries, direct filter links, optional cards and responsive layouts.
+- **Collector-ready game catalogue:** platform logos, regions, alternate names, languages, release years and CIB, Boxed
+  or Loose condition.
+- **AI Photo Intake:** recognizes books, games and physical media; identifies platforms, editions and condition, with
+  review, progress and cancellation.
+- **Stronger metadata and covers:** IGDB-based game data, configurable missing-data checks, provider health checks and
+  cover recovery.
+- **Faster collection work:** inline editing, bulk updates, custom columns, sorting, filters, adjustable grids and
+  persistent Browse views.
+- **A better wishlist:** dedicated wishlist adds, clear heart indicators and simple transitions between owned and
+  wishlisted items.
+- **Personalised appearance:** per-user themes, account icons or initials, and selectable Home tiles, card details and
+  filters.
+- **Smarter Home and Browse:** platform and missing-data summaries, direct filter links, optional cards and responsive
+  layouts.
 - **Polished daily use:** mobile/PWA improvements, remembered sign-in, feedback toasts and consistent Lucide icons.
-- **Multi-architecture releases:** every `main` build publishes `latest` for both AMD64 and ARM64, so Docker automatically serves the right image to PCs, servers and Raspberry Pis.
-- **Self-hosting ready:** Windows/WSL developer tooling, Docker local development and multi-architecture GitHub Container Registry images.
+- **Multi-architecture releases:** every `main` build publishes `latest` for both AMD64 and ARM64, so Docker
+  automatically serves the right image to PCs, servers and Raspberry Pis.
+- **Self-hosting ready:** Windows/WSL developer tooling, Docker local development and multi-architecture GitHub
+  Container Registry images.
 
 This file is the central record of customizations in this fork. The upstream
 [`README.md`](README.md) continues to document Shelf itself; this file covers
