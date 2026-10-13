@@ -10,6 +10,7 @@
 - **Personalised appearance:** per-user themes, account icons or initials, and selectable Home tiles, card details and filters.
 - **Smarter Home and Browse:** platform and missing-data summaries, direct filter links, optional cards and responsive layouts.
 - **Polished daily use:** mobile/PWA improvements, remembered sign-in, feedback toasts and consistent Lucide icons.
+- **Multi-architecture releases:** every `main` build publishes `latest` for both AMD64 and ARM64, so Docker automatically serves the right image to PCs, servers and Raspberry Pis.
 - **Self-hosting ready:** Windows/WSL developer tooling, Docker local development and multi-architecture GitHub Container Registry images.
 
 This file is the central record of customizations in this fork. The upstream
@@ -308,6 +309,8 @@ by [PapirusDevelopmentTeam](https://github.com/PapirusDevelopmentTeam).
   `linux/arm64` variants to `ghcr.io/chrisser73/shelf` only from `main`.
   The `latest` tag always points to that current `main` image, and Docker
   automatically pulls the correct variant for the host.
+- `docker-compose.release.yml` deploys that image on either architecture:
+  `docker compose -f docker-compose.release.yml up -d`.
 
 ## Small Interface Improvements
 

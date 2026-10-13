@@ -1,11 +1,10 @@
-name: Publish ARM64 Docker image
+name: Publish Docker image
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-      - feature/**
 
 permissions:
   contents: read
@@ -13,10 +12,15 @@ permissions:
 
 jobs:
   publish:
+    # Manual workflow runs only publish when run from main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -28,11 +32,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish ARM64 image
+      - name: Build and publish multi-platform image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/arm64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/chrisser73/shelf:latest

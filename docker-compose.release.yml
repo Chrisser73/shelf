@@ -1,0 +1,19 @@
+services:
+  shelf:
+    # `latest` is multi-architecture; Docker automatically selects linux/amd64
+    # or linux/arm64 to match the host, so no override is needed.
+    image: ghcr.io/chrisser73/shelf:latest
+    container_name: ${SHELF_CONTAINER:-shelf}
+    ports:
+      - "${SHELF_PORT:-18888}:${SHELF_PORT:-18888}"
+    environment:
+      CERT_SAN: ${CERT_SAN:-DNS:shelf,DNS:localhost}
+      SHELF_PORT: ${SHELF_PORT:-18888}
+      SHELF_TLS: ${SHELF_TLS:-}
+      SHELF_TRUST_PROXY: ${SHELF_TRUST_PROXY:-}
+      SHELF_SESSION_DAYS: ${SHELF_SESSION_DAYS:-}
+      SECRET_KEY: ${SECRET_KEY:-}
+      SHELF_ENCRYPTION_KEY: ${SHELF_ENCRYPTION_KEY:-}
+    volumes:
+      - ${SHELF_DATA:-./data}:/data:z
+    restart: unless-stopped

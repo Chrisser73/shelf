@@ -296,6 +296,8 @@ by [PapirusDevelopmentTeam](https://github.com/PapirusDevelopmentTeam).
   `linux/arm64` variants to `ghcr.io/chrisser73/shelf` only from `main`.
   The `latest` tag always points to that current `main` image, and Docker
   automatically pulls the correct variant for the host.
+- `docker-compose.release.yml` deploys that image on either architecture:
+  `docker compose -f docker-compose.release.yml up -d`.
 
 ## Small Interface Improvements
 
