@@ -2,8 +2,12 @@
 
 [![CI](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml/badge.svg)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
 [![GHCR container image](https://img.shields.io/badge/GHCR-container%20image-2496ED?logo=docker&logoColor=white)](https://github.com/Chrisser73/shelf-modification/pkgs/container/shelf)
+[![Release](https://img.shields.io/github/v/release/Chrisser73/shelf-modification)](https://github.com/Chrisser73/shelf-modification/releases)
 [![Unit tests](https://img.shields.io/badge/unit%20tests-0%20passing-brightgreen)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
 [![E2E tests](https://img.shields.io/badge/e2e%20tests-0%20passing-brightgreen)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
+[![License](https://img.shields.io/github/license/Chrisser73/shelf-modification)](https://github.com/Chrisser73/shelf-modification/blob/main/LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/Chrisser73/shelf-modification)](https://github.com/Chrisser73/shelf-modification/commits/main)
+[![Open issues](https://img.shields.io/github/issues/Chrisser73/shelf-modification)](https://github.com/Chrisser73/shelf-modification/issues)
 
 ## Highlights
 
