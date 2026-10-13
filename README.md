@@ -1,5 +1,9 @@
 # Shelf – Changes in This Fork
 
+[![CI](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml/badge.svg)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-0%20passing-brightgreen)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
+[![E2E tests](https://img.shields.io/badge/e2e%20tests-0%20passing-brightgreen)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
+
 ## Highlights
 
 - **Collector-ready game catalogue:** platform logos, regions, alternate names, languages, release years and CIB, Boxed or Loose condition.
