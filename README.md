@@ -1,6 +1,7 @@
 # Shelf – Changes in This Fork
 
 [![CI](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml/badge.svg)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
+[![GHCR container image](https://img.shields.io/badge/GHCR-container%20image-2496ED?logo=docker&logoColor=white)](https://github.com/Chrisser73/shelf-modification/pkgs/container/shelf)
 [![Unit tests](https://img.shields.io/badge/unit%20tests-0%20passing-brightgreen)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
 [![E2E tests](https://img.shields.io/badge/e2e%20tests-0%20passing-brightgreen)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
 
