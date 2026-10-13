@@ -1,4 +1,4 @@
-# Shelf (by [dgahagan](https://github.com/dgahagan/shelf)) AI and QoL Improvements Mod – Changes in This Fork
+# Shelf (by [dgahagan](https://github.com/dgahagan/shelf)) AI and QoL Improvements Mod
 
 [![CI](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml/badge.svg)](https://github.com/Chrisser73/shelf-modification/actions/workflows/test.yml)
 [![GHCR container image](https://img.shields.io/badge/GHCR-container%20image-2496ED?logo=docker&logoColor=white)](https://github.com/Chrisser73/shelf-modification/pkgs/container/shelf)
@@ -9,7 +9,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/Chrisser73/shelf-modification)](https://github.com/Chrisser73/shelf-modification/commits/main)
 [![Open issues](https://img.shields.io/github/issues/Chrisser73/shelf-modification)](https://github.com/Chrisser73/shelf-modification/issues)
 
-## Highlights
+## Changes in This Fork & Highlights
 
 - **Collector-ready game catalogue:** platform logos, regions, alternate names, languages, release years and CIB, Boxed
   or Loose condition.
