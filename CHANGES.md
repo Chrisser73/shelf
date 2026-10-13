@@ -290,11 +290,12 @@ by [PapirusDevelopmentTeam](https://github.com/PapirusDevelopmentTeam).
 - Cover controls use the consistent name **Edit cover**. The item edit page
   includes upload, public URL, provider search, and remove actions.
 
-## ARM64 Container Publishing
+## Multi-Architecture Container Publishing
 
-- `.github/workflows/docker-publish.yml` builds and publishes an ARM64 image
-  to `ghcr.io/chrisser73/shelf` on every push to `main` and `feature/**`, as
-  well as through a manual workflow run.
+- `.github/workflows/docker-publish.yml` publishes `linux/amd64` and
+  `linux/arm64` variants to `ghcr.io/chrisser73/shelf` only from `main`.
+  The `latest` tag always points to that current `main` image, and Docker
+  automatically pulls the correct variant for the host.
 
 ## Small Interface Improvements
 
@@ -308,3 +309,10 @@ by [PapirusDevelopmentTeam](https://github.com/PapirusDevelopmentTeam).
 - The navigation uses 20-px Lucide icons that inherit the active or hover text
   color. It uses Lucide's official `data-lucide` and `createIcons` API with a
   locally served, pinned package bundle; `make setup` prepares that bundle.
+
+---
+
+## Original Project
+
+For the original project documentation, see the
+[upstream README](https://github.com/dgahagan/shelf#readme).
