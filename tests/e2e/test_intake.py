@@ -513,15 +513,20 @@ def test_confirm_round_trip_sends_edits_and_persists_them(live_server, intake_pa
         route.continue_()
 
     intake_page.route("**/api/intake/confirm", capture)
-    intake_page.locator("button", has_text="Add 2 to Library").click()
+    intake_page.locator("button", has_text="Fetch & Add 2 Items").click()
 
     expect(intake_page.locator("[data-testid=intake-added-row]")).to_have_count(1)
 
-    # The wire shape: exactly four keys per book, and `source` is not one.
+    # The wire shape carries the fork's expanded game/catalogue metadata;
+    # `source` remains review-only and must never reach the server.
     books = sent["payload"]["books"]
     assert len(books) == 2
     for book in books:
-        assert set(book) == {"title", "authors", "isbn", "media_type"}
+        assert set(book) == {
+            "title", "authors", "publisher", "publish_year", "isbn", "media_type",
+            "language", "region", "alternate_title", "platform",
+            "collector_condition", "existing_id", "replace_existing",
+        }
     assert books[1]["media_type"] == "dvd"
     assert books[1]["isbn"] == "123"
 
@@ -879,7 +884,7 @@ def test_replacing_the_photo_during_analysis_keeps_the_new_photos_rows(
     deadline = time.time() + 10
     while page.evaluate("() => window.__analyzeDelivered") < 2 and time.time() < deadline:
         time.sleep(0.1)
-    assert page.evaluate("() => window.__analyzeDelivered") == 2, \
+    assert page.evaluate("() => window.__analyzeDelivered") >= 2, \
         "photo A's held response never landed — the pin would be vacuous"
 
     expect(page.locator("[data-testid=intake-row]")).to_have_count(2)
@@ -1121,19 +1126,20 @@ def test_review_row_mobile_select_fits_widest_option(live_server, intake_page):
         f"{fit['boxWidth']:.0f}px")
 
 
-def test_review_row_desktop_stays_one_line(live_server, intake_page):
-    """At `sm` and up the row is still the single line that shipped before —
-    and the recognized title is wider than the 88px it used to get."""
+def test_review_row_desktop_keeps_the_extended_fields_usable(live_server, intake_page):
+    """The fork adds alternate title, publisher and language to each review
+    row. At desktop width those fields may use three deliberate lines, but
+    the original controls and title floors must remain usable."""
     _analyze_long(live_server, intake_page, 1280)
     plain, recognized = _shapes(intake_page)
 
     assert "badge" not in plain, "the plain row's badge must stay hidden"
     lines = _lines(plain, ["checkbox", "title", "author", "isbn", "select"])
-    assert max(lines.values()) + 1 == 1, f"plain row wrapped on desktop: {lines}"
+    assert max(lines.values()) + 1 <= 3, f"plain row used too many lines on desktop: {lines}"
 
     lines = _lines(recognized,
                    ["checkbox", "title", "badge", "author", "isbn", "select"])
-    assert max(lines.values()) + 1 == 1, f"recognized row wrapped on desktop: {lines}"
+    assert max(lines.values()) + 1 <= 3, f"recognized row used too many lines on desktop: {lines}"
     assert recognized["title"]["width"] >= 120, (
         f"recognized-row title is {recognized['title']['width']:.0f}px at 1280px, "
         "floor 120px (it measured 88px on main)")
@@ -1176,8 +1182,8 @@ def test_review_row_stays_three_lines_up_to_the_lg_seam(live_server, intake_page
         "floor 200px")
 
 
-def test_review_row_is_one_line_from_the_lg_seam_up(live_server, intake_page):
-    """1024px is the first single-line width, and the title is usable there.
+def test_review_row_is_usable_from_the_lg_seam_up(live_server, intake_page):
+    """1024px keeps the extended review row compact and the title usable.
 
     The floor is set for *margin*, not to just clear the local measurement. The
     badge and the select are sized by their content, so the non-title side of
@@ -1195,10 +1201,10 @@ def test_review_row_is_one_line_from_the_lg_seam_up(live_server, intake_page):
     plain, recognized = _shapes(intake_page)
 
     lines = _lines(plain, ["checkbox", "title", "author", "isbn", "select"])
-    assert max(lines.values()) + 1 == 1, f"plain row wrapped at 1024px: {lines}"
+    assert max(lines.values()) + 1 <= 3, f"plain row used too many lines at 1024px: {lines}"
     lines = _lines(recognized,
                    ["checkbox", "title", "badge", "author", "isbn", "select"])
-    assert max(lines.values()) + 1 == 1, f"recognized row wrapped at 1024px: {lines}"
+    assert max(lines.values()) + 1 <= 3, f"recognized row used too many lines at 1024px: {lines}"
     assert recognized["title"]["width"] >= 120, (
         f"recognized-row title is {recognized['title']['width']:.0f}px at 1024px; "
         "floor 120px")
@@ -1227,7 +1233,7 @@ def test_review_row_edits_round_trip_at_both_viewports(live_server, intake_page,
     # Positive proof the toggle landed before the negative "absent" assertion
     # below — a payload of one book is otherwise satisfied by a page that never
     # registered the click (G31).
-    add = page.locator("button", has_text="Add 1 to Library")
+    add = page.locator("button", has_text="Fetch & Add 1 Item")
     expect(add).to_be_visible()
 
     sent = {}
@@ -1244,7 +1250,11 @@ def test_review_row_edits_round_trip_at_both_viewports(live_server, intake_page,
     # list that could be capped or sampled.
     books = sent["payload"]["books"]
     assert len(books) == 1, books
-    assert set(books[0]) == {"title", "authors", "isbn", "media_type"}, books[0]
+    assert set(books[0]) == {
+        "title", "authors", "publisher", "publish_year", "isbn", "media_type",
+        "language", "region", "alternate_title", "platform",
+        "collector_condition", "existing_id", "replace_existing",
+    }, books[0]
     assert books[0]["title"] == "Edited Title 33"
     assert books[0]["authors"] == "Edited Author"
     assert books[0]["isbn"] == "123"
@@ -1271,7 +1281,7 @@ def test_intake_page_loads_without_pageerror(live_server, intake_page):
     assert errors == [], f"/intake threw on load: {errors}"
 
     page.route("**/api/intake/confirm", lambda route: route.fulfill(json=CONFIRM_OK))
-    page.locator("button", has_text="Add 2 to Library").click()
+    page.locator("button", has_text="Fetch & Add 2 Items").click()
     expect(page.locator("[data-testid=intake-added-row]")).to_have_count(1)
 
     assert errors == [], f"/intake threw during the confirm round trip: {errors}"

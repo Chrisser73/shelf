@@ -231,7 +231,7 @@ def test_scan_lookup_reports_in_trash_then_restore_updates_card_and_history(
 
         toast = pg.locator("#toast-container > div").first
         expect(toast).to_be_visible(timeout=5_000)
-        assert "bg-shelf-warning" in (toast.get_attribute("class") or "")
+        assert "border-l-shelf-warning" in (toast.get_attribute("class") or "")
 
         with pg.expect_response(
             lambda r: r.url.split("?")[0].endswith(

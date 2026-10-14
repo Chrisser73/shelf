@@ -484,10 +484,10 @@ def test_cover_picker_opens_on_item_that_already_has_a_cover(live_server, authed
     authed_page.goto(f"{live_server['url']}/item/{item_id}")
     authed_page.wait_for_load_state("networkidle")
 
-    # Before the fix this regresses: cover-controls (and Find cover with it)
+    # Before the fix this regresses: cover-controls (and Edit cover with it)
     # must render even though the item already has a cover.
     find_cover = authed_page.locator(
-        '[data-testid="cover-controls"] button:has-text("Find cover")'
+        '[data-testid="cover-controls"] button:has-text("Edit cover")'
     )
     expect(find_cover).to_be_visible()
     find_cover.click()
@@ -524,7 +524,7 @@ def test_cover_picker_remove_cover(live_server, authed_page):
     authed_page.wait_for_load_state("networkidle")
 
     authed_page.locator(
-        '[data-testid="cover-controls"] button:has-text("Find cover")'
+        '[data-testid="cover-controls"] button:has-text("Edit cover")'
     ).click()
     remove_btn = authed_page.locator("[data-testid='cover-remove']")
     expect(remove_btn).to_be_visible()

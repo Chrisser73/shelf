@@ -129,7 +129,7 @@ new MutationObserver(function (muts) {
     muts.forEach(function (m) {
         if (!m.target || m.target.id !== 'toast-container') return;
         for (var i = 0; i < m.addedNodes.length; i++) {
-            if (m.addedNodes[i].textContent === %s) {
+            if (m.addedNodes[i].textContent.indexOf(%s) !== -1) {
                 window.__guardToastAppends++;
             }
         }

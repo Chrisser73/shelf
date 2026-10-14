@@ -48,7 +48,7 @@ def test_a_clicked_button_is_busy_until_its_request_ends(live_server, authed_pag
     item_id = insert_item(live_server["data_dir"], title=f"Busy Cover {outcome}")
     held, _ = _hold(authed_page, f"**/api/items/{item_id}/cover-search*")
     authed_page.goto(f"{live_server['url']}/item/{item_id}")
-    btn = authed_page.get_by_role("button", name="Find cover")
+    btn = authed_page.get_by_role("button", name="Edit cover")
     btn.click()
     _wait_held(authed_page, held)
 
@@ -77,7 +77,7 @@ def test_a_double_click_issues_one_request(live_server, authed_page):
     item_id = insert_item(live_server["data_dir"], title="Busy Double Click")
     held, _ = _hold(authed_page, f"**/api/items/{item_id}/cover-search*")
     authed_page.goto(f"{live_server['url']}/item/{item_id}")
-    btn = authed_page.get_by_role("button", name="Find cover")
+    btn = authed_page.get_by_role("button", name="Edit cover")
     btn.dblclick()
     _wait_held(authed_page, held)
     held[0].fulfill(status=200, content_type="text/html", body=_COVER_FRAGMENT)

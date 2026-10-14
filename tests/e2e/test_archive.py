@@ -100,7 +100,7 @@ def _reading_log_count(live_server) -> int:
 def _open_data_tab(page, live_server):
     page.goto(f"{live_server['url']}/settings")
     page.wait_for_load_state("networkidle")
-    page.locator("button:has-text('Data')").click()
+    page.get_by_test_id("tab-data").click()
 
 
 def _result_text(page) -> str:

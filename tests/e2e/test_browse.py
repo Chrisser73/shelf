@@ -153,7 +153,7 @@ def test_browse_search_survives_other_filter_change_on_narrow_viewport(live_serv
 
     # Now change a different filter — its hx-include picks up both q inputs.
     # On a narrow viewport the filter panel is collapsed behind a toggle.
-    authed_page.get_by_role("button", name="Filters").click()
+    authed_page.get_by_test_id("filters-toggle").click()
     authed_page.locator("select#type-filter").select_option("book")
     authed_page.wait_for_load_state("networkidle")
 

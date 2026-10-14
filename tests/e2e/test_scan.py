@@ -608,7 +608,7 @@ def test_typed_entry_with_a_warning_styled_notice_toasts_as_success(
     toast = authed_page.locator("#toast-container > div").first
     expect(toast).to_be_visible(timeout=5_000)
     expect(toast).to_contain_text("Added: Goodfellas")
-    assert "bg-shelf-success" in (toast.get_attribute("class") or "")
+    assert "border-l-shelf-success" in (toast.get_attribute("class") or "")
     assert_page_clean(authed_page)
 
 
@@ -1328,7 +1328,7 @@ def test_a_typed_duplicate_scan_raises_exactly_one_warning_toast(
     toast = authed_page.locator("#toast-container > div").first
     expect(toast).to_be_visible(timeout=10_000)
     expect(toast).to_contain_text("Toast Duplicate Subject")
-    assert "bg-shelf-warning" in (toast.get_attribute("class") or "")
+    assert "border-l-shelf-warning" in (toast.get_attribute("class") or "")
     _assert_exactly_one_toast(authed_page)
     assert_page_clean(authed_page)
 

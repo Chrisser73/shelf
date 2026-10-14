@@ -47,7 +47,7 @@ def test_csv_import(live_server, authed_page):
     authed_page.wait_for_load_state("networkidle")
 
     # CSV import is on the "Data" tab — click it first
-    authed_page.locator("button:has-text('Data')").click()
+    authed_page.get_by_test_id("tab-data").click()
 
     # CSV import file input
     file_input = authed_page.locator("input[type=file][accept*='.csv']")
@@ -104,7 +104,7 @@ def test_goodreads_import_via_ui(live_server, authed_page):
 
     authed_page.goto(f"{live_server['url']}/settings")
     authed_page.wait_for_load_state("networkidle")
-    authed_page.locator("button:has-text('Data')").click()
+    authed_page.get_by_test_id("tab-data").click()
 
     file_input = authed_page.locator("input[type=file][accept*='.csv']")
     expect(file_input).to_be_visible()
@@ -131,7 +131,9 @@ def test_goodreads_import_via_ui(live_server, authed_page):
     authed_page.wait_for_load_state("networkidle")
     expect(authed_page.locator("body")).to_contain_text("GR Read Book")
     expect(authed_page.locator("body")).to_contain_text("GR Wishlist Book")
-    expect(authed_page.get_by_text("Wishlist", exact=True).first).to_be_visible()
+    # Collection cards now use an accessible heart icon rather than a text
+    # pill, keeping the grid compact while preserving the state for readers.
+    expect(authed_page.get_by_role("img", name="Wishlisted").first).to_be_visible()
 
     # Issue #125 T11: a `read`, zero-owned Goodreads row lands neither owned
     # nor wishlisted — not the pre-#125 rule that owned=0 meant wishlisted.
@@ -180,7 +182,7 @@ def test_librarything_import_shows_beta_and_unimported(live_server, authed_page)
 
     authed_page.goto(f"{live_server['url']}/settings")
     authed_page.wait_for_load_state("networkidle")
-    authed_page.locator("button:has-text('Data')").click()
+    authed_page.get_by_test_id("tab-data").click()
 
     file_input = authed_page.locator("input[type=file][accept*='.csv']")
     expect(file_input).to_be_visible()
@@ -221,7 +223,7 @@ def test_import_card_lists_created_locations(live_server, authed_page):
 
     authed_page.goto(f"{live_server['url']}/settings")
     authed_page.wait_for_load_state("networkidle")
-    authed_page.locator("button:has-text('Data')").click()
+    authed_page.get_by_test_id("tab-data").click()
 
     file_input = authed_page.locator("input[type=file][accept*='.csv']")
     expect(file_input).to_be_visible()

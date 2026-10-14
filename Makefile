@@ -22,8 +22,22 @@ PYTEST_FLAGS ?= -q --tb=short --no-header
 # rebinds module-level path constants, so per-file affinity is the conservative
 # split. Never add -p no:cacheprovider here — test-fast's --lf needs the cache.
 PYTEST_PAR   ?= -n auto --dist loadfile
+# Failed local test runs are preserved here, with a timestamp in their file
+# name. Successful runs remove their temporary log so this stays a failure
+# inbox rather than a growing copy of every green run.
+TEST_LOG_DIR ?= test-logs
 
-.PHONY: setup platform-logos lucide css test test-verbose test-fast test-e2e test-contract test-all \
+define run_pytest
+	@mkdir -p $(TEST_LOG_DIR)
+	@log="$(TEST_LOG_DIR)/$(1)-$$(date +%Y-%m-%d_%H-%M-%S).log"; \
+	set -o pipefail; \
+	$(PYTHON) -m pytest $(2) 2>&1 | tee "$$log"; \
+	status=$${PIPESTATUS[0]}; \
+	if [ "$$status" -eq 0 ]; then rm -f "$$log"; else echo "Failure log: $$log"; fi; \
+	exit "$$status"
+endef
+
+.PHONY: setup platform-logos lucide css test test-verbose test-fast test-e2e test-e2e-fast test-contract test-all \
         check-deps check-licenses check-secrets check-csrf check-alpine check-sw-version check-tests check-deleted \
         badges check-badges check-roadmap \
         checks checks-fast \
@@ -45,11 +59,7 @@ setup:
 	npm install
 	$(MAKE) lucide
 	$(MAKE) platform-logos
-	@if grep -q 'VERSION_ID="26.04"' /etc/os-release 2>/dev/null; then \
-		echo "Skipping Playwright Chromium: this Playwright release has no Ubuntu 26.04 build. Unit tests remain available via make test."; \
-	else \
-		$(PYTHON) -m playwright install chromium; \
-	fi
+	$(PYTHON) -m playwright install chromium
 	@echo "=== Setup complete ==="
 
 # The logos are a pinned, generated development dependency rather than files
@@ -82,27 +92,32 @@ css:
 # ---------------------------------------------------------------------------
 
 test:
-	$(PYTHON) -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract -m "not live" $(PYTEST_FLAGS) $(PYTEST_PAR)
+	$(call run_pytest,unit,tests/ --ignore=tests/e2e --ignore=tests/contract -m "not live" $(PYTEST_FLAGS) $(PYTEST_PAR))
 
 # Per-test roll-call, for when a human is reading the output.
 test-verbose:
-	$(PYTHON) -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract -v --tb=short
+	$(call run_pytest,unit-verbose,tests/ --ignore=tests/e2e --ignore=tests/contract -v --tb=short)
 
 # Inner fix loop: re-run only what failed last time. Stays parallel because
 # --lf falls back to the *whole* suite when nothing failed last run, and a
 # serial fallback there costs 97s instead of 17s. (--lf is a collection-time
 # filter, so it composes fine with xdist — don't add -x, which does not.)
 test-fast:
-	$(PYTHON) -m pytest tests/ --ignore=tests/e2e --ignore=tests/contract $(PYTEST_FLAGS) $(PYTEST_PAR) --lf
+	$(call run_pytest,unit-fast,tests/ --ignore=tests/e2e --ignore=tests/contract $(PYTEST_FLAGS) $(PYTEST_PAR) --lf)
 
 test-e2e:
-	$(PYTHON) -m pytest tests/e2e/ $(PYTEST_FLAGS) -m "e2e and not live"
+	$(call run_pytest,e2e,tests/e2e/ $(PYTEST_FLAGS) -m "e2e and not live")
+
+# Fast E2E feedback: only the failures cached by the last E2E run. If there
+# are none, pytest deliberately falls back to the complete E2E suite.
+test-e2e-fast:
+	$(call run_pytest,e2e-fast,tests/e2e/ $(PYTEST_FLAGS) -m "e2e and not live" --lf)
 
 # The live contract check for the UPC Item DB stub's recording. Spends one
 # trial-tier lookup per run (100/day); run at release, never on a gate
 # (#123). A skip means the quota was already spent — read the reason.
 test-contract:
-	$(PYTHON) -m pytest tests/contract/ $(PYTEST_FLAGS) -m live -rs
+	$(call run_pytest,contract,tests/contract/ $(PYTEST_FLAGS) -m live -rs)
 
 test-all: test test-e2e
 
@@ -182,13 +197,14 @@ checks-fast: check-secrets check-csrf check-deleted check-alpine check-sw-versio
 # Keep this the full set: the release procedure in ../CLAUDE.md step 1 calls it.
 checks: checks-fast check-deps check-licenses
 
-# Local release preparation. Unlike qa/release-check this deliberately skips
-# browser E2E and live-contract tests: they need a supported Playwright build
-# and external credentials. CI remains responsible for those environments.
+# Local release preparation. The supported Playwright version covers the
+# browser suite locally; live-contract tests remain separate because they use
+# external credentials and quota.
 preflight:
 	$(MAKE) css
 	$(MAKE) badges
 	$(MAKE) test
+	$(MAKE) test-e2e
 	$(MAKE) checks
 
 # ---------------------------------------------------------------------------

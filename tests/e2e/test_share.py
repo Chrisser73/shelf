@@ -14,14 +14,14 @@ def test_share_link_full_lifecycle(live_server, browser, authed_page):
     # Create a wishlist link on the settings Data tab
     authed_page.goto(f"{live_server['url']}/settings")
     authed_page.wait_for_load_state("networkidle")
-    authed_page.locator("button:has-text('Data')").click()
+    authed_page.get_by_test_id("tab-data").click()
     share_form = authed_page.locator("form[action='/api/share']")
     share_form.locator("select[name=scope]").select_option("wishlist")
     share_form.locator("input[name=label]").fill("E2E Gift List")
     with authed_page.expect_navigation():
         share_form.locator("button[type=submit]").click()
 
-    authed_page.locator("button:has-text('Data')").click()
+    authed_page.get_by_test_id("tab-data").click()
     row = authed_page.get_by_test_id("share-link-row").first
     expect(row).to_contain_text("E2E Gift List")
     token = row.locator("button[data-token]").get_attribute("data-token")

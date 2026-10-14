@@ -5,6 +5,7 @@ __pycache__/
 .devdocs
 .coverage
 reports/
+test-logs/
 htmlcov/
 .claude
 .codex/

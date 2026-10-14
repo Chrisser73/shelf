@@ -40,7 +40,7 @@ def test_display_name_change_succeeds(live_server, authed_page):
     expect(name_input).to_be_visible()
     name_input.fill("E2E Admin")  # same value back — exercises the endpoint
     with authed_page.expect_response("**/api/account/display-name") as resp_info:
-        authed_page.click("button:has-text('Save')")
+        authed_page.get_by_role("button", name="Save", exact=True).click()
     assert resp_info.value.status == 200, f"display-name save returned {resp_info.value.status}"
 
 

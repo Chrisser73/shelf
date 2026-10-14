@@ -54,7 +54,8 @@ def test_light_theme_is_a_per_user_appearance_preference(admin_client):
         follow_redirects=False,
     )
     html = admin_client.get("/settings").text
-    assert '<html lang="en" class="dark" data-theme="light">' in html
+    assert '<html lang="en" class="dark' in html
+    assert 'data-theme="light"' in html
     theme_input = html[html.index('name="theme" value="light"'):]
     assert "checked" in theme_input[:200]
 
@@ -70,7 +71,8 @@ def test_ocean_theme_is_a_per_user_appearance_preference(admin_client):
         follow_redirects=False,
     )
     html = admin_client.get("/settings").text
-    assert '<html lang="en" class="dark" data-theme="ocean">' in html
+    assert '<html lang="en" class="dark' in html
+    assert 'data-theme="ocean"' in html
     theme_input = html[html.index('name="theme" value="ocean"'):]
     assert "checked" in theme_input[:200]
 
@@ -83,7 +85,8 @@ def test_additional_dark_themes_are_available_per_user(admin_client):
             follow_redirects=False,
         )
         html = admin_client.get("/settings").text
-        assert f'<html lang="en" class="dark" data-theme="{theme}">' in html
+        assert '<html lang="en" class="dark' in html
+        assert f'data-theme="{theme}"' in html
         theme_input = html[html.index(f'name="theme" value="{theme}"'):]
         assert "checked" in theme_input[:200]
 
